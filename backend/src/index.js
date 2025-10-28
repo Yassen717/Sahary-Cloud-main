@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 const session = require('express-session');
 const RedisStore = require('connect-redis').default;
 const { createClient } = require('redis');
+const { connectDatabase, checkDatabaseHealth } = require('./config/database');
 require('dotenv').config();
 
 const app = express();
@@ -83,13 +84,17 @@ if (redisClient) {
 }
 
 // Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
+app.get('/health', async (req, res) => {
+  const dbHealth = await checkDatabaseHealth();
+  
+  res.status(dbHealth.status === 'healthy' ? 200 : 503).json({
+    status: dbHealth.status === 'healthy' ? 'OK' : 'ERROR',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV,
-    version: process.env.npm_package_version || '1.0.0'
+    version: process.env.npm_package_version || '1.0.0',
+    database: dbHealth,
+    redis: redisClient ? 'connected' : 'disconnected'
   });
 });
 
@@ -186,12 +191,27 @@ process.on('SIGINT', async () => {
 
 // Start server
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, HOST, () => {
-    console.log(`🚀 Sahary Cloud API Server running on http://${HOST}:${PORT}`);
-    console.log(`📊 Environment: ${process.env.NODE_ENV}`);
-    console.log(`🔗 API Base URL: http://${HOST}:${PORT}/api`);
-    console.log(`❤️  Health Check: http://${HOST}:${PORT}/health`);
-  });
+  const startServer = async () => {
+    try {
+      // Connect to database
+      await connectDatabase();
+      
+      // Start HTTP server
+      app.listen(PORT, HOST, () => {
+        console.log(`🚀 Sahary Cloud API Server running on http://${HOST}:${PORT}`);
+        console.log(`📊 Environment: ${process.env.NODE_ENV}`);
+        console.log(`🔗 API Base URL: http://${HOST}:${PORT}/api`);
+        console.log(`❤️  Health Check: http://${HOST}:${PORT}/health`);
+        console.log(`🗄️  Database: Connected`);
+        console.log(`🔴 Redis: ${redisClient ? 'Connected' : 'Disconnected'}`);
+      });
+    } catch (error) {
+      console.error('❌ Failed to start server:', error);
+      process.exit(1);
+    }
+  };
+  
+  startServer();
 }
 
 module.exports = app;

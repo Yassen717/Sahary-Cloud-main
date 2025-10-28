@@ -1,0 +1,419 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User Model - المستخدمين
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  password    String
+  firstName   String
+  lastName    String
+  phone       String?
+  avatar      String?
+  role        Role     @default(USER)
+  isActive    Boolean  @default(true)
+  isVerified  Boolean  @default(false)
+  emailVerificationToken String?
+  emailVerificationExpires DateTime?
+  passwordResetToken String?
+  passwordResetExpires DateTime?
+  lastLoginAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  virtualMachines VirtualMachine[]
+  invoices        Invoice[]
+  sessions        Session[]
+  usageRecords    UsageRecord[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+
+  @@map("users")
+}
+
+// Virtual Machine Model - الخوادم الافتراضية
+model VirtualMachine {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  status      VMStatus  @default(STOPPED)
+  
+  // Resource specifications
+  cpu         Int       // CPU cores
+  ram         Int       // RAM in MB
+  storage     Int       // Storage in GB
+  bandwidth   Int?      // Bandwidth in GB/month
+  
+  // Network configuration
+  ipAddress   String?   @unique
+  port        Int?
+  
+  // Docker configuration
+  dockerImage String?
+  dockerContainerId String?
+  
+  // Pricing
+  hourlyRate  Decimal   @default(0.00)
+  
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  startedAt   DateTime?
+  stoppedAt   DateTime?
+
+  // Relations
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usageRecords UsageRecord[]
+  backups     Backup[]
+
+  @@map("virtual_machines")
+}
+
+// Invoice Model - الفواتير
+model Invoice {
+  id          String        @id @default(cuid())
+  invoiceNumber String      @unique
+  amount      Decimal       @default(0.00)
+  subtotal    Decimal       @default(0.00)
+  tax         Decimal       @default(0.00)
+  discount    Decimal       @default(0.00)
+  currency    String        @default("USD")
+  status      InvoiceStatus @default(PENDING)
+  
+  // Billing period
+  billingPeriodStart DateTime
+  billingPeriodEnd   DateTime
+  
+  // Payment information
+  dueDate     DateTime
+  paidAt      DateTime?
+  paymentMethod String?
+  paymentId   String?
+  
+  // Timestamps
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items       InvoiceItem[]
+  payments    Payment[]
+
+  @@map("invoices")
+}
+
+// Invoice Item Model - عناصر الفاتورة
+model InvoiceItem {
+  id          String   @id @default(cuid())
+  description String
+  quantity    Decimal  @default(1)
+  unitPrice   Decimal
+  totalPrice  Decimal
+  
+  // Resource details
+  resourceType String  // VM, Storage, Bandwidth, etc.
+  resourceId   String?
+  
+  // Usage period
+  usageStart  DateTime?
+  usageEnd    DateTime?
+  
+  createdAt   DateTime @default(now())
+
+  // Relations
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_items")
+}
+
+// Payment Model - المدفوعات
+model Payment {
+  id          String        @id @default(cuid())
+  amount      Decimal
+  currency    String        @default("USD")
+  status      PaymentStatus @default(PENDING)
+  method      PaymentMethod
+  
+  // Payment gateway details
+  gatewayId   String?       // Stripe payment intent ID
+  gatewayResponse Json?
+  
+  // Timestamps
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  processedAt DateTime?
+
+  // Relations
+  invoiceId   String
+  invoice     Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+// Usage Record Model - سجلات الاستخدام
+model UsageRecord {
+  id          String   @id @default(cuid())
+  
+  // Resource usage
+  cpuUsage    Float    @default(0) // CPU usage percentage
+  ramUsage    Float    @default(0) // RAM usage in MB
+  storageUsage Float   @default(0) // Storage usage in GB
+  bandwidthUsage Float @default(0) // Bandwidth usage in GB
+  
+  // Time tracking
+  duration    Int      @default(0) // Duration in minutes
+  timestamp   DateTime @default(now())
+  
+  // Billing
+  cost        Decimal  @default(0.00)
+  
+  // Relations
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vmId        String?
+  vm          VirtualMachine? @relation(fields: [vmId], references: [id], onDelete: SetNull)
+
+  @@map("usage_records")
+}
+
+// Solar Data Model - بيانات الطاقة الشمسية
+model SolarData {
+  id          String   @id @default(cuid())
+  
+  // Energy metrics
+  production  Float    @default(0) // kWh produced
+  consumption Float    @default(0) // kWh consumed
+  efficiency  Float    @default(0) // Efficiency percentage
+  
+  // Environmental impact
+  co2Saved    Float    @default(0) // CO2 saved in kg
+  
+  // Weather data
+  solarIrradiance Float? // Solar irradiance in W/m²
+  temperature     Float? // Temperature in Celsius
+  cloudCover      Float? // Cloud cover percentage
+  
+  // System status
+  systemStatus    SolarSystemStatus @default(NORMAL)
+  
+  timestamp   DateTime @default(now())
+
+  @@map("solar_data")
+}
+
+// Session Model - الجلسات
+model Session {
+  id          String   @id @default(cuid())
+  sessionId   String   @unique
+  
+  // Session data
+  data        Json?
+  ipAddress   String?
+  userAgent   String?
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  expiresAt   DateTime
+
+  // Relations
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// Notification Model - الإشعارات
+model Notification {
+  id          String             @id @default(cuid())
+  title       String
+  message     String
+  type        NotificationType   @default(INFO)
+  isRead      Boolean            @default(false)
+  
+  // Metadata
+  metadata    Json?
+  
+  createdAt   DateTime           @default(now())
+
+  // Relations
+  userId      String
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+// Backup Model - النسخ الاحتياطية
+model Backup {
+  id          String       @id @default(cuid())
+  name        String
+  description String?
+  size        BigInt       @default(0) // Size in bytes
+  status      BackupStatus @default(PENDING)
+  
+  // Backup details
+  backupPath  String?
+  backupType  BackupType   @default(FULL)
+  
+  // Timestamps
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  completedAt DateTime?
+
+  // Relations
+  vmId        String
+  vm          VirtualMachine @relation(fields: [vmId], references: [id], onDelete: Cascade)
+
+  @@map("backups")
+}
+
+// Audit Log Model - سجلات المراجعة
+model AuditLog {
+  id          String     @id @default(cuid())
+  action      String     // Action performed
+  resource    String     // Resource affected
+  resourceId  String?    // ID of the resource
+  
+  // Request details
+  ipAddress   String?
+  userAgent   String?
+  
+  // Changes
+  oldValues   Json?
+  newValues   Json?
+  
+  timestamp   DateTime   @default(now())
+
+  // Relations
+  userId      String?
+  user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+// Pricing Plan Model - خطط الأسعار
+model PricingPlan {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  
+  // Resource limits
+  maxCpu      Int      @default(1)
+  maxRam      Int      @default(1024) // MB
+  maxStorage  Int      @default(10)   // GB
+  maxBandwidth Int     @default(100)  // GB/month
+  maxVMs      Int      @default(1)
+  
+  // Pricing
+  monthlyPrice Decimal @default(0.00)
+  hourlyPrice  Decimal @default(0.00)
+  
+  // Features
+  features    Json?
+  
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("pricing_plans")
+}
+
+// System Settings Model - إعدادات النظام
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  category    String   @default("general")
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
+// Enums - التعدادات
+
+enum Role {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum VMStatus {
+  RUNNING
+  STOPPED
+  STARTING
+  STOPPING
+  RESTARTING
+  ERROR
+  SUSPENDED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  STRIPE
+  PAYPAL
+  BANK_TRANSFER
+  CRYPTO
+}
+
+enum SolarSystemStatus {
+  NORMAL
+  WARNING
+  ERROR
+  MAINTENANCE
+  OFFLINE
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+  SYSTEM
+}
+
+enum BackupStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum BackupType {
+  FULL
+  INCREMENTAL
+  DIFFERENTIAL
+}

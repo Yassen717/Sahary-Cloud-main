@@ -1,6 +1,6 @@
 # خطة تنفيذ منصة Sahary Cloud
 
-- [-] 1. إعداد البنية الأساسية للمشروع
+- [x] 1. إعداد البنية الأساسية للمشروع
   - إنشاء هيكل المجلدات للواجهة الخلفية حسب التصميم المحدد
   - تكوين package.json مع جميع التبعيات المطلوبة (Express, Prisma, JWT, bcrypt, Redis)
   - إعداد ملفات البيئة والتكوين الأساسي
@@ -8,7 +8,7 @@
   - **Commit:** `feat: setup project structure and dependencies`
 
 - [ ] 2. إعداد قاعدة البيانات ونماذج البيانات
-  - [ ] 2.1 تكوين Prisma وإنشاء مخطط قاعدة البيانات
+  - [-] 2.1 تكوين Prisma وإنشاء مخطط قاعدة البيانات
     - كتابة schema.prisma مع جميع النماذج (User, VirtualMachine, Invoice, UsageRecord, SolarData)
     - تكوين اتصال PostgreSQL
     - إنشاء وتشغيل migrations الأولية
