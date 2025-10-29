@@ -8,14 +8,14 @@
   - **Commit:** `feat: setup project structure and dependencies`
 
 - [ ] 2. إعداد قاعدة البيانات ونماذج البيانات
-  - [-] 2.1 تكوين Prisma وإنشاء مخطط قاعدة البيانات
+  - [x] 2.1 تكوين Prisma وإنشاء مخطط قاعدة البيانات
     - كتابة schema.prisma مع جميع النماذج (User, VirtualMachine, Invoice, UsageRecord, SolarData)
     - تكوين اتصال PostgreSQL
     - إنشاء وتشغيل migrations الأولية
     - _المتطلبات: 1.1, 2.1, 3.1, 4.1, 5.1_
     - **Commit:** `feat: setup prisma schema and database models`
 
-  - [ ] 2.2 إنشاء نماذج البيانات والتحقق من صحتها
+  - [-] 2.2 إنشاء نماذج البيانات والتحقق من صحتها
     - تطوير validation schemas باستخدام Joi أو Zod
     - إنشاء helper functions للتحقق من البيانات
     - كتابة اختبارات وحدة لنماذج البيانات
