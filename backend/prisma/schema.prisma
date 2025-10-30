@@ -37,6 +37,7 @@ model User {
   usageRecords    UsageRecord[]
   notifications   Notification[]
   auditLogs       AuditLog[]
+  backups         Backup[]
 
   @@map("users")
 }
@@ -267,6 +268,7 @@ model Backup {
   // Backup details
   backupPath  String?
   backupType  BackupType   @default(FULL)
+  dockerImageId String?    // Docker image ID for container backups
   
   // Timestamps
   createdAt   DateTime     @default(now())
@@ -276,6 +278,8 @@ model Backup {
   // Relations
   vmId        String
   vm          VirtualMachine @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("backups")
 }

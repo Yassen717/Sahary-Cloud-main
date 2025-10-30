@@ -214,6 +214,125 @@ router.get('/:id/stats',
   VMController.getVMStatistics
 );
 
+/**
+ * @route   GET /api/v1/vms/:id/container/status
+ * @desc    Get VM container status
+ * @access  Private (Owner or Admin)
+ */
+router.get('/:id/container/status',
+  apiRateLimit(),
+  validate(vmActionSchema),
+  authenticate,
+  requireAnyPermission('vm:read:own', 'vm:read:all'),
+  VMController.getVMContainerStatus
+);
+
+/**
+ * @route   GET /api/v1/vms/:id/container/logs
+ * @desc    Get VM container logs
+ * @access  Private (Owner or Admin)
+ */
+router.get('/:id/container/logs',
+  apiRateLimit(),
+  validate(vmActionSchema),
+  authenticate,
+  requireAnyPermission('vm:read:own', 'vm:read:all'),
+  VMController.getVMContainerLogs
+);
+
+/**
+ * @route   POST /api/v1/vms/:id/container/exec
+ * @desc    Execute command in VM container
+ * @access  Private (Owner or Admin)
+ */
+router.post('/:id/container/exec',
+  apiRateLimit(),
+  [
+    param('id').isUUID().withMessage('Invalid VM ID'),
+    body('command')
+      .isArray({ min: 1 })
+      .withMessage('Command must be a non-empty array'),
+    body('command.*')
+      .isString()
+      .isLength({ min: 1, max: 1000 })
+      .withMessage('Each command part must be a string between 1 and 1000 characters'),
+  ],
+  authenticate,
+  requireAnyPermission('vm:manage:own', 'vm:manage:all'),
+  VMController.execInVMContainer
+);
+
+/**
+ * @route   POST /api/v1/vms/:id/backup
+ * @desc    Create VM backup
+ * @access  Private (Owner or Admin)
+ */
+router.post('/:id/backup',
+  apiRateLimit(),
+  [
+    param('id').isUUID().withMessage('Invalid VM ID'),
+    body('backupName')
+      .notEmpty()
+      .isLength({ min: 1, max: 100 })
+      .withMessage('Backup name is required and must be between 1 and 100 characters'),
+  ],
+  authenticate,
+  requireAnyPermission('vm:manage:own', 'vm:manage:all'),
+  VMController.createVMBackup
+);
+
+/**
+ * @route   POST /api/v1/vms/restore/:backupId
+ * @desc    Restore VM from backup
+ * @access  Private (Owner or Admin)
+ */
+router.post('/restore/:backupId',
+  apiRateLimit(),
+  [
+    param('backupId').isUUID().withMessage('Invalid backup ID'),
+    body('name')
+      .optional()
+      .isLength({ min: 1, max: 100 })
+      .withMessage('VM name must be between 1 and 100 characters'),
+    body('description')
+      .optional()
+      .isLength({ max: 500 })
+      .withMessage('Description must be less than 500 characters'),
+    body('cpu')
+      .optional()
+      .isInt({ min: 1, max: 32 })
+      .withMessage('CPU must be between 1 and 32 cores'),
+    body('ram')
+      .optional()
+      .isInt({ min: 512, max: 32768 })
+      .withMessage('RAM must be between 512MB and 32GB'),
+    body('storage')
+      .optional()
+      .isInt({ min: 10, max: 1000 })
+      .withMessage('Storage must be between 10GB and 1TB'),
+    body('bandwidth')
+      .optional()
+      .isInt({ min: 100, max: 10000 })
+      .withMessage('Bandwidth must be between 100GB and 10TB per month'),
+  ],
+  authenticate,
+  requireAnyPermission('vm:create:own', 'vm:create:all'),
+  VMController.restoreVMFromBackup
+);
+
+/**
+ * @route   GET /api/v1/vms/:id/resources
+ * @desc    Get VM resource usage stats
+ * @access  Private (Owner or Admin)
+ */
+router.get('/:id/resources',
+  apiRateLimit(),
+  validate(vmActionSchema),
+  authenticate,
+  requireAnyPermission('vm:read:own', 'vm:read:all'),
+  VMController.getVMResourceStats
+);
+
 // Health check for VM routes
 router.get('/health', (req, res) => {
   res.status(200).json({

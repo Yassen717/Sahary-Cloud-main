@@ -111,6 +111,7 @@ app.get('/api', (req, res) => {
 // Routes
 app.use('/api/v1/auth', require('./routes/auth'));
 app.use('/api/v1/vms', require('./routes/vms'));
+app.use('/api/v1/docker', require('./routes/docker'));
 // app.use('/api/v1/billing', require('./routes/billing'));
 // app.use('/api/v1/admin', require('./routes/admin'));
 // app.use('/api/v1/solar', require('./routes/solar'));

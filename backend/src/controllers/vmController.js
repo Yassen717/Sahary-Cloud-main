@@ -565,6 +565,180 @@ class VMController {
       });
     }
   }
+  /**
+   * Get VM container status
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  static async getVMContainerStatus(req, res) {
+    try {
+      const userId = req.user.userId;
+      const { vmId } = req.params;
+
+      const containerStatus = await VMService.getVMContainerStatus(vmId, userId);
+
+      res.json({
+        success: true,
+        data: containerStatus,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get VM container status',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Get VM container logs
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  static async getVMContainerLogs(req, res) {
+    try {
+      const userId = req.user.userId;
+      const { vmId } = req.params;
+      const { tail = 100, since, until, timestamps = true } = req.query;
+
+      const logs = await VMService.getVMContainerLogs(vmId, userId, {
+        tail: parseInt(tail),
+        since,
+        until,
+        timestamps: timestamps === 'true',
+      });
+
+      res.json({
+        success: true,
+        data: logs,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get VM container logs',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Execute command in VM container
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  static async execInVMContainer(req, res) {
+    try {
+      const userId = req.user.userId;
+      const { vmId } = req.params;
+      const { command } = req.body;
+
+      if (!command || !Array.isArray(command)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Command must be an array of strings',
+        });
+      }
+
+      const result = await VMService.execInVMContainer(vmId, userId, command);
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to execute command in VM container',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Create VM backup
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  static async createVMBackup(req, res) {
+    try {
+      const userId = req.user.userId;
+      const { vmId } = req.params;
+      const { backupName } = req.body;
+
+      if (!backupName) {
+        return res.status(400).json({
+          success: false,
+          error: 'Backup name is required',
+        });
+      }
+
+      const backup = await VMService.createVMBackup(vmId, userId, backupName);
+
+      res.status(201).json({
+        success: true,
+        message: 'VM backup created successfully',
+        data: backup,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to create VM backup',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Restore VM from backup
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  static async restoreVMFromBackup(req, res) {
+    try {
+      const userId = req.user.userId;
+      const { backupId } = req.params;
+      const restoreConfig = req.body;
+
+      const restoredVM = await VMService.restoreVMFromBackup(backupId, userId, restoreConfig);
+
+      res.status(201).json({
+        success: true,
+        message: 'VM restored from backup successfully',
+        data: restoredVM,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to restore VM from backup',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Get VM resource usage stats
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  static async getVMResourceStats(req, res) {
+    try {
+      const userId = req.user.userId;
+      const { vmId } = req.params;
+
+      const stats = await VMService.getVMResourceStats(vmId, userId);
+
+      res.json({
+        success: true,
+        data: stats,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get VM resource stats',
+        message: error.message,
+      });
+    }
+  }
 }
 
 module.exports = VMController;
