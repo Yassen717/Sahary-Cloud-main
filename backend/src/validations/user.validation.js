@@ -174,6 +174,124 @@ const verifyEmailSchema = z.object({
   }),
 });
 
+// Token validation schema
+const validateTokenSchema = z.object({
+  body: z.object({
+    token: z
+      .string({
+        required_error: 'Token is required',
+      })
+      .min(1, 'Token cannot be empty'),
+  }),
+});
+
+// Impersonation validation
+const impersonateUserSchema = z.object({
+  body: z.object({
+    targetUserId: z
+      .string({
+        required_error: 'Target user ID is required',
+      })
+      .cuid('Invalid user ID format'),
+    
+    reason: z
+      .string()
+      .min(10, 'Reason must be at least 10 characters')
+      .max(500, 'Reason must not exceed 500 characters')
+      .optional(),
+  }),
+});
+
+// Account deactivation validation
+const deactivateAccountSchema = z.object({
+  body: z.object({
+    password: z
+      .string({
+        required_error: 'Password is required',
+      })
+      .min(1, 'Password cannot be empty'),
+    
+    reason: z
+      .string()
+      .min(10, 'Reason must be at least 10 characters')
+      .max(500, 'Reason must not exceed 500 characters')
+      .optional(),
+  }),
+});
+
+// Account reactivation validation
+const reactivateAccountSchema = z.object({
+  body: z.object({
+    email: z
+      .string({
+        required_error: 'Email is required',
+      })
+      .email('Invalid email format')
+      .toLowerCase(),
+    
+    token: z
+      .string({
+        required_error: 'Reactivation token is required',
+      })
+      .min(1, 'Token cannot be empty'),
+  }),
+});
+
+// Activity log query validation
+const activityQuerySchema = z.object({
+  query: z.object({
+    page: z
+      .string()
+      .regex(/^\d+$/, 'Page must be a positive integer')
+      .transform(Number)
+      .refine(val => val > 0, 'Page must be greater than 0')
+      .optional()
+      .default('1'),
+    
+    limit: z
+      .string()
+      .regex(/^\d+$/, 'Limit must be a positive integer')
+      .transform(Number)
+      .refine(val => val > 0 && val <= 100, 'Limit must be between 1 and 100')
+      .optional()
+      .default('20'),
+    
+    action: z
+      .string()
+      .min(1, 'Action cannot be empty')
+      .max(100, 'Action must not exceed 100 characters')
+      .optional(),
+    
+    startDate: z
+      .string()
+      .datetime('Invalid start date format')
+      .optional(),
+    
+    endDate: z
+      .string()
+      .datetime('Invalid end date format')
+      .optional(),
+    
+    sortBy: z
+      .enum(['timestamp', 'action', 'resource'])
+      .optional()
+      .default('timestamp'),
+    
+    sortOrder: z
+      .enum(['asc', 'desc'])
+      .optional()
+      .default('desc'),
+  }).refine((data) => {
+    if (data.startDate && data.endDate) {
+      return new Date(data.startDate) <= new Date(data.endDate);
+    }
+    return true;
+  }, {
+    message: 'Start date must be before or equal to end date',
+    path: ['endDate'],
+  }),
+});
+
 module.exports = {
   registerSchema,
   loginSchema,
@@ -182,4 +300,9 @@ module.exports = {
   forgotPasswordSchema,
   resetPasswordSchema,
   verifyEmailSchema,
+  validateTokenSchema,
+  impersonateUserSchema,
+  deactivateAccountSchema,
+  reactivateAccountSchema,
+  activityQuerySchema,
 };

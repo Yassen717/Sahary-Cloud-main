@@ -30,14 +30,14 @@
     - _المتطلبات: 1.1, 1.2, 1.5_
     - **Commit:** `feat: implement core authentication service with JWT`
 
-  - [ ] 3.2 تطوير middleware المصادقة والتفويض
+  - [x] 3.2 تطوير middleware المصادقة والتفويض
     - إنشاء middleware للتحقق من JWT tokens
     - تطوير role-based access control
     - تنفيذ rate limiting للحماية من الهجمات
     - _المتطلبات: 1.3, 1.4, 6.3_
     - **Commit:** `feat: add authentication middleware and RBAC`
 
-  - [ ] 3.3 تطوير APIs المصادقة
+  - [-] 3.3 تطوير APIs المصادقة
     - إنشاء routes للتسجيل وتسجيل الدخول والخروج
     - تطوير API لتجديد tokens
     - تنفيذ تفعيل البريد الإلكتروني ونسيان كلمة المرور

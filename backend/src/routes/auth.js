@@ -11,6 +11,11 @@ const {
   forgotPasswordSchema,
   resetPasswordSchema,
   verifyEmailSchema,
+  validateTokenSchema,
+  impersonateUserSchema,
+  deactivateAccountSchema,
+  reactivateAccountSchema,
+  activityQuerySchema,
 } = require('../validations/user.validation');
 
 const router = express.Router();
@@ -174,6 +179,98 @@ router.delete('/sessions',
   authRateLimit(),
   authenticate,
   AuthController.revokeAllSessions
+);
+
+/**
+ * @route   DELETE /api/v1/auth/sessions/:sessionId
+ * @desc    Revoke specific session
+ * @access  Private
+ */
+router.delete('/sessions/:sessionId',
+  authRateLimit(),
+  authenticate,
+  AuthController.revokeSession
+);
+
+/**
+ * @route   POST /api/v1/auth/validate-token
+ * @desc    Validate token without authentication
+ * @access  Public
+ */
+router.post('/validate-token',
+  apiRateLimit(),
+  validate(validateTokenSchema),
+  AuthController.validateToken
+);
+
+/**
+ * @route   GET /api/v1/auth/permissions
+ * @desc    Get user permissions
+ * @access  Private
+ */
+router.get('/permissions',
+  apiRateLimit(),
+  authenticate,
+  AuthController.getUserPermissions
+);
+
+/**
+ * @route   POST /api/v1/auth/impersonate
+ * @desc    Impersonate another user (Super Admin only)
+ * @access  Private
+ */
+router.post('/impersonate',
+  authRateLimit(),
+  validate(impersonateUserSchema),
+  authenticate,
+  AuthController.impersonateUser
+);
+
+/**
+ * @route   POST /api/v1/auth/stop-impersonation
+ * @desc    Stop impersonating user
+ * @access  Private
+ */
+router.post('/stop-impersonation',
+  apiRateLimit(),
+  authenticate,
+  AuthController.stopImpersonation
+);
+
+/**
+ * @route   GET /api/v1/auth/activity
+ * @desc    Get user activity log
+ * @access  Private
+ */
+router.get('/activity',
+  apiRateLimit(),
+  validate(activityQuerySchema),
+  authenticate,
+  AuthController.getUserActivity
+);
+
+/**
+ * @route   POST /api/v1/auth/deactivate
+ * @desc    Deactivate user account
+ * @access  Private
+ */
+router.post('/deactivate',
+  authRateLimit(),
+  validate(deactivateAccountSchema),
+  authenticate,
+  requireEmailVerification,
+  AuthController.deactivateAccount
+);
+
+/**
+ * @route   POST /api/v1/auth/reactivate
+ * @desc    Reactivate user account
+ * @access  Public
+ */
+router.post('/reactivate',
+  authRateLimit(),
+  validate(reactivateAccountSchema),
+  AuthController.reactivateAccount
 );
 
 // Health check for auth routes
