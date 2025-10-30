@@ -108,8 +108,8 @@ app.get('/api', (req, res) => {
   });
 });
 
-// Routes will be added here
-// app.use('/api/v1/auth', require('./routes/auth'));
+// Routes
+app.use('/api/v1/auth', require('./routes/auth'));
 // app.use('/api/v1/vms', require('./routes/vms'));
 // app.use('/api/v1/billing', require('./routes/billing'));
 // app.use('/api/v1/admin', require('./routes/admin'));
