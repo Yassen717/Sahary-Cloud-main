@@ -1,7 +1,8 @@
 const express = require('express');
-const rateLimit = require('express-rate-limit');
 const AuthController = require('../controllers/authController');
 const { validate } = require('../middlewares/validation');
+const { authenticate, optionalAuth, requireEmailVerification } = require('../middlewares/auth');
+const { authRateLimit, apiRateLimit, bruteForceProtection, sanitizeInput, xssProtection } = require('../middlewares/security');
 const { 
   registerSchema,
   loginSchema,
@@ -14,33 +15,9 @@ const {
 
 const router = express.Router();
 
-// Rate limiting configurations
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 attempts per window
-  message: {
-    success: false,
-    error: 'Too many authentication attempts',
-    message: 'Please try again later',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // 20 requests per window
-  message: {
-    success: false,
-    error: 'Too many requests',
-    message: 'Please try again later',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Import auth middleware (will be created in next task)
-// const { authenticate, optionalAuth } = require('../middlewares/auth');
+// Apply security middleware to all routes
+router.use(sanitizeInput());
+router.use(xssProtection());
 
 /**
  * @route   POST /api/v1/auth/register
@@ -48,7 +25,7 @@ const generalLimiter = rateLimit({
  * @access  Public
  */
 router.post('/register', 
-  authLimiter,
+  authRateLimit(),
   validate(registerSchema),
   AuthController.register
 );
@@ -59,7 +36,8 @@ router.post('/register',
  * @access  Public
  */
 router.post('/login',
-  authLimiter,
+  authRateLimit(),
+  bruteForceProtection(),
   validate(loginSchema),
   AuthController.login
 );
@@ -70,7 +48,7 @@ router.post('/login',
  * @access  Public
  */
 router.post('/refresh',
-  generalLimiter,
+  apiRateLimit(),
   AuthController.refreshToken
 );
 
@@ -80,8 +58,8 @@ router.post('/refresh',
  * @access  Private
  */
 router.post('/logout',
-  generalLimiter,
-  // authenticate, // Will be uncommented when auth middleware is ready
+  apiRateLimit(),
+  authenticate,
   AuthController.logout
 );
 
@@ -91,9 +69,10 @@ router.post('/logout',
  * @access  Private
  */
 router.post('/change-password',
-  authLimiter,
+  authRateLimit(),
   validate(changePasswordSchema),
-  // authenticate, // Will be uncommented when auth middleware is ready
+  authenticate,
+  requireEmailVerification,
   AuthController.changePassword
 );
 
@@ -103,7 +82,7 @@ router.post('/change-password',
  * @access  Public
  */
 router.post('/forgot-password',
-  authLimiter,
+  authRateLimit(),
   validate(forgotPasswordSchema),
   AuthController.forgotPassword
 );
@@ -114,7 +93,7 @@ router.post('/forgot-password',
  * @access  Public
  */
 router.post('/reset-password',
-  authLimiter,
+  authRateLimit(),
   validate(resetPasswordSchema),
   AuthController.resetPassword
 );
@@ -125,7 +104,7 @@ router.post('/reset-password',
  * @access  Public
  */
 router.post('/verify-email',
-  generalLimiter,
+  apiRateLimit(),
   validate(verifyEmailSchema),
   AuthController.verifyEmail
 );
@@ -136,7 +115,7 @@ router.post('/verify-email',
  * @access  Public
  */
 router.post('/resend-verification',
-  authLimiter,
+  authRateLimit(),
   validate(forgotPasswordSchema), // Reuse email validation
   AuthController.resendVerification
 );
@@ -147,8 +126,8 @@ router.post('/resend-verification',
  * @access  Private
  */
 router.get('/profile',
-  generalLimiter,
-  // authenticate, // Will be uncommented when auth middleware is ready
+  apiRateLimit(),
+  authenticate,
   AuthController.getProfile
 );
 
@@ -158,9 +137,9 @@ router.get('/profile',
  * @access  Private
  */
 router.put('/profile',
-  generalLimiter,
+  apiRateLimit(),
   validate(updateProfileSchema),
-  // authenticate, // Will be uncommented when auth middleware is ready
+  authenticate,
   AuthController.updateProfile
 );
 
@@ -170,8 +149,8 @@ router.put('/profile',
  * @access  Private
  */
 router.get('/check',
-  generalLimiter,
-  // authenticate, // Will be uncommented when auth middleware is ready
+  apiRateLimit(),
+  authenticate,
   AuthController.checkAuth
 );
 
@@ -181,8 +160,8 @@ router.get('/check',
  * @access  Private
  */
 router.get('/sessions',
-  generalLimiter,
-  // authenticate, // Will be uncommented when auth middleware is ready
+  apiRateLimit(),
+  authenticate,
   AuthController.getSessions
 );
 
@@ -192,8 +171,8 @@ router.get('/sessions',
  * @access  Private
  */
 router.delete('/sessions',
-  authLimiter,
-  // authenticate, // Will be uncommented when auth middleware is ready
+  authRateLimit(),
+  authenticate,
   AuthController.revokeAllSessions
 );
 
