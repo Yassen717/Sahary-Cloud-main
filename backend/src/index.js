@@ -173,6 +173,12 @@ app.use((err, req, res, next) => {
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully');
   
+  // Stop usage collector
+  if (process.env.NODE_ENV !== 'test') {
+    const usageCollector = require('./jobs/usageCollector');
+    usageCollector.stop();
+  }
+  
   if (redisClient) {
     await redisClient.quit();
   }
@@ -182,6 +188,12 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
   console.log('SIGINT received, shutting down gracefully');
+  
+  // Stop usage collector
+  if (process.env.NODE_ENV !== 'test') {
+    const usageCollector = require('./jobs/usageCollector');
+    usageCollector.stop();
+  }
   
   if (redisClient) {
     await redisClient.quit();
@@ -197,6 +209,10 @@ if (process.env.NODE_ENV !== 'test') {
       // Connect to database
       await connectDatabase();
       
+      // Start usage collector
+      const usageCollector = require('./jobs/usageCollector');
+      usageCollector.start();
+      
       // Start HTTP server
       app.listen(PORT, HOST, () => {
         console.log(`🚀 Sahary Cloud API Server running on http://${HOST}:${PORT}`);
@@ -205,6 +221,7 @@ if (process.env.NODE_ENV !== 'test') {
         console.log(`❤️  Health Check: http://${HOST}:${PORT}/health`);
         console.log(`🗄️  Database: Connected`);
         console.log(`🔴 Redis: ${redisClient ? 'Connected' : 'Disconnected'}`);
+        console.log(`📈 Usage Collector: Started`);
       });
     } catch (error) {
       console.error('❌ Failed to start server:', error);
