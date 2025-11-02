@@ -83,7 +83,7 @@
     - _المتطلبات: 3.2, 3.6_
     - **Commit:** `feat: implement automated invoice generation system`
 
-  - [ ] 5.3 تكامل بوابة الدفع
+  - [x] 5.3 تكامل بوابة الدفع
     - تكامل Stripe أو PayPal لمعالجة المدفوعات
     - تطوير webhook handlers لتحديث حالة الدفع
     - تنفيذ أمان المدفوعات والتشفير
