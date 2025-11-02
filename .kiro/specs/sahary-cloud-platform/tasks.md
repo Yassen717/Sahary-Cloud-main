@@ -90,7 +90,7 @@
     - _المتطلبات: 3.4, 3.5_
     - **Commit:** `feat: integrate payment gateway with webhook handlers`
 
-  - [ ] 5.4 تطوير APIs الفواتير والدفع
+  - [x] 5.4 تطوير APIs الفواتير والدفع
     - إنشاء routes لعرض الفواتير والاستهلاك
     - تطوير APIs لمعالجة المدفوعات
     - تنفيذ APIs لعرض الأسعار والتكاليف
