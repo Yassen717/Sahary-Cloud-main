@@ -406,3 +406,302 @@ describe('Billing Service', () => {
     });
   });
 });
+
+
+describe('Invoice Generation', () => {
+  let testInvoice;
+
+  beforeAll(async () => {
+    // Create some usage records for invoice generation
+    const usageRecords = [
+      { cpuUsage: 40, ramUsage: 1000, storageUsage: 18, bandwidthUsage: 400, duration: 60 },
+      { cpuUsage: 55, ramUsage: 1300, storageUsage: 22, bandwidthUsage: 600, duration: 60 },
+      { cpuUsage: 65, ramUsage: 1500, storageUsage: 25, bandwidthUsage: 800, duration: 60 },
+    ];
+
+    for (const usage of usageRecords) {
+      await BillingService.recordUsage(testVM.id, usage);
+    }
+  });
+
+  describe('Monthly Invoice Generation', () => {
+    it('should generate monthly invoice for user', async () => {
+      const now = new Date();
+      const invoice = await BillingService.generateMonthlyInvoice(testUser.id, {
+        month: now.getMonth(),
+        year: now.getFullYear(),
+      });
+
+      expect(invoice).toBeDefined();
+      expect(invoice.invoiceNumber).toMatch(/^INV-\d{6}-\d{4}$/);
+      expect(invoice.userId).toBe(testUser.id);
+      expect(invoice.status).toBe('PENDING');
+      expect(invoice.subtotal).toBeGreaterThan(0);
+      expect(invoice.taxAmount).toBeGreaterThan(0);
+      expect(invoice.total).toBeGreaterThan(invoice.subtotal);
+      expect(invoice.items).toBeInstanceOf(Array);
+      expect(invoice.items.length).toBeGreaterThan(0);
+
+      testInvoice = invoice;
+    });
+
+    it('should not generate duplicate invoice for same period', async () => {
+      const now = new Date();
+      await expect(
+        BillingService.generateMonthlyInvoice(testUser.id, {
+          month: now.getMonth(),
+          year: now.getFullYear(),
+        })
+      ).rejects.toThrow('already exists');
+    });
+
+    it('should reject invoice generation for period with no usage', async () => {
+      // Try to generate invoice for future month
+      const futureDate = new Date();
+      futureDate.setMonth(futureDate.getMonth() + 2);
+
+      await expect(
+        BillingService.generateMonthlyInvoice(testUser.id, {
+          month: futureDate.getMonth(),
+          year: futureDate.getFullYear(),
+        })
+      ).rejects.toThrow('No usage found');
+    });
+
+    it('should generate unique invoice numbers', async () => {
+      const invoiceNumber1 = await BillingService.generateInvoiceNumber();
+      const invoiceNumber2 = await BillingService.generateInvoiceNumber();
+
+      expect(invoiceNumber1).toBeDefined();
+      expect(invoiceNumber2).toBeDefined();
+      expect(invoiceNumber1).toMatch(/^INV-\d{6}-\d{4}$/);
+      expect(invoiceNumber2).toMatch(/^INV-\d{6}-\d{4}$/);
+    });
+  });
+
+  describe('Invoice Retrieval', () => {
+    it('should get invoice by ID', async () => {
+      const invoice = await BillingService.getInvoiceById(testInvoice.id, testUser.id);
+
+      expect(invoice).toBeDefined();
+      expect(invoice.id).toBe(testInvoice.id);
+      expect(invoice.user).toBeDefined();
+      expect(invoice.items).toBeInstanceOf(Array);
+    });
+
+    it('should return null for non-existent invoice', async () => {
+      const invoice = await BillingService.getInvoiceById('non-existent-id', testUser.id);
+
+      expect(invoice).toBeNull();
+    });
+
+    it('should get user invoices with pagination', async () => {
+      const result = await BillingService.getUserInvoices(testUser.id, {
+        page: 1,
+        limit: 10,
+      });
+
+      expect(result).toBeDefined();
+      expect(result.data).toBeInstanceOf(Array);
+      expect(result.data.length).toBeGreaterThan(0);
+      expect(result.pagination).toBeDefined();
+      expect(result.pagination.page).toBe(1);
+    });
+
+    it('should filter invoices by status', async () => {
+      const result = await BillingService.getUserInvoices(testUser.id, {
+        status: 'PENDING',
+      });
+
+      expect(result.data).toBeInstanceOf(Array);
+      result.data.forEach((invoice) => {
+        expect(invoice.status).toBe('PENDING');
+      });
+    });
+  });
+
+  describe('Discount Application', () => {
+    it('should apply fixed discount to invoice', async () => {
+      const originalTotal = testInvoice.total;
+
+      const updatedInvoice = await BillingService.applyDiscount(testInvoice.id, {
+        discountAmount: 5.0,
+        reason: 'Test discount',
+      });
+
+      expect(updatedInvoice.discountAmount).toBe(5.0);
+      expect(updatedInvoice.total).toBeLessThan(originalTotal);
+      expect(updatedInvoice.discountReason).toBe('Test discount');
+    });
+
+    it('should apply percentage discount to invoice', async () => {
+      // Create new invoice for this test
+      const newUser = await AuthService.register({
+        email: 'discount-test@example.com',
+        password: 'TestPassword123!',
+        firstName: 'Discount',
+        lastName: 'Test',
+      });
+
+      await prisma.user.update({
+        where: { id: newUser.user.id },
+        data: { isVerified: true },
+      });
+
+      const newVM = await VMService.createVM(newUser.user.id, {
+        name: 'discount-test-vm',
+        cpu: 1,
+        ram: 1024,
+        storage: 20,
+      });
+
+      await BillingService.recordUsage(newVM.id, {
+        cpuUsage: 50,
+        ramUsage: 512,
+        storageUsage: 10,
+        bandwidthUsage: 200,
+        duration: 60,
+      });
+
+      const now = new Date();
+      const invoice = await BillingService.generateMonthlyInvoice(newUser.user.id, {
+        month: now.getMonth(),
+        year: now.getFullYear(),
+      });
+
+      const originalSubtotal = invoice.subtotal;
+
+      const updatedInvoice = await BillingService.applyDiscount(invoice.id, {
+        discountPercentage: 10,
+        discountCode: 'TEST10',
+        reason: '10% discount',
+      });
+
+      const expectedDiscount = originalSubtotal * 0.1;
+      expect(updatedInvoice.discountAmount).toBeCloseTo(expectedDiscount, 2);
+      expect(updatedInvoice.discountCode).toBe('TEST10');
+
+      // Cleanup
+      await prisma.invoice.delete({ where: { id: invoice.id } });
+      await prisma.virtualMachine.delete({ where: { id: newVM.id } });
+      await prisma.user.delete({ where: { id: newUser.user.id } });
+    });
+
+    it('should reject discount exceeding subtotal', async () => {
+      await expect(
+        BillingService.applyDiscount(testInvoice.id, {
+          discountAmount: testInvoice.subtotal + 100,
+        })
+      ).rejects.toThrow('cannot exceed subtotal');
+    });
+
+    it('should reject discount on non-pending invoice', async () => {
+      // Update invoice status
+      await BillingService.updateInvoiceStatus(testInvoice.id, 'PAID');
+
+      await expect(
+        BillingService.applyDiscount(testInvoice.id, {
+          discountAmount: 5.0,
+        })
+      ).rejects.toThrow('pending invoices');
+
+      // Revert status
+      await BillingService.updateInvoiceStatus(testInvoice.id, 'PENDING');
+    });
+  });
+
+  describe('Invoice Status Management', () => {
+    it('should update invoice status to PAID', async () => {
+      const updatedInvoice = await BillingService.updateInvoiceStatus(
+        testInvoice.id,
+        'PAID'
+      );
+
+      expect(updatedInvoice.status).toBe('PAID');
+      expect(updatedInvoice.paidAt).toBeDefined();
+    });
+
+    it('should update invoice status to CANCELLED', async () => {
+      // Revert to PENDING first
+      await BillingService.updateInvoiceStatus(testInvoice.id, 'PENDING');
+
+      const updatedInvoice = await BillingService.updateInvoiceStatus(
+        testInvoice.id,
+        'CANCELLED'
+      );
+
+      expect(updatedInvoice.status).toBe('CANCELLED');
+    });
+
+    it('should reject invalid status', async () => {
+      await expect(
+        BillingService.updateInvoiceStatus(testInvoice.id, 'INVALID_STATUS')
+      ).rejects.toThrow('Invalid status');
+    });
+  });
+
+  describe('Batch Invoice Generation', () => {
+    it('should generate invoices for all users', async () => {
+      const now = new Date();
+      const results = await BillingService.generateAllMonthlyInvoices({
+        month: now.getMonth() - 1,
+        year: now.getFullYear(),
+      });
+
+      expect(results).toBeDefined();
+      expect(results.total).toBeGreaterThanOrEqual(0);
+      expect(results.success).toBeGreaterThanOrEqual(0);
+      expect(results.failed).toBeGreaterThanOrEqual(0);
+      expect(results.skipped).toBeGreaterThanOrEqual(0);
+      expect(results.invoices).toBeInstanceOf(Array);
+      expect(results.errors).toBeInstanceOf(Array);
+    });
+  });
+
+  describe('Overdue Invoice Management', () => {
+    it('should mark overdue invoices', async () => {
+      // Create invoice with past due date
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 10);
+
+      await prisma.invoice.update({
+        where: { id: testInvoice.id },
+        data: {
+          status: 'PENDING',
+          dueDate: pastDate,
+        },
+      });
+
+      const results = await BillingService.markOverdueInvoices();
+
+      expect(results).toBeDefined();
+      expect(results.updated).toBeGreaterThanOrEqual(1);
+      expect(results.timestamp).toBeDefined();
+
+      // Verify invoice is marked as overdue
+      const invoice = await BillingService.getInvoiceById(testInvoice.id);
+      expect(invoice.status).toBe('OVERDUE');
+    });
+  });
+
+  describe('Invoice Statistics', () => {
+    it('should get invoice statistics for user', async () => {
+      const stats = await BillingService.getInvoiceStatistics(testUser.id);
+
+      expect(stats).toBeDefined();
+      expect(stats.counts).toBeDefined();
+      expect(stats.counts.total).toBeGreaterThan(0);
+      expect(stats.amounts).toBeDefined();
+      expect(stats.amounts.totalRevenue).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should get global invoice statistics', async () => {
+      const stats = await BillingService.getInvoiceStatistics();
+
+      expect(stats).toBeDefined();
+      expect(stats.counts).toBeDefined();
+      expect(stats.counts.total).toBeGreaterThanOrEqual(0);
+      expect(stats.amounts).toBeDefined();
+    });
+  });
+});

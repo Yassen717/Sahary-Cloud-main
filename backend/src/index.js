@@ -213,6 +213,10 @@ if (process.env.NODE_ENV !== 'test') {
       const usageCollector = require('./jobs/usageCollector');
       usageCollector.start();
       
+      // Start invoice generator
+      const invoiceGenerator = require('./jobs/invoiceGenerator');
+      invoiceGenerator.start();
+      
       // Start HTTP server
       app.listen(PORT, HOST, () => {
         console.log(`🚀 Sahary Cloud API Server running on http://${HOST}:${PORT}`);
@@ -222,6 +226,7 @@ if (process.env.NODE_ENV !== 'test') {
         console.log(`🗄️  Database: Connected`);
         console.log(`🔴 Redis: ${redisClient ? 'Connected' : 'Disconnected'}`);
         console.log(`📈 Usage Collector: Started`);
+        console.log(`💰 Invoice Generator: Started`);
       });
     } catch (error) {
       console.error('❌ Failed to start server:', error);
