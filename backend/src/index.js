@@ -114,7 +114,7 @@ app.use('/api/v1/vms', require('./routes/vms'));
 app.use('/api/v1/docker', require('./routes/docker'));
 app.use('/api/v1/payments', require('./routes/payments'));
 app.use('/api/v1/billing', require('./routes/billing'));
-// app.use('/api/v1/admin', require('./routes/admin'));
+app.use('/api/v1/admin', require('./routes/admin'));
 // app.use('/api/v1/solar', require('./routes/solar'));
 
 // 404 handler
