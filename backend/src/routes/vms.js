@@ -10,6 +10,12 @@ const {
   vmActionSchema,
   vmQuerySchema,
   createBackupSchema,
+  execContainerSchema,
+  containerLogsSchema,
+  restoreBackupSchema,
+  vmStatsQuerySchema,
+  adminVMQuerySchema,
+  vmSuspendSchema,
 } = require('../validations/vm.validation');
 const { calculatePricingSchema } = require('../validations/billing.validation');
 
@@ -53,7 +59,7 @@ router.get('/',
  */
 router.get('/all',
   apiRateLimit(),
-  validate(vmQuerySchema),
+  validate(adminVMQuerySchema),
   authenticate,
   requirePermission('vm:read:all'),
   VMController.getAllVMs
@@ -182,7 +188,7 @@ router.post('/:id/restart',
  */
 router.post('/:id/suspend',
   apiRateLimit(),
-  validate(vmActionSchema),
+  validate(vmSuspendSchema),
   authenticate,
   requirePermission('vm:suspend:all'),
   VMController.suspendVM
@@ -208,7 +214,7 @@ router.post('/:id/resume',
  */
 router.get('/:id/stats',
   apiRateLimit(),
-  validate(vmActionSchema),
+  validate(vmStatsQuerySchema),
   authenticate,
   requireAnyPermission('vm:read:own', 'vm:read:all'),
   VMController.getVMStatistics
@@ -234,7 +240,7 @@ router.get('/:id/container/status',
  */
 router.get('/:id/container/logs',
   apiRateLimit(),
-  validate(vmActionSchema),
+  validate(containerLogsSchema),
   authenticate,
   requireAnyPermission('vm:read:own', 'vm:read:all'),
   VMController.getVMContainerLogs
@@ -247,16 +253,7 @@ router.get('/:id/container/logs',
  */
 router.post('/:id/container/exec',
   apiRateLimit(),
-  [
-    param('id').isUUID().withMessage('Invalid VM ID'),
-    body('command')
-      .isArray({ min: 1 })
-      .withMessage('Command must be a non-empty array'),
-    body('command.*')
-      .isString()
-      .isLength({ min: 1, max: 1000 })
-      .withMessage('Each command part must be a string between 1 and 1000 characters'),
-  ],
+  validate(execContainerSchema),
   authenticate,
   requireAnyPermission('vm:manage:own', 'vm:manage:all'),
   VMController.execInVMContainer
@@ -269,13 +266,7 @@ router.post('/:id/container/exec',
  */
 router.post('/:id/backup',
   apiRateLimit(),
-  [
-    param('id').isUUID().withMessage('Invalid VM ID'),
-    body('backupName')
-      .notEmpty()
-      .isLength({ min: 1, max: 100 })
-      .withMessage('Backup name is required and must be between 1 and 100 characters'),
-  ],
+  validate(createBackupSchema),
   authenticate,
   requireAnyPermission('vm:manage:own', 'vm:manage:all'),
   VMController.createVMBackup
@@ -288,33 +279,7 @@ router.post('/:id/backup',
  */
 router.post('/restore/:backupId',
   apiRateLimit(),
-  [
-    param('backupId').isUUID().withMessage('Invalid backup ID'),
-    body('name')
-      .optional()
-      .isLength({ min: 1, max: 100 })
-      .withMessage('VM name must be between 1 and 100 characters'),
-    body('description')
-      .optional()
-      .isLength({ max: 500 })
-      .withMessage('Description must be less than 500 characters'),
-    body('cpu')
-      .optional()
-      .isInt({ min: 1, max: 32 })
-      .withMessage('CPU must be between 1 and 32 cores'),
-    body('ram')
-      .optional()
-      .isInt({ min: 512, max: 32768 })
-      .withMessage('RAM must be between 512MB and 32GB'),
-    body('storage')
-      .optional()
-      .isInt({ min: 10, max: 1000 })
-      .withMessage('Storage must be between 10GB and 1TB'),
-    body('bandwidth')
-      .optional()
-      .isInt({ min: 100, max: 10000 })
-      .withMessage('Bandwidth must be between 100GB and 10TB per month'),
-  ],
+  validate(restoreBackupSchema),
   authenticate,
   requireAnyPermission('vm:create:own', 'vm:create:all'),
   VMController.restoreVMFromBackup

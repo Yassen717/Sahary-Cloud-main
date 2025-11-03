@@ -155,7 +155,7 @@ const vmQuerySchema = z.object({
 // VM backup validation
 const createBackupSchema = z.object({
   body: z.object({
-    name: z
+    backupName: z
       .string({
         required_error: 'Backup name is required',
       })
@@ -172,6 +172,214 @@ const createBackupSchema = z.object({
       .enum(['FULL', 'INCREMENTAL', 'DIFFERENTIAL'])
       .optional()
       .default('FULL'),
+  }),
+  
+  params: z.object({
+    id: z
+      .string({
+        required_error: 'VM ID is required',
+      })
+      .cuid('Invalid VM ID format'),
+  }),
+});
+
+// VM container exec validation
+const execContainerSchema = z.object({
+  body: z.object({
+    command: z
+      .array(z.string().min(1).max(1000))
+      .min(1, 'Command must contain at least one element')
+      .max(10, 'Command cannot exceed 10 elements'),
+  }),
+  
+  params: z.object({
+    id: z
+      .string({
+        required_error: 'VM ID is required',
+      })
+      .cuid('Invalid VM ID format'),
+  }),
+});
+
+// VM container logs validation
+const containerLogsSchema = z.object({
+  query: z.object({
+    tail: z
+      .string()
+      .regex(/^\d+$/, 'Tail must be a positive integer')
+      .transform(Number)
+      .refine(val => val > 0 && val <= 10000, 'Tail must be between 1 and 10000')
+      .optional()
+      .default('100'),
+    
+    since: z
+      .string()
+      .datetime('Invalid since date format')
+      .optional(),
+    
+    until: z
+      .string()
+      .datetime('Invalid until date format')
+      .optional(),
+    
+    timestamps: z
+      .enum(['true', 'false'])
+      .optional()
+      .default('true'),
+  }),
+  
+  params: z.object({
+    id: z
+      .string({
+        required_error: 'VM ID is required',
+      })
+      .cuid('Invalid VM ID format'),
+  }),
+});
+
+// VM restore from backup validation
+const restoreBackupSchema = z.object({
+  body: z.object({
+    name: z
+      .string()
+      .min(3, 'VM name must be at least 3 characters')
+      .max(50, 'VM name must not exceed 50 characters')
+      .regex(/^[a-zA-Z0-9-_]+$/, 'VM name can only contain letters, numbers, hyphens, and underscores')
+      .optional(),
+    
+    description: z
+      .string()
+      .max(500, 'Description must not exceed 500 characters')
+      .optional(),
+    
+    cpu: z
+      .number()
+      .int('CPU cores must be an integer')
+      .min(1, 'CPU cores must be at least 1')
+      .max(32, 'CPU cores must not exceed 32')
+      .optional(),
+    
+    ram: z
+      .number()
+      .int('RAM must be an integer')
+      .min(512, 'RAM must be at least 512 MB')
+      .max(131072, 'RAM must not exceed 128 GB')
+      .optional(),
+    
+    storage: z
+      .number()
+      .int('Storage must be an integer')
+      .min(10, 'Storage must be at least 10 GB')
+      .max(2048, 'Storage must not exceed 2 TB')
+      .optional(),
+    
+    bandwidth: z
+      .number()
+      .int('Bandwidth must be an integer')
+      .min(100, 'Bandwidth must be at least 100 GB')
+      .max(10000, 'Bandwidth must not exceed 10 TB')
+      .optional(),
+  }),
+  
+  params: z.object({
+    backupId: z
+      .string({
+        required_error: 'Backup ID is required',
+      })
+      .cuid('Invalid backup ID format'),
+  }),
+});
+
+// VM statistics query validation
+const vmStatsQuerySchema = z.object({
+  query: z.object({
+    startDate: z
+      .string()
+      .datetime('Invalid start date format')
+      .optional(),
+    
+    endDate: z
+      .string()
+      .datetime('Invalid end date format')
+      .optional(),
+    
+    granularity: z
+      .enum(['hour', 'day', 'week', 'month'])
+      .optional()
+      .default('hour'),
+  }).refine((data) => {
+    if (data.startDate && data.endDate) {
+      return new Date(data.startDate) <= new Date(data.endDate);
+    }
+    return true;
+  }, {
+    message: 'Start date must be before or equal to end date',
+    path: ['endDate'],
+  }),
+  
+  params: z.object({
+    id: z
+      .string({
+        required_error: 'VM ID is required',
+      })
+      .cuid('Invalid VM ID format'),
+  }),
+});
+
+// Admin VM query validation
+const adminVMQuerySchema = z.object({
+  query: z.object({
+    page: z
+      .string()
+      .regex(/^\d+$/, 'Page must be a positive integer')
+      .transform(Number)
+      .refine(val => val > 0, 'Page must be greater than 0')
+      .optional()
+      .default('1'),
+    
+    limit: z
+      .string()
+      .regex(/^\d+$/, 'Limit must be a positive integer')
+      .transform(Number)
+      .refine(val => val > 0 && val <= 100, 'Limit must be between 1 and 100')
+      .optional()
+      .default('20'),
+    
+    status: z
+      .enum(['RUNNING', 'STOPPED', 'STARTING', 'STOPPING', 'RESTARTING', 'ERROR', 'SUSPENDED'])
+      .optional(),
+    
+    userId: z
+      .string()
+      .cuid('Invalid user ID format')
+      .optional(),
+    
+    search: z
+      .string()
+      .min(1, 'Search term cannot be empty')
+      .max(100, 'Search term must not exceed 100 characters')
+      .optional(),
+    
+    sortBy: z
+      .enum(['name', 'createdAt', 'updatedAt', 'status', 'cpu', 'ram', 'storage', 'hourlyRate'])
+      .optional()
+      .default('createdAt'),
+    
+    sortOrder: z
+      .enum(['asc', 'desc'])
+      .optional()
+      .default('desc'),
+  }),
+});
+
+// VM suspend/resume validation
+const vmSuspendSchema = z.object({
+  body: z.object({
+    reason: z
+      .string()
+      .min(10, 'Reason must be at least 10 characters')
+      .max(500, 'Reason must not exceed 500 characters')
+      .optional(),
   }),
   
   params: z.object({
@@ -208,5 +416,11 @@ module.exports = {
   vmActionSchema,
   vmQuerySchema,
   createBackupSchema,
+  execContainerSchema,
+  containerLogsSchema,
+  restoreBackupSchema,
+  vmStatsQuerySchema,
+  adminVMQuerySchema,
+  vmSuspendSchema,
   validateVMResources,
 };

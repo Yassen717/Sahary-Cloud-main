@@ -1,4 +1,5 @@
 const VMService = require('../services/vmService');
+const { prisma } = require('../config/database');
 
 /**
  * Virtual Machine Controller

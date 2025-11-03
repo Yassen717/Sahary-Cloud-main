@@ -1,49 +1,41 @@
 # VM Management API Documentation
 
 ## Overview
-This document provides comprehensive documentation for the Virtual Machine (VM) Management APIs in the Sahary Cloud platform.
+
+The VM Management API provides comprehensive endpoints for creating, managing, and monitoring virtual machines on the Sahary Cloud platform. All endpoints require authentication and proper authorization.
 
 ## Base URL
+
 ```
-http://localhost:3000/api/v1/vms
+/api/v1/vms
 ```
 
 ## Authentication
-All VM endpoints require authentication using JWT Bearer token:
+
+All endpoints require a valid JWT token in the Authorization header:
+
 ```
 Authorization: Bearer <your_jwt_token>
 ```
 
-## Table of Contents
-1. [VM CRUD Operations](#vm-crud-operations)
-2. [VM State Management](#vm-state-management)
-3. [VM Statistics & Monitoring](#vm-statistics--monitoring)
-4. [Docker Container Management](#docker-container-management)
-5. [Backup & Restore](#backup--restore)
-6. [Admin Operations](#admin-operations)
-7. [Error Responses](#error-responses)
-
----
-
-## VM CRUD Operations
+## Endpoints
 
 ### 1. Create VM
-Create a new virtual machine.
 
-**Endpoint:** `POST /api/v1/vms`
+**POST** `/api/v1/vms`
 
-**Permissions:** `vm:create`
+Creates a new virtual machine with specified resources.
 
 **Request Body:**
 ```json
 {
-  "name": "my-web-server",
-  "description": "Production web server",
+  "name": "my-vm",
+  "description": "My production VM",
   "cpu": 2,
-  "ram": 4096,
-  "storage": 50,
+  "ram": 2048,
+  "storage": 40,
   "bandwidth": 1000,
-  "dockerImage": "ubuntu:22.04"
+  "dockerImage": "ubuntu:latest"
 }
 ```
 
@@ -51,37 +43,31 @@ Create a new virtual machine.
 - `name`: 3-50 characters, alphanumeric with hyphens and underscores only
 - `description`: Optional, max 500 characters
 - `cpu`: 1-32 cores
-- `ram`: 512-131072 MB (0.5-128 GB)
+- `ram`: 512-131072 MB (512 MB - 128 GB)
 - `storage`: 10-2048 GB (10 GB - 2 TB)
-- `bandwidth`: 100-10000 GB (100 GB - 10 TB), optional
-- `dockerImage`: Valid Docker image name, optional (default: ubuntu:latest)
+- `bandwidth`: 100-10000 GB (100 GB - 10 TB), optional, default 1000
+- `dockerImage`: Optional, max 200 characters
 
-**Success Response (201):**
+**Response (201):**
 ```json
 {
   "success": true,
   "message": "VM created successfully",
   "data": {
     "vm": {
-      "id": "cm4abc123xyz",
-      "name": "my-web-server",
-      "description": "Production web server",
-      "status": "STOPPED",
+      "id": "clxxxxxxxxxxxxxxxxxx",
+      "name": "my-vm",
+      "description": "My production VM",
       "cpu": 2,
-      "ram": 4096,
-      "storage": 50,
+      "ram": 2048,
+      "storage": 40,
       "bandwidth": 1000,
-      "dockerImage": "ubuntu:22.04",
-      "dockerContainerId": null,
-      "ipAddress": null,
-      "hourlyRate": "0.05",
+      "dockerImage": "ubuntu:latest",
+      "status": "STOPPED",
+      "hourlyRate": 0.05,
       "createdAt": "2024-01-01T00:00:00.000Z",
-      "updatedAt": "2024-01-01T00:00:00.000Z",
-      "startedAt": null,
-      "stoppedAt": null,
-      "userId": "cm4user123",
       "user": {
-        "id": "cm4user123",
+        "id": "clxxxxxxxxxxxxxxxxxx",
         "email": "user@example.com",
         "firstName": "John",
         "lastName": "Doe"
@@ -92,56 +78,56 @@ Create a new virtual machine.
 ```
 
 **Error Responses:**
-- `400`: Validation failed or resource limits exceeded
+- `400`: Validation failed, duplicate name, insufficient resources
 - `401`: Unauthorized
-- `403`: Insufficient permissions
+- `403`: Email not verified
 
 ---
 
-### 2. Get User's VMs
-Retrieve all VMs belonging to the authenticated user.
+### 2. Get User VMs
 
-**Endpoint:** `GET /api/v1/vms`
+**GET** `/api/v1/vms`
 
-**Permissions:** `vm:read:own`
+Retrieves all VMs belonging to the authenticated user with pagination and filtering.
 
 **Query Parameters:**
 - `page`: Page number (default: 1)
-- `limit`: Items per page (default: 10, max: 100)
+- `limit`: Items per page (1-100, default: 10)
 - `status`: Filter by status (RUNNING, STOPPED, STARTING, STOPPING, RESTARTING, ERROR, SUSPENDED)
 - `search`: Search by name or description
-- `sortBy`: Sort field (createdAt, name, status, cpu, ram, storage)
-- `sortOrder`: Sort order (asc, desc)
+- `sortBy`: Sort field (name, createdAt, updatedAt, status, cpu, ram, storage)
+- `sortOrder`: Sort order (asc, desc, default: desc)
 
-**Example Request:**
-```
-GET /api/v1/vms?page=1&limit=10&status=RUNNING&sortBy=createdAt&sortOrder=desc
-```
-
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
-  "data": {
-    "vms": [
-      {
-        "id": "cm4abc123xyz",
-        "name": "my-web-server",
-        "status": "RUNNING",
-        "cpu": 2,
-        "ram": 4096,
-        "storage": 50,
-        "ipAddress": "172.20.0.5",
-        "hourlyRate": "0.05",
-        "createdAt": "2024-01-01T00:00:00.000Z"
-      }
-    ],
-    "pagination": {
-      "total": 5,
-      "page": 1,
-      "limit": 10,
-      "totalPages": 1
+  "message": "VMs retrieved successfully",
+  "data": [
+    {
+      "id": "clxxxxxxxxxxxxxxxxxx",
+      "name": "my-vm",
+      "status": "RUNNING",
+      "cpu": 2,
+      "ram": 2048,
+      "storage": 40,
+      "ipAddress": "192.168.1.100",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "usageRecords": [
+        {
+          "cpuUsage": 45.5,
+          "ramUsage": 1024,
+          "storageUsage": 20,
+          "timestamp": "2024-01-01T12:00:00.000Z"
+        }
+      ]
     }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 5,
+    "totalPages": 1
   }
 }
 ```
@@ -149,108 +135,101 @@ GET /api/v1/vms?page=1&limit=10&status=RUNNING&sortBy=createdAt&sortOrder=desc
 ---
 
 ### 3. Get VM by ID
-Retrieve detailed information about a specific VM.
 
-**Endpoint:** `GET /api/v1/vms/:id`
+**GET** `/api/v1/vms/:id`
 
-**Permissions:** `vm:read:own` or `vm:read:all` (admin)
+Retrieves detailed information about a specific VM.
 
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
+  "message": "VM retrieved successfully",
   "data": {
     "vm": {
-      "id": "cm4abc123xyz",
-      "name": "my-web-server",
-      "description": "Production web server",
+      "id": "clxxxxxxxxxxxxxxxxxx",
+      "name": "my-vm",
+      "description": "My production VM",
       "status": "RUNNING",
       "cpu": 2,
-      "ram": 4096,
-      "storage": 50,
+      "ram": 2048,
+      "storage": 40,
       "bandwidth": 1000,
-      "dockerImage": "ubuntu:22.04",
-      "dockerContainerId": "abc123def456",
-      "ipAddress": "172.20.0.5",
-      "port": null,
-      "hourlyRate": "0.05",
+      "dockerImage": "ubuntu:latest",
+      "dockerContainerId": "abc123...",
+      "ipAddress": "192.168.1.100",
+      "hourlyRate": 0.05,
+      "startedAt": "2024-01-01T10:00:00.000Z",
       "createdAt": "2024-01-01T00:00:00.000Z",
-      "updatedAt": "2024-01-01T00:00:00.000Z",
-      "startedAt": "2024-01-01T01:00:00.000Z",
-      "stoppedAt": null,
-      "userId": "cm4user123",
+      "updatedAt": "2024-01-01T10:00:00.000Z",
       "user": {
-        "id": "cm4user123",
+        "id": "clxxxxxxxxxxxxxxxxxx",
         "email": "user@example.com",
         "firstName": "John",
         "lastName": "Doe"
       },
-      "usageRecords": []
+      "usageRecords": [...],
+      "backups": [...]
     }
   }
 }
 ```
 
 **Error Responses:**
-- `404`: VM not found
-- `403`: Access denied
+- `400`: Invalid VM ID format
+- `404`: VM not found or access denied
 
 ---
 
 ### 4. Update VM
-Update VM configuration (only when stopped).
 
-**Endpoint:** `PUT /api/v1/vms/:id`
+**PUT** `/api/v1/vms/:id`
 
-**Permissions:** `vm:manage:own` or `vm:manage:all` (admin)
+Updates VM configuration. VM must be stopped to update resources.
 
 **Request Body:**
 ```json
 {
-  "name": "updated-web-server",
+  "name": "updated-vm-name",
   "description": "Updated description",
   "cpu": 4,
-  "ram": 8192,
-  "storage": 100,
+  "ram": 4096,
+  "storage": 80,
   "bandwidth": 2000
 }
 ```
 
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
   "message": "VM updated successfully",
   "data": {
     "vm": {
-      "id": "cm4abc123xyz",
-      "name": "updated-web-server",
+      "id": "clxxxxxxxxxxxxxxxxxx",
+      "name": "updated-vm-name",
       "cpu": 4,
-      "ram": 8192,
-      "storage": 100,
-      "bandwidth": 2000,
-      "hourlyRate": "0.10",
-      "updatedAt": "2024-01-01T02:00:00.000Z"
+      "ram": 4096,
+      "hourlyRate": 0.10,
+      ...
     }
   }
 }
 ```
 
 **Error Responses:**
-- `400`: VM is running or in transitional state
-- `403`: Access denied
+- `400`: Validation failed, VM in transitional state, insufficient resources
 - `404`: VM not found
 
 ---
 
 ### 5. Delete VM
-Delete a virtual machine (must be stopped).
 
-**Endpoint:** `DELETE /api/v1/vms/:id`
+**DELETE** `/api/v1/vms/:id`
 
-**Permissions:** `vm:delete:own` or `vm:delete:all` (admin)
+Deletes a VM. VM must be stopped before deletion.
 
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
@@ -259,249 +238,124 @@ Delete a virtual machine (must be stopped).
 ```
 
 **Error Responses:**
-- `400`: VM is running
-- `403`: Access denied
+- `400`: VM is running or in transitional state
 - `404`: VM not found
 
 ---
 
-## VM State Management
-
 ### 6. Start VM
-Start a stopped virtual machine.
 
-**Endpoint:** `POST /api/v1/vms/:id/start`
+**POST** `/api/v1/vms/:id/start`
 
-**Permissions:** `vm:manage:own` or `vm:manage:all` (admin)
+Starts a stopped VM.
 
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
-  "message": "VM started successfully",
+  "message": "VM start initiated successfully",
   "data": {
     "vm": {
-      "id": "cm4abc123xyz",
-      "name": "my-web-server",
+      "id": "clxxxxxxxxxxxxxxxxxx",
       "status": "STARTING",
-      "dockerContainerId": "abc123def456",
-      "ipAddress": "172.20.0.5"
+      ...
     }
   }
 }
 ```
 
 **Error Responses:**
-- `400`: VM is already running or in error state
-- `403`: Access denied
-- `404`: VM not found
+- `400`: VM already running or in transitional state
 
 ---
 
 ### 7. Stop VM
-Stop a running virtual machine.
 
-**Endpoint:** `POST /api/v1/vms/:id/stop`
+**POST** `/api/v1/vms/:id/stop`
 
-**Permissions:** `vm:manage:own` or `vm:manage:all` (admin)
+Stops a running VM.
 
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
-  "message": "VM stopped successfully",
+  "message": "VM stop initiated successfully",
   "data": {
     "vm": {
-      "id": "cm4abc123xyz",
-      "name": "my-web-server",
-      "status": "STOPPING"
+      "id": "clxxxxxxxxxxxxxxxxxx",
+      "status": "STOPPING",
+      ...
     }
   }
 }
 ```
+
+**Error Responses:**
+- `400`: VM already stopped or in transitional state
 
 ---
 
 ### 8. Restart VM
-Restart a running virtual machine.
 
-**Endpoint:** `POST /api/v1/vms/:id/restart`
+**POST** `/api/v1/vms/:id/restart`
 
-**Permissions:** `vm:manage:own` or `vm:manage:all` (admin)
+Restarts a running VM.
 
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
-  "message": "VM restarted successfully",
+  "message": "VM restart initiated successfully",
   "data": {
     "vm": {
-      "id": "cm4abc123xyz",
-      "name": "my-web-server",
-      "status": "RESTARTING"
+      "id": "clxxxxxxxxxxxxxxxxxx",
+      "status": "RESTARTING",
+      ...
     }
   }
 }
 ```
 
----
-
-### 9. Suspend VM (Admin Only)
-Suspend a virtual machine.
-
-**Endpoint:** `POST /api/v1/vms/:id/suspend`
-
-**Permissions:** `vm:suspend:all` (admin only)
-
-**Success Response (200):**
-```json
-{
-  "success": true,
-  "message": "VM suspended successfully",
-  "data": {
-    "vm": {
-      "id": "cm4abc123xyz",
-      "status": "SUSPENDED"
-    }
-  }
-}
-```
+**Error Responses:**
+- `400`: VM not running
 
 ---
 
-### 10. Resume VM (Admin Only)
-Resume a suspended virtual machine.
+### 9. Get Resource Usage
 
-**Endpoint:** `POST /api/v1/vms/:id/resume`
+**GET** `/api/v1/vms/resources`
 
-**Permissions:** `vm:suspend:all` (admin only)
+Gets the authenticated user's total resource usage and limits.
 
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
-  "message": "VM resumed successfully",
-  "data": {
-    "vm": {
-      "id": "cm4abc123xyz",
-      "status": "STOPPED"
-    }
-  }
-}
-```
-
----
-
-## VM Statistics & Monitoring
-
-### 11. Get VM Statistics
-Get detailed statistics for a specific VM.
-
-**Endpoint:** `GET /api/v1/vms/:id/stats`
-
-**Permissions:** `vm:read:own` or `vm:read:all` (admin)
-
-**Success Response (200):**
-```json
-{
-  "success": true,
-  "data": {
-    "vm": {
-      "id": "cm4abc123xyz",
-      "name": "my-web-server",
-      "status": "RUNNING"
-    },
-    "statistics": {
-      "totalUptime": 86400,
-      "totalCost": "1.20",
-      "averageCpuUsage": 45.5,
-      "averageRamUsage": 2048,
-      "totalBandwidthUsage": 150.5,
-      "recentUsage": []
-    }
-  }
-}
-```
-
----
-
-### 12. Get VM Resource Stats
-Get real-time resource usage from Docker container.
-
-**Endpoint:** `GET /api/v1/vms/:id/resources`
-
-**Permissions:** `vm:read:own` or `vm:read:all` (admin)
-
-**Success Response (200):**
-```json
-{
-  "success": true,
-  "data": {
-    "vmId": "cm4abc123xyz",
-    "vmName": "my-web-server",
-    "vmStatus": "RUNNING",
-    "dockerContainerId": "abc123def456",
-    "stats": {
-      "timestamp": "2024-01-01T12:00:00.000Z",
-      "cpu": {
-        "usage": 45.5,
-        "systemUsage": 1234567890
-      },
-      "memory": {
-        "used": 2147483648,
-        "limit": 4294967296,
-        "percentage": 50.0
-      },
-      "network": {
-        "rxBytes": 1048576,
-        "txBytes": 2097152,
-        "totalBytes": 3145728
-      },
-      "blockIO": {
-        "readBytes": 4194304,
-        "writeBytes": 8388608,
-        "totalBytes": 12582912
-      },
-      "pids": 25
-    }
-  }
-}
-```
-
----
-
-### 13. Get User Resource Usage
-Get total resource usage for the authenticated user.
-
-**Endpoint:** `GET /api/v1/vms/resources`
-
-**Permissions:** `vm:read:own`
-
-**Success Response (200):**
-```json
-{
-  "success": true,
+  "message": "Resource usage retrieved successfully",
   "data": {
     "usage": {
-      "cpu": 6,
-      "ram": 12288,
+      "cpu": 8,
+      "ram": 16384,
       "storage": 200,
-      "bandwidth": 500,
-      "vmCount": 3
+      "bandwidth": 5000
     },
     "limits": {
       "cpu": 16,
       "ram": 32768,
-      "storage": 1000,
-      "bandwidth": 5000,
-      "maxVMs": 10
+      "storage": 1024,
+      "bandwidth": 10000
+    },
+    "usagePercentages": {
+      "cpu": 50,
+      "ram": 50,
+      "storage": 19.53,
+      "bandwidth": 50
     },
     "available": {
-      "cpu": 10,
-      "ram": 20480,
-      "storage": 800,
-      "bandwidth": 4500,
-      "vms": 7
+      "cpu": 8,
+      "ram": 16384,
+      "storage": 824,
+      "bandwidth": 5000
     }
   }
 }
@@ -509,391 +363,303 @@ Get total resource usage for the authenticated user.
 
 ---
 
-## Docker Container Management
+### 10. Get Pricing Estimate
 
-### 14. Get Container Status
-Get Docker container status and details.
+**POST** `/api/v1/vms/pricing`
 
-**Endpoint:** `GET /api/v1/vms/:id/container/status`
+Calculates pricing estimate for VM resources.
 
-**Permissions:** `vm:read:own` or `vm:read:all` (admin)
+**Request Body:**
+```json
+{
+  "resources": {
+    "cpu": 2,
+    "ram": 2048,
+    "storage": 40,
+    "bandwidth": 1000
+  },
+  "duration": 24
+}
+```
 
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
+  "message": "Pricing estimate calculated successfully",
   "data": {
-    "vmId": "cm4abc123xyz",
-    "vmName": "my-web-server",
-    "vmStatus": "RUNNING",
-    "containerStatus": {
-      "containerId": "abc123def456",
-      "name": "/sahary-vm-cm4abc123xyz",
-      "status": "running",
-      "running": true,
-      "paused": false,
-      "restarting": false,
-      "exitCode": 0,
-      "error": "",
-      "startedAt": "2024-01-01T01:00:00.000Z",
-      "finishedAt": null,
-      "image": "ubuntu:22.04",
-      "ipAddress": "172.20.0.5",
-      "ports": [],
-      "stats": {
-        "cpu": { "usage": 45.5 },
-        "memory": { "used": 2147483648, "limit": 4294967296, "percentage": 50.0 }
-      }
-    }
+    "resources": {
+      "cpu": 2,
+      "ram": 2048,
+      "storage": 40,
+      "bandwidth": 1000
+    },
+    "estimates": {
+      "hourly": 0.05,
+      "daily": 1.20,
+      "weekly": 8.40,
+      "monthly": 36.00,
+      "yearly": 438.00,
+      "custom": 1.20
+    },
+    "currency": "USD",
+    "warnings": []
   }
 }
 ```
 
 ---
 
-### 15. Get Container Logs
-Get Docker container logs.
+### 11. Get VM Statistics
 
-**Endpoint:** `GET /api/v1/vms/:id/container/logs`
+**GET** `/api/v1/vms/:id/stats`
 
-**Permissions:** `vm:read:own` or `vm:read:all` (admin)
+Gets usage statistics for a specific VM.
 
 **Query Parameters:**
-- `tail`: Number of lines to retrieve (default: 100, max: 10000)
-- `since`: ISO 8601 timestamp to get logs since
-- `until`: ISO 8601 timestamp to get logs until
-- `timestamps`: Include timestamps (true/false, default: true)
+- `startDate`: Start date (ISO 8601 format)
+- `endDate`: End date (ISO 8601 format)
+- `granularity`: Data granularity (hour, day, week, month)
 
-**Example Request:**
-```
-GET /api/v1/vms/:id/container/logs?tail=50&timestamps=true
-```
-
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
+  "message": "VM statistics retrieved successfully",
   "data": {
-    "vmId": "cm4abc123xyz",
-    "vmName": "my-web-server",
-    "dockerContainerId": "abc123def456",
-    "logs": "2024-01-01T01:00:00.000Z Container started\n2024-01-01T01:00:01.000Z Application initialized\n..."
+    "totalRecords": 100,
+    "totalCost": 12.50,
+    "averageCPU": 45.5,
+    "averageRAM": 1024,
+    "totalBandwidth": 50000,
+    "peakCPU": 95.0,
+    "peakRAM": 1800,
+    "records": [...]
   }
 }
 ```
 
 ---
 
-### 16. Execute Command in Container
-Execute a command inside the VM container.
+### 12. Get All VMs (Admin Only)
 
-**Endpoint:** `POST /api/v1/vms/:id/container/exec`
+**GET** `/api/v1/vms/all`
 
-**Permissions:** `vm:manage:own` or `vm:manage:all` (admin)
+Gets all VMs across all users (admin only).
 
-**Request Body:**
-```json
-{
-  "command": ["ls", "-la", "/app"]
-}
-```
-
-**Success Response (200):**
-```json
-{
-  "success": true,
-  "data": {
-    "vmId": "cm4abc123xyz",
-    "vmName": "my-web-server",
-    "dockerContainerId": "abc123def456",
-    "result": {
-      "exitCode": 0,
-      "output": "total 4\ndrwxr-xr-x 2 root root 4096 Jan  1 00:00 .\ndrwxr-xr-x 3 root root 4096 Jan  1 00:00 ..",
-      "command": "ls -la /app"
-    }
-  }
-}
-```
-
----
-
-## Backup & Restore
-
-### 17. Create VM Backup
-Create a backup of the VM container.
-
-**Endpoint:** `POST /api/v1/vms/:id/backup`
-
-**Permissions:** `vm:manage:own` or `vm:manage:all` (admin)
-
-**Request Body:**
-```json
-{
-  "backupName": "my-web-server-backup-2024-01-01"
-}
-```
-
-**Success Response (201):**
-```json
-{
-  "success": true,
-  "message": "VM backup created successfully",
-  "data": {
-    "id": "cm4backup123",
-    "name": "my-web-server-backup-2024-01-01",
-    "vmId": "cm4abc123xyz",
-    "userId": "cm4user123",
-    "size": 1073741824,
-    "dockerImageId": "sha256:abc123...",
-    "status": "COMPLETED",
-    "createdAt": "2024-01-01T12:00:00.000Z",
-    "dockerBackup": {
-      "backupId": "sha256:abc123...",
-      "name": "my-web-server-backup-2024-01-01",
-      "size": 1073741824,
-      "created": "2024-01-01T12:00:00.000Z",
-      "tags": ["sahary-backup/my-web-server-backup-2024-01-01:2024-01-01T12-00-00-000Z"]
-    }
-  }
-}
-```
-
----
-
-### 18. Restore VM from Backup
-Restore a VM from a backup.
-
-**Endpoint:** `POST /api/v1/vms/restore/:backupId`
-
-**Permissions:** `vm:create:own` or `vm:create:all` (admin)
-
-**Request Body:**
-```json
-{
-  "name": "restored-web-server",
-  "description": "Restored from backup",
-  "cpu": 2,
-  "ram": 4096,
-  "storage": 50,
-  "bandwidth": 1000
-}
-```
-
-**Success Response (201):**
-```json
-{
-  "success": true,
-  "message": "VM restored from backup successfully",
-  "data": {
-    "id": "cm4newvm123",
-    "name": "restored-web-server",
-    "status": "STOPPED",
-    "dockerImage": "sha256:abc123...",
-    "createdAt": "2024-01-01T13:00:00.000Z"
-  }
-}
-```
-
----
-
-## Admin Operations
-
-### 19. Get All VMs (Admin Only)
-Get all VMs in the system.
-
-**Endpoint:** `GET /api/v1/vms/all`
-
-**Permissions:** `vm:read:all` (admin only)
-
-**Query Parameters:** Same as "Get User's VMs" plus:
+**Query Parameters:**
+- `page`: Page number
+- `limit`: Items per page (1-100, default: 20)
+- `status`: Filter by status
 - `userId`: Filter by user ID
+- `search`: Search term
+- `sortBy`: Sort field
+- `sortOrder`: Sort order
 
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
-  "data": {
-    "vms": [],
-    "pagination": {
-      "total": 50,
-      "page": 1,
-      "limit": 10,
-      "totalPages": 5
-    }
-  }
+  "message": "All VMs retrieved successfully",
+  "data": [...],
+  "pagination": {...}
 }
 ```
 
+**Error Responses:**
+- `403`: Insufficient permissions
+
 ---
 
-### 20. Get System Stats (Admin Only)
-Get system-wide VM statistics.
+### 13. Get System Statistics (Admin Only)
 
-**Endpoint:** `GET /api/v1/vms/stats`
+**GET** `/api/v1/vms/stats`
 
-**Permissions:** `vm:read:all` (admin only)
+Gets system-wide resource statistics (admin only).
 
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
+  "message": "System statistics retrieved successfully",
   "data": {
-    "totalVMs": 50,
-    "runningVMs": 35,
-    "stoppedVMs": 10,
-    "suspendedVMs": 5,
-    "totalUsers": 25,
-    "resourceUsage": {
-      "totalCpu": 120,
-      "totalRam": 262144,
-      "totalStorage": 5000,
-      "totalBandwidth": 50000
+    "vms": {
+      "total": 150,
+      "running": 120,
+      "stopped": 25,
+      "error": 5
     },
-    "resourceLimits": {
-      "maxCpu": 256,
-      "maxRam": 524288,
-      "maxStorage": 10000,
-      "maxBandwidth": 100000
-    }
+    "resources": {
+      "totalCPU": 500,
+      "totalRAM": 1048576,
+      "totalStorage": 50000,
+      "usedCPU": 350,
+      "usedRAM": 700000,
+      "usedStorage": 30000
+    },
+    "timestamp": "2024-01-01T12:00:00.000Z"
   }
 }
 ```
 
 ---
 
-### 21. Calculate Pricing Estimate
-Calculate pricing estimate for VM configuration.
+### 14. Suspend VM (Admin Only)
 
-**Endpoint:** `POST /api/v1/vms/pricing`
+**POST** `/api/v1/vms/:id/suspend`
 
-**Permissions:** Authenticated user
+Suspends a VM (admin only).
 
 **Request Body:**
 ```json
 {
-  "cpu": 2,
-  "ram": 4096,
-  "storage": 50,
-  "bandwidth": 1000,
-  "duration": 720
+  "reason": "Policy violation - excessive resource usage detected"
 }
 ```
 
-**Success Response (200):**
+**Response (200):**
 ```json
 {
   "success": true,
-  "data": {
-    "hourlyRate": "0.05",
-    "dailyRate": "1.20",
-    "monthlyRate": "36.00",
-    "estimatedCost": "36.00",
-    "duration": 720,
-    "breakdown": {
-      "cpuCost": "14.40",
-      "ramCost": "10.80",
-      "storageCost": "7.20",
-      "bandwidthCost": "3.60"
-    }
-  }
+  "message": "VM suspended successfully"
 }
 ```
 
+**Error Responses:**
+- `400`: Invalid reason (must be at least 10 characters)
+- `403`: Insufficient permissions
+
 ---
 
-## Error Responses
+### 15. Resume VM (Admin Only)
 
-### Standard Error Format
+**POST** `/api/v1/vms/:id/resume`
+
+Resumes a suspended VM (admin only).
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "VM resumed successfully"
+}
+```
+
+**Error Responses:**
+- `400`: VM not suspended
+- `403`: Insufficient permissions
+
+---
+
+## VM Status Values
+
+- `STOPPED`: VM is stopped
+- `STARTING`: VM is starting up
+- `RUNNING`: VM is running
+- `STOPPING`: VM is stopping
+- `RESTARTING`: VM is restarting
+- `ERROR`: VM encountered an error
+- `SUSPENDED`: VM is suspended by admin
+
+## Error Response Format
+
+All error responses follow this format:
+
 ```json
 {
   "success": false,
   "error": "Error type",
-  "message": "Detailed error message"
+  "message": "Detailed error message",
+  "details": [...], // Optional, for validation errors
+  "timestamp": "2024-01-01T12:00:00.000Z"
 }
 ```
-
-### Common HTTP Status Codes
-- `200`: Success
-- `201`: Created
-- `400`: Bad Request (validation error, invalid state)
-- `401`: Unauthorized (missing or invalid token)
-- `403`: Forbidden (insufficient permissions)
-- `404`: Not Found (resource doesn't exist)
-- `429`: Too Many Requests (rate limit exceeded)
-- `500`: Internal Server Error
-
-### Example Error Responses
-
-**Validation Error (400):**
-```json
-{
-  "success": false,
-  "error": "Validation failed",
-  "message": "VM name must be at least 3 characters"
-}
-```
-
-**Unauthorized (401):**
-```json
-{
-  "success": false,
-  "error": "Unauthorized",
-  "message": "Invalid or expired token"
-}
-```
-
-**Forbidden (403):**
-```json
-{
-  "success": false,
-  "error": "Forbidden",
-  "message": "Insufficient permissions to perform this action"
-}
-```
-
-**Not Found (404):**
-```json
-{
-  "success": false,
-  "error": "Not Found",
-  "message": "VM not found or access denied"
-}
-```
-
-**Rate Limit (429):**
-```json
-{
-  "success": false,
-  "error": "Too Many Requests",
-  "message": "Rate limit exceeded. Please try again later."
-}
-```
-
----
 
 ## Rate Limiting
 
-All VM endpoints are rate-limited to prevent abuse:
-- **Standard endpoints**: 100 requests per 15 minutes per IP
-- **Resource-intensive operations** (start, stop, restart): Additional throttling may apply
+API endpoints are rate-limited to prevent abuse:
+- Default: 100 requests per 15 minutes per IP
+- Rate limit headers are included in responses:
+  - `X-RateLimit-Limit`: Maximum requests allowed
+  - `X-RateLimit-Remaining`: Remaining requests
+  - `X-RateLimit-Reset`: Time when limit resets
 
----
+## Security
+
+- All endpoints require authentication via JWT token
+- Sensitive operations require email verification
+- Input is sanitized to prevent XSS attacks
+- RBAC (Role-Based Access Control) enforces permissions
+- Admin-only endpoints are protected
 
 ## Best Practices
 
-1. **Always check VM status** before performing state operations
-2. **Use pagination** when listing VMs to improve performance
-3. **Monitor resource usage** regularly to avoid hitting limits
-4. **Create backups** before major changes or updates
-5. **Use appropriate error handling** in your client applications
-6. **Respect rate limits** to ensure service availability
-7. **Clean up unused VMs** to optimize resource allocation
+1. **Always check VM status** before performing operations
+2. **Stop VMs before deletion** to prevent data loss
+3. **Monitor resource usage** to avoid hitting limits
+4. **Use pagination** for large result sets
+5. **Handle rate limits** gracefully in your application
+6. **Validate input** on the client side before sending requests
+7. **Store sensitive data** (like tokens) securely
 
----
+## Examples
+
+### Creating a VM with cURL
+
+```bash
+curl -X POST https://api.saharycloud.com/api/v1/vms \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-production-vm",
+    "description": "Production web server",
+    "cpu": 4,
+    "ram": 8192,
+    "storage": 100,
+    "bandwidth": 2000,
+    "dockerImage": "nginx:latest"
+  }'
+```
+
+### Starting a VM with JavaScript
+
+```javascript
+const response = await fetch('https://api.saharycloud.com/api/v1/vms/VM_ID/start', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  }
+});
+
+const data = await response.json();
+console.log(data);
+```
+
+### Getting VMs with Python
+
+```python
+import requests
+
+headers = {
+    'Authorization': f'Bearer {token}'
+}
+
+params = {
+    'page': 1,
+    'limit': 10,
+    'status': 'RUNNING'
+}
+
+response = requests.get(
+    'https://api.saharycloud.com/api/v1/vms',
+    headers=headers,
+    params=params
+)
+
+vms = response.json()
+```
 
 ## Support
 
-For API support or questions, please contact:
-- Email: support@saharycloud.com
-- Documentation: https://docs.saharycloud.com
-- Status Page: https://status.saharycloud.com
+For API support, contact: support@saharycloud.com
