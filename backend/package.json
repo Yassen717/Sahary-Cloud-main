@@ -59,7 +59,8 @@
     "uuid": "^9.0.1",
     "moment": "^2.29.4",
     "lodash": "^4.17.21",
-    "axios": "^1.6.2"
+    "axios": "^1.6.2",
+    "node-cron": "^3.0.3"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",

@@ -115,7 +115,7 @@ app.use('/api/v1/docker', require('./routes/docker'));
 app.use('/api/v1/payments', require('./routes/payments'));
 app.use('/api/v1/billing', require('./routes/billing'));
 app.use('/api/v1/admin', require('./routes/admin'));
-// app.use('/api/v1/solar', require('./routes/solar'));
+app.use('/api/v1/solar', require('./routes/solar'));
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -174,10 +174,13 @@ app.use((err, req, res, next) => {
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully');
   
-  // Stop usage collector
+  // Stop jobs
   if (process.env.NODE_ENV !== 'test') {
     const usageCollector = require('./jobs/usageCollector');
     usageCollector.stop();
+    
+    const solarDataCollector = require('./jobs/solarDataCollector');
+    solarDataCollector.stop();
   }
   
   if (redisClient) {
@@ -190,10 +193,13 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   console.log('SIGINT received, shutting down gracefully');
   
-  // Stop usage collector
+  // Stop jobs
   if (process.env.NODE_ENV !== 'test') {
     const usageCollector = require('./jobs/usageCollector');
     usageCollector.stop();
+    
+    const solarDataCollector = require('./jobs/solarDataCollector');
+    solarDataCollector.stop();
   }
   
   if (redisClient) {
@@ -218,6 +224,10 @@ if (process.env.NODE_ENV !== 'test') {
       const invoiceGenerator = require('./jobs/invoiceGenerator');
       invoiceGenerator.start();
       
+      // Start solar data collector
+      const solarDataCollector = require('./jobs/solarDataCollector');
+      solarDataCollector.start();
+      
       // Start HTTP server
       app.listen(PORT, HOST, () => {
         console.log(`🚀 Sahary Cloud API Server running on http://${HOST}:${PORT}`);
@@ -228,6 +238,7 @@ if (process.env.NODE_ENV !== 'test') {
         console.log(`🔴 Redis: ${redisClient ? 'Connected' : 'Disconnected'}`);
         console.log(`📈 Usage Collector: Started`);
         console.log(`💰 Invoice Generator: Started`);
+        console.log(`🌞 Solar Data Collector: Started`);
       });
     } catch (error) {
       console.error('❌ Failed to start server:', error);
