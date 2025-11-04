@@ -10,6 +10,15 @@ class SolarService {
   constructor() {
     this.solarApiUrl = process.env.SOLAR_API_URL || 'http://localhost:8080';
     this.solarApiKey = process.env.SOLAR_API_KEY;
+    this.solarAlertService = null; // Will be set to avoid circular dependency
+  }
+
+  /**
+   * Set alert service (to avoid circular dependency)
+   * @param {Object} alertService - Solar alert service instance
+   */
+  setAlertService(alertService) {
+    this.solarAlertService = alertService;
   }
 
   /**
@@ -275,11 +284,22 @@ class SolarService {
     try {
       const production = await this.getCurrentProduction();
       const consumption = await this.getCurrentConsumption();
+      const batteryLevel = await this.getBatteryLevel();
 
       const recordedData = await this.recordSolarData({
         production: production.production,
         consumption: consumption.consumption
       });
+
+      // Check energy levels and trigger alerts if needed
+      if (this.solarAlertService) {
+        await this.solarAlertService.monitorEnergyLevels({
+          production: production.production,
+          consumption: consumption.consumption,
+          batteryLevel,
+          capacity: 100 // Assuming 100 kWh capacity, should be configurable
+        });
+      }
 
       console.log('Solar data collected and recorded:', recordedData);
       return recordedData;

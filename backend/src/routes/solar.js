@@ -22,4 +22,12 @@ router.get('/history', solarController.getHistory);
 router.get('/battery', authorize('ADMIN', 'SUPER_ADMIN'), solarController.getBatteryLevel);
 router.post('/collect', authorize('ADMIN', 'SUPER_ADMIN'), solarController.collectData);
 
+// Alert and emergency routes (Admin only)
+router.get('/alerts', authorize('ADMIN', 'SUPER_ADMIN'), solarController.getActiveAlerts);
+router.put('/alerts/:id/resolve', authorize('ADMIN', 'SUPER_ADMIN'), solarController.resolveAlert);
+router.get('/emergency-logs', authorize('ADMIN', 'SUPER_ADMIN'), solarController.getEmergencyLogs);
+router.get('/system-state', authorize('ADMIN', 'SUPER_ADMIN'), solarController.getSystemState);
+router.post('/reset-state', authorize('ADMIN', 'SUPER_ADMIN'), solarController.resetSystemState);
+router.post('/emergency/:severity', authorize('ADMIN', 'SUPER_ADMIN'), solarController.triggerEmergencyPlan);
+
 module.exports = router;

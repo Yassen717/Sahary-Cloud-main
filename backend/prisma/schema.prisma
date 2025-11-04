@@ -349,6 +349,42 @@ model SystemSetting {
   @@map("system_settings")
 }
 
+// Solar Alert Model - تنبيهات الطاقة الشمسية
+model SolarAlert {
+  id          String        @id @default(cuid())
+  type        String        // Alert type (LOW_PRODUCTION, LOW_BATTERY, etc.)
+  severity    AlertSeverity @default(WARNING)
+  message     String
+  data        String?       // JSON string with additional data
+  resolved    Boolean       @default(false)
+  
+  createdAt   DateTime      @default(now())
+  resolvedAt  DateTime?
+
+  @@map("solar_alerts")
+}
+
+// Emergency Log Model - سجلات الطوارئ
+model EmergencyLog {
+  id          String        @id @default(cuid())
+  severity    AlertSeverity
+  action      String
+  data        String?       // JSON string with additional data
+  timestamp   DateTime      @default(now())
+
+  @@map("emergency_logs")
+}
+
+// System Status Model - حالة النظام
+model SystemStatus {
+  id          String   @id @default(cuid())
+  status      String   // NORMAL, BACKUP_POWER, BACKUP_READY, etc.
+  message     String
+  timestamp   DateTime @default(now())
+
+  @@map("system_status")
+}
+
 // Enums - التعدادات
 
 enum Role {
@@ -420,4 +456,11 @@ enum BackupType {
   FULL
   INCREMENTAL
   DIFFERENTIAL
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+  EMERGENCY
 }

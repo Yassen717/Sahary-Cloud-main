@@ -385,3 +385,360 @@ SOLAR_COLLECTION_SCHEDULE="*/15 * * * *"
 ## Support
 
 For issues or questions about the Solar Monitoring API, please contact the development team or refer to the main API documentation.
+
+
+---
+
+## Alert and Emergency Management Endpoints
+
+### 9. Get Active Alerts (Admin Only)
+
+Get all currently active solar energy alerts.
+
+**Endpoint:** `GET /api/v1/solar/alerts`
+
+**Authorization:** Requires `ADMIN` or `SUPER_ADMIN` role
+
+**Response:**
+```json
+{
+  "success": true,
+  "count": 2,
+  "data": [
+    {
+      "id": "clr1234567890",
+      "type": "LOW_PRODUCTION",
+      "severity": "WARNING",
+      "message": "إنتاج الطاقة الشمسية منخفض: 15.0%",
+      "data": "{\"production\":15,\"productionPercentage\":15}",
+      "resolved": false,
+      "createdAt": "2024-01-15T10:30:00.000Z"
+    },
+    {
+      "id": "clr0987654321",
+      "type": "LOW_BATTERY",
+      "severity": "WARNING",
+      "message": "مستوى البطارية منخفض: 25%",
+      "data": "{\"batteryLevel\":25}",
+      "resolved": false,
+      "createdAt": "2024-01-15T10:25:00.000Z"
+    }
+  ]
+}
+```
+
+**Alert Types:**
+- `LOW_PRODUCTION` - Low solar energy production
+- `CRITICAL_LOW_PRODUCTION` - Critically low solar energy production
+- `LOW_BATTERY` - Low battery level
+- `CRITICAL_LOW_BATTERY` - Critically low battery level
+- `HIGH_CONSUMPTION` - High energy consumption
+
+**Severity Levels:**
+- `INFO` - Informational
+- `WARNING` - Warning level
+- `CRITICAL` - Critical level requiring immediate attention
+- `EMERGENCY` - Emergency situation
+
+---
+
+### 10. Resolve Alert (Admin Only)
+
+Mark an alert as resolved.
+
+**Endpoint:** `PUT /api/v1/solar/alerts/:id/resolve`
+
+**Authorization:** Requires `ADMIN` or `SUPER_ADMIN` role
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Alert resolved successfully",
+  "data": {
+    "id": "clr1234567890",
+    "type": "LOW_PRODUCTION",
+    "severity": "WARNING",
+    "message": "إنتاج الطاقة الشمسية منخفض: 15.0%",
+    "resolved": true,
+    "resolvedAt": "2024-01-15T11:00:00.000Z",
+    "createdAt": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+---
+
+### 11. Get Emergency Logs (Admin Only)
+
+Get emergency action logs.
+
+**Endpoint:** `GET /api/v1/solar/emergency-logs`
+
+**Authorization:** Requires `ADMIN` or `SUPER_ADMIN` role
+
+**Query Parameters:**
+- `limit` (optional): Number of logs to return (default: 50)
+- `severity` (optional): Filter by severity - `WARNING`, `CRITICAL`, or `EMERGENCY`
+
+**Example Request:**
+```bash
+GET /api/v1/solar/emergency-logs?limit=20&severity=CRITICAL
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "count": 3,
+  "data": [
+    {
+      "id": "clr1234567890",
+      "severity": "CRITICAL",
+      "action": "Emergency plan activated: CRITICAL",
+      "data": null,
+      "timestamp": "2024-01-15T10:30:00.000Z"
+    },
+    {
+      "id": "clr0987654321",
+      "severity": "CRITICAL",
+      "action": "Identified 5 non-essential VMs for load reduction",
+      "data": "{\"vmIds\":[\"vm1\",\"vm2\",\"vm3\",\"vm4\",\"vm5\"]}",
+      "timestamp": "2024-01-15T10:31:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+### 12. Get System State (Admin Only)
+
+Get the current emergency state of the solar system.
+
+**Endpoint:** `GET /api/v1/solar/system-state`
+
+**Authorization:** Requires `ADMIN` or `SUPER_ADMIN` role
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "state": "WARNING",
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**System States:**
+- `NORMAL` - System operating normally
+- `WARNING` - System in warning state
+- `CRITICAL` - System in critical state
+- `EMERGENCY` - System in emergency state
+
+---
+
+### 13. Reset System State (Admin Only)
+
+Manually reset the system to normal state and resolve all alerts.
+
+**Endpoint:** `POST /api/v1/solar/reset-state`
+
+**Authorization:** Requires `ADMIN` or `SUPER_ADMIN` role
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "System state reset successfully",
+  "data": {
+    "success": true,
+    "message": "System reset to normal state",
+    "timestamp": "2024-01-15T11:00:00.000Z"
+  }
+}
+```
+
+---
+
+### 14. Trigger Emergency Plan (Admin Only)
+
+Manually trigger an emergency plan.
+
+**Endpoint:** `POST /api/v1/solar/emergency/:severity`
+
+**Authorization:** Requires `ADMIN` or `SUPER_ADMIN` role
+
+**URL Parameters:**
+- `severity`: Emergency severity - `WARNING` or `CRITICAL`
+
+**Example Request:**
+```bash
+POST /api/v1/solar/emergency/CRITICAL
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Emergency plan activated: CRITICAL",
+  "timestamp": "2024-01-15T10:30:00.000Z"
+}
+```
+
+**Emergency Actions:**
+
+**WARNING Level:**
+- Prepare backup power system
+- Notify all administrators
+- Log emergency event
+
+**CRITICAL Level:**
+- Switch to backup power
+- Reduce non-essential load
+- Notify all administrators with high priority
+- Log emergency event
+
+---
+
+## Alert Thresholds
+
+The system monitors energy levels and triggers alerts based on configurable thresholds:
+
+| Threshold | Default Value | Description |
+|-----------|---------------|-------------|
+| `LOW_PRODUCTION_THRESHOLD` | 20% | Warning when production falls below this percentage |
+| `CRITICAL_PRODUCTION_THRESHOLD` | 10% | Critical alert when production falls below this percentage |
+| `LOW_BATTERY_THRESHOLD` | 30% | Warning when battery level falls below this percentage |
+| `CRITICAL_BATTERY_THRESHOLD` | 15% | Critical alert when battery level falls below this percentage |
+| `HIGH_CONSUMPTION_THRESHOLD` | 90% | Warning when consumption exceeds this percentage |
+
+These thresholds can be configured via environment variables.
+
+---
+
+## Emergency Procedures
+
+### Automatic Emergency Response
+
+The system automatically responds to critical situations:
+
+1. **Low Production Detection**
+   - Monitor solar production levels
+   - Trigger warnings at threshold levels
+   - Activate emergency plan if critical
+
+2. **Battery Management**
+   - Monitor battery levels continuously
+   - Prepare backup power when battery is low
+   - Switch to backup power when battery is critical
+
+3. **Load Management**
+   - Identify non-essential VMs
+   - Prepare for load reduction
+   - Suspend non-essential services if needed
+
+4. **Notification System**
+   - Email notifications to administrators
+   - Different priority levels based on severity
+   - Real-time alerts for critical situations
+
+### Manual Override
+
+Administrators can manually:
+- Trigger emergency plans
+- Reset system state
+- Resolve alerts
+- Review emergency logs
+
+---
+
+## Example Usage - Alerts
+
+### Check for Active Alerts
+
+```bash
+curl -X GET \
+  'http://localhost:3000/api/v1/solar/alerts' \
+  -H 'Authorization: Bearer YOUR_ADMIN_JWT_TOKEN'
+```
+
+### Resolve an Alert
+
+```bash
+curl -X PUT \
+  'http://localhost:3000/api/v1/solar/alerts/clr1234567890/resolve' \
+  -H 'Authorization: Bearer YOUR_ADMIN_JWT_TOKEN'
+```
+
+### View Emergency Logs
+
+```bash
+curl -X GET \
+  'http://localhost:3000/api/v1/solar/emergency-logs?severity=CRITICAL&limit=10' \
+  -H 'Authorization: Bearer YOUR_ADMIN_JWT_TOKEN'
+```
+
+### Check System State
+
+```bash
+curl -X GET \
+  'http://localhost:3000/api/v1/solar/system-state' \
+  -H 'Authorization: Bearer YOUR_ADMIN_JWT_TOKEN'
+```
+
+### Manually Trigger Emergency Plan
+
+```bash
+curl -X POST \
+  'http://localhost:3000/api/v1/solar/emergency/WARNING' \
+  -H 'Authorization: Bearer YOUR_ADMIN_JWT_TOKEN'
+```
+
+### Reset System to Normal
+
+```bash
+curl -X POST \
+  'http://localhost:3000/api/v1/solar/reset-state' \
+  -H 'Authorization: Bearer YOUR_ADMIN_JWT_TOKEN'
+```
+
+---
+
+## Monitoring Best Practices
+
+1. **Regular Monitoring**
+   - Check system status regularly
+   - Review active alerts daily
+   - Monitor battery levels
+
+2. **Alert Response**
+   - Respond to warnings promptly
+   - Investigate critical alerts immediately
+   - Document resolution actions
+
+3. **Emergency Preparedness**
+   - Test backup power systems regularly
+   - Review emergency procedures
+   - Keep administrator contact information updated
+
+4. **Log Review**
+   - Review emergency logs weekly
+   - Analyze patterns in alerts
+   - Adjust thresholds based on historical data
+
+---
+
+## Configuration
+
+Additional environment variables for alert system:
+
+```env
+# Solar Alert Thresholds
+LOW_PRODUCTION_THRESHOLD=20
+CRITICAL_PRODUCTION_THRESHOLD=10
+LOW_BATTERY_THRESHOLD=30
+CRITICAL_BATTERY_THRESHOLD=15
+HIGH_CONSUMPTION_THRESHOLD=90
+```

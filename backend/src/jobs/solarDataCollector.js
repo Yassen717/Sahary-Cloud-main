@@ -1,5 +1,9 @@
 const cron = require('node-cron');
 const solarService = require('../services/solarService');
+const solarAlertService = require('../services/solarAlertService');
+
+// Set up the connection between services
+solarService.setAlertService(solarAlertService);
 
 /**
  * Solar Data Collector Job

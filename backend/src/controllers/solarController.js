@@ -1,4 +1,5 @@
 const solarService = require('../services/solarService');
+const solarAlertService = require('../services/solarAlertService');
 
 /**
  * Solar Energy Monitoring Controller
@@ -186,6 +187,138 @@ exports.collectData = async (req, res, next) => {
       success: true,
       message: 'Solar data collected successfully',
       data
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+/**
+ * Get active alerts
+ * @route GET /api/solar/alerts
+ * @access Private/Admin
+ */
+exports.getActiveAlerts = async (req, res, next) => {
+  try {
+    const alerts = await solarAlertService.getActiveAlerts();
+    
+    res.status(200).json({
+      success: true,
+      count: alerts.length,
+      data: alerts
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Resolve an alert
+ * @route PUT /api/solar/alerts/:id/resolve
+ * @access Private/Admin
+ */
+exports.resolveAlert = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const alert = await solarAlertService.resolveAlert(id);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Alert resolved successfully',
+      data: alert
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get emergency logs
+ * @route GET /api/solar/emergency-logs
+ * @access Private/Admin
+ */
+exports.getEmergencyLogs = async (req, res, next) => {
+  try {
+    const { limit, severity } = req.query;
+    
+    const logs = await solarAlertService.getEmergencyLogs({
+      limit: limit ? parseInt(limit) : 50,
+      severity
+    });
+    
+    res.status(200).json({
+      success: true,
+      count: logs.length,
+      data: logs
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get current system state
+ * @route GET /api/solar/system-state
+ * @access Private/Admin
+ */
+exports.getSystemState = async (req, res, next) => {
+  try {
+    const state = solarAlertService.getCurrentState();
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        state,
+        timestamp: new Date()
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Reset system to normal state
+ * @route POST /api/solar/reset-state
+ * @access Private/Admin
+ */
+exports.resetSystemState = async (req, res, next) => {
+  try {
+    const result = await solarAlertService.resetToNormalState();
+    
+    res.status(200).json({
+      success: true,
+      message: 'System state reset successfully',
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Manually trigger emergency plan
+ * @route POST /api/solar/emergency/:severity
+ * @access Private/Admin
+ */
+exports.triggerEmergencyPlan = async (req, res, next) => {
+  try {
+    const { severity } = req.params;
+    
+    if (!['WARNING', 'CRITICAL'].includes(severity)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid severity. Must be WARNING or CRITICAL'
+      });
+    }
+    
+    await solarAlertService.activateEmergencyPlan(severity);
+    
+    res.status(200).json({
+      success: true,
+      message: `Emergency plan activated: ${severity}`,
+      timestamp: new Date()
     });
   } catch (error) {
     next(error);
