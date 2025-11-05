@@ -105,6 +105,7 @@ app.use('/api/v1/payments', require('./routes/payments'));
 app.use('/api/v1/billing', require('./routes/billing'));
 app.use('/api/v1/admin', require('./routes/admin'));
 app.use('/api/v1/solar', require('./routes/solar'));
+app.use('/api/v1/cache', require('./routes/cache'));
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -170,6 +171,9 @@ process.on('SIGTERM', async () => {
     
     const solarDataCollector = require('./jobs/solarDataCollector');
     solarDataCollector.stop();
+    
+    const cacheCleanup = require('./jobs/cacheCleanup');
+    cacheCleanup.stop();
   }
   
   // Disconnect Redis
@@ -188,6 +192,9 @@ process.on('SIGINT', async () => {
     
     const solarDataCollector = require('./jobs/solarDataCollector');
     solarDataCollector.stop();
+    
+    const cacheCleanup = require('./jobs/cacheCleanup');
+    cacheCleanup.stop();
   }
   
   // Disconnect Redis
@@ -222,6 +229,10 @@ if (process.env.NODE_ENV !== 'test') {
       const solarDataCollector = require('./jobs/solarDataCollector');
       solarDataCollector.start();
       
+      // Start cache cleanup job
+      const cacheCleanup = require('./jobs/cacheCleanup');
+      cacheCleanup.start();
+      
       // Start HTTP server
       app.listen(PORT, HOST, () => {
         console.log(`🚀 Sahary Cloud API Server running on http://${HOST}:${PORT}`);
@@ -233,6 +244,7 @@ if (process.env.NODE_ENV !== 'test') {
         console.log(`📈 Usage Collector: Started`);
         console.log(`💰 Invoice Generator: Started`);
         console.log(`🌞 Solar Data Collector: Started`);
+        console.log(`🧹 Cache Cleanup: Started`);
       });
     } catch (error) {
       console.error('❌ Failed to start server:', error);

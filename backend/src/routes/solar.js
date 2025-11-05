@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const solarController = require('../controllers/solarController');
 const { protect, authorize } = require('../middlewares/auth');
+const { cacheConfigs } = require('../middlewares/cache');
 
 /**
  * Solar Energy Monitoring Routes
@@ -11,12 +12,12 @@ const { protect, authorize } = require('../middlewares/auth');
 // Public routes (authenticated users)
 router.use(protect);
 
-router.get('/status', solarController.getStatus);
-router.get('/production', solarController.getProduction);
-router.get('/consumption', solarController.getConsumption);
-router.get('/environmental-impact', solarController.getEnvironmentalImpact);
-router.get('/statistics', solarController.getStatistics);
-router.get('/history', solarController.getHistory);
+router.get('/status', cacheConfigs.short, solarController.getStatus);
+router.get('/production', cacheConfigs.short, solarController.getProduction);
+router.get('/consumption', cacheConfigs.short, solarController.getConsumption);
+router.get('/environmental-impact', cacheConfigs.medium, solarController.getEnvironmentalImpact);
+router.get('/statistics', cacheConfigs.medium, solarController.getStatistics);
+router.get('/history', cacheConfigs.long, solarController.getHistory);
 
 // Admin only routes
 router.get('/battery', authorize('ADMIN', 'SUPER_ADMIN'), solarController.getBatteryLevel);
