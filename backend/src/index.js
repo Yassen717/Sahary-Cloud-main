@@ -5,27 +5,16 @@ const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const session = require('express-session');
 const RedisStore = require('connect-redis').default;
-const { createClient } = require('redis');
 const { connectDatabase, checkDatabaseHealth } = require('./config/database');
+const redisService = require('./services/redisService');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || 'localhost';
 
-// Redis client for sessions
+// Redis client for sessions (will be initialized in startServer)
 let redisClient;
-if (process.env.NODE_ENV !== 'test') {
-  redisClient = createClient({
-    url: process.env.REDIS_URL
-  });
-  
-  redisClient.on('error', (err) => {
-    console.error('Redis Client Error:', err);
-  });
-  
-  redisClient.connect().catch(console.error);
-}
 
 // Security middleware
 app.use(helmet({
@@ -68,10 +57,10 @@ app.use('/api/', limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Session configuration
-if (redisClient) {
+// Session configuration (will be set up after Redis connection)
+const setupSession = (client) => {
   app.use(session({
-    store: new RedisStore({ client: redisClient }),
+    store: new RedisStore({ client }),
     secret: process.env.SESSION_SECRET || 'sahary-cloud-session-secret',
     resave: false,
     saveUninitialized: false,
@@ -81,7 +70,7 @@ if (redisClient) {
       maxAge: parseInt(process.env.SESSION_MAX_AGE) || 24 * 60 * 60 * 1000 // 24 hours
     }
   }));
-}
+};
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
@@ -183,9 +172,8 @@ process.on('SIGTERM', async () => {
     solarDataCollector.stop();
   }
   
-  if (redisClient) {
-    await redisClient.quit();
-  }
+  // Disconnect Redis
+  await redisService.disconnect();
   
   process.exit(0);
 });
@@ -202,9 +190,8 @@ process.on('SIGINT', async () => {
     solarDataCollector.stop();
   }
   
-  if (redisClient) {
-    await redisClient.quit();
-  }
+  // Disconnect Redis
+  await redisService.disconnect();
   
   process.exit(0);
 });
@@ -215,6 +202,13 @@ if (process.env.NODE_ENV !== 'test') {
     try {
       // Connect to database
       await connectDatabase();
+      
+      // Connect to Redis
+      await redisService.connect();
+      redisClient = redisService.getClient();
+      
+      // Setup session middleware after Redis connection
+      setupSession(redisClient);
       
       // Start usage collector
       const usageCollector = require('./jobs/usageCollector');
@@ -235,7 +229,7 @@ if (process.env.NODE_ENV !== 'test') {
         console.log(`🔗 API Base URL: http://${HOST}:${PORT}/api`);
         console.log(`❤️  Health Check: http://${HOST}:${PORT}/health`);
         console.log(`🗄️  Database: Connected`);
-        console.log(`🔴 Redis: ${redisClient ? 'Connected' : 'Disconnected'}`);
+        console.log(`🔴 Redis: ${redisService.isReady() ? 'Connected' : 'Disconnected'}`);
         console.log(`📈 Usage Collector: Started`);
         console.log(`💰 Invoice Generator: Started`);
         console.log(`🌞 Solar Data Collector: Started`);
