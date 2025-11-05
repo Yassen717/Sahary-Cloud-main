@@ -60,15 +60,18 @@ export default function Header() {
                 </Link>
               </li>
               <li>
-                <Link href="#contact" className="hover:text-primary transition-colors">
-                  Contact
+                <Link href="/dashboard" className="hover:text-primary transition-colors">
+                  Dashboard
                 </Link>
               </li>
             </ul>
           </nav>
           <ThemeToggle />
+          <Button asChild variant="outline" className="mr-2">
+            <Link href="/login">Login</Link>
+          </Button>
           <Button asChild className="bg-primary hover:bg-primary/90">
-            <Link href="#signup">Get Started</Link>
+            <Link href="/register">Sign Up</Link>
           </Button>
         </div>
         
@@ -114,12 +117,22 @@ export default function Header() {
               </li>
               <li>
                 <Link 
-                  href="#contact" 
+                  href="/dashboard" 
                   className="block py-2 hover:text-primary transition-colors"
                   onClick={() => setIsOpen(false)}
                 >
-                  Contact
+                  Dashboard
                 </Link>
+              </li>
+              <li>
+                <Button 
+                  asChild 
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Link href="/login">Login</Link>
+                </Button>
               </li>
               <li>
                 <Button 
@@ -127,7 +140,7 @@ export default function Header() {
                   className="w-full bg-primary hover:bg-primary/90"
                   onClick={() => setIsOpen(false)}
                 >
-                  <Link href="#signup">Get Started</Link>
+                  <Link href="/register">Sign Up</Link>
                 </Button>
               </li>
             </ul>
