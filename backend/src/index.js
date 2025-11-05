@@ -7,7 +7,14 @@ const session = require('express-session');
 const RedisStore = require('connect-redis').default;
 const { connectDatabase, checkDatabaseHealth } = require('./config/database');
 const redisService = require('./services/redisService');
+const logger = require('./utils/logger');
+const { errorHandler, notFoundHandler, handleUnhandledRejection, handleUncaughtException } = require('./middlewares/errorHandler');
+const { requestLogger } = require('./middlewares/requestLogger');
 require('dotenv').config();
+
+// Handle unhandled rejections and uncaught exceptions
+handleUnhandledRejection();
+handleUncaughtException();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -56,6 +63,11 @@ app.use('/api/', limiter);
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Request logging middleware
+if (process.env.NODE_ENV !== 'test') {
+  app.use(requestLogger);
+}
 
 // Session configuration (will be set up after Redis connection)
 const setupSession = (client) => {
@@ -108,57 +120,10 @@ app.use('/api/v1/solar', require('./routes/solar'));
 app.use('/api/v1/cache', require('./routes/cache'));
 
 // 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    error: 'Route not found',
-    message: `The requested route ${req.originalUrl} does not exist`,
-    availableRoutes: [
-      'GET /health',
-      'GET /api',
-      'GET /api/v1/*'
-    ]
-  });
-});
+app.use('*', notFoundHandler);
 
 // Global error handler
-app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  
-  // Default error
-  let error = {
-    message: err.message || 'Internal Server Error',
-    status: err.status || 500
-  };
-
-  // Mongoose validation error
-  if (err.name === 'ValidationError') {
-    error.message = Object.values(err.errors).map(e => e.message).join(', ');
-    error.status = 400;
-  }
-
-  // JWT errors
-  if (err.name === 'JsonWebTokenError') {
-    error.message = 'Invalid token';
-    error.status = 401;
-  }
-
-  if (err.name === 'TokenExpiredError') {
-    error.message = 'Token expired';
-    error.status = 401;
-  }
-
-  // Duplicate key error
-  if (err.code === 11000) {
-    error.message = 'Duplicate field value entered';
-    error.status = 400;
-  }
-
-  res.status(error.status).json({
-    success: false,
-    error: error.message,
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-  });
-});
+app.use(errorHandler);
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
