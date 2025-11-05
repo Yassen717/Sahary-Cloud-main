@@ -146,6 +146,7 @@ app.use('/api/v1/admin', require('./routes/admin'));
 app.use('/api/v1/solar', require('./routes/solar'));
 app.use('/api/v1/cache', require('./routes/cache'));
 app.use('/api/v1/monitoring', require('./routes/monitoring'));
+app.use('/api/v1/security', require('./routes/security'));
 
 // 404 handler
 app.use('*', notFoundHandler);
