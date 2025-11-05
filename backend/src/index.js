@@ -67,6 +67,10 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Request logging middleware
 if (process.env.NODE_ENV !== 'test') {
   app.use(requestLogger);
+  
+  // Performance monitoring
+  const performanceMonitor = require('./middlewares/performanceMonitor');
+  app.use(performanceMonitor);
 }
 
 // Session configuration (will be set up after Redis connection)
@@ -118,6 +122,7 @@ app.use('/api/v1/billing', require('./routes/billing'));
 app.use('/api/v1/admin', require('./routes/admin'));
 app.use('/api/v1/solar', require('./routes/solar'));
 app.use('/api/v1/cache', require('./routes/cache'));
+app.use('/api/v1/monitoring', require('./routes/monitoring'));
 
 // 404 handler
 app.use('*', notFoundHandler);
