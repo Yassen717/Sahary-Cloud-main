@@ -60,7 +60,9 @@
     "moment": "^2.29.4",
     "lodash": "^4.17.21",
     "axios": "^1.6.2",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "validator": "^13.11.0",
+    "rate-limit-redis": "^4.2.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",

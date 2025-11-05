@@ -33,7 +33,30 @@ app.use(helmet({
       imgSrc: ["'self'", "data:", "https:"],
     },
   },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  },
+  frameguard: {
+    action: 'deny',
+  },
+  noSniff: true,
+  xssFilter: true,
 }));
+
+// Input sanitization
+const { sanitizeAll, checkXSS, preventNoSQLInjection } = require('./middlewares/sanitization');
+app.use(sanitizeAll);
+app.use(checkXSS);
+app.use(preventNoSQLInjection);
+
+// DDoS protection
+if (process.env.NODE_ENV === 'production') {
+  const { ddosProtectionMiddleware, connectionLimitMiddleware } = require('./middlewares/ddosProtection');
+  app.use(ddosProtectionMiddleware);
+  app.use(connectionLimitMiddleware);
+}
 
 // CORS configuration
 app.use(cors({
