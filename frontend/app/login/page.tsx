@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,15 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get('redirect');
+  const expired = searchParams.get('expired');
+
+  useEffect(() => {
+    if (expired === 'true') {
+      setError('انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى.');
+    }
+  }, [expired]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +34,13 @@ export default function LoginPage() {
     try {
       const response = await apiClient.login(email, password);
       console.log('Login successful:', response);
-      router.push('/dashboard');
+      
+      // Redirect to the original page or dashboard
+      if (redirectTo) {
+        router.push(redirectTo);
+      } else {
+        router.push('/dashboard');
+      }
     } catch (err: any) {
       setError(err.message || 'فشل تسجيل الدخول');
     } finally {
