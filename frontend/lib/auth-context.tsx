@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { useRouter } from 'next/navigation';
 import { apiClient } from './api';
 import { getUserFromToken, isTokenExpired } from './jwt';
+import { getStorageItem } from './storage';
 
 interface User {
   id: string;
@@ -30,7 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Check if user is already logged in and validate token
-    const token = localStorage.getItem('token');
+    const token = getStorageItem('token');
     if (token) {
       validateToken(token);
     } else {
@@ -39,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Set up interval to check token expiration every minute
     const interval = setInterval(() => {
-      const currentToken = localStorage.getItem('token');
+      const currentToken = getStorageItem('token');
       if (currentToken && isTokenExpired(currentToken)) {
         handleAutoLogout();
       }

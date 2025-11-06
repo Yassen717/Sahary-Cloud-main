@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3001",
     "lint": "next lint"
   },
   "dependencies": {
@@ -49,11 +49,11 @@
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.3.0",
     "eslint": "8.49.0",
-    "eslint-config-next": "13.5.1",
+    "eslint-config-next": "14.2.18",
     "framer-motion": "^10.16.4",
     "input-otp": "^1.2.4",
     "lucide-react": "^0.446.0",
-    "next": "^15.3.2",
+    "next": "14.2.18",
     "next-themes": "^0.3.0",
     "postcss": "^8.5.3",
     "react": "18.2.0",

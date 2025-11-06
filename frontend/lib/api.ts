@@ -1,35 +1,45 @@
+import { getStorageItem, setStorageItem, removeStorageItem } from './storage';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
 
 export class ApiClient {
   private baseURL: string;
   private token: string | null = null;
+  private tokenInitialized: boolean = false;
 
   constructor() {
     this.baseURL = API_URL;
-    if (typeof window !== 'undefined') {
-      this.token = localStorage.getItem('token');
+  }
+
+  private initToken() {
+    if (!this.tokenInitialized) {
+      this.token = getStorageItem('token');
+      this.tokenInitialized = true;
     }
   }
 
   setToken(token: string) {
     this.token = token;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('token', token);
-      // Also set as cookie for middleware access
+    setStorageItem('token', token);
+    // Also set as cookie for middleware access
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       document.cookie = `token=${token}; path=/; max-age=${60 * 60 * 24 * 7}`; // 7 days
     }
   }
 
   clearToken() {
     this.token = null;
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('token');
-      // Clear cookie
+    removeStorageItem('token');
+    // Clear cookie
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       document.cookie = 'token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     }
   }
 
   private async request(endpoint: string, options: RequestInit = {}) {
+    // Initialize token on first request
+    this.initToken();
+
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...options.headers,
@@ -178,4 +188,9 @@ export class ApiClient {
   }
 }
 
-export const apiClient = new ApiClient();
+// Create singleton instance only on client side
+let apiClientInstance: ApiClient | null = null;
+
+export const apiClient = typeof window !== 'undefined' 
+  ? (apiClientInstance || (apiClientInstance = new ApiClient()))
+  : new ApiClient(); // Fallback for SSR (won't have token)
