@@ -15,6 +15,8 @@ export class ApiClient {
     this.token = token;
     if (typeof window !== 'undefined') {
       localStorage.setItem('token', token);
+      // Also set as cookie for middleware access
+      document.cookie = `token=${token}; path=/; max-age=${60 * 60 * 24 * 7}`; // 7 days
     }
   }
 
@@ -22,6 +24,8 @@ export class ApiClient {
     this.token = null;
     if (typeof window !== 'undefined') {
       localStorage.removeItem('token');
+      // Clear cookie
+      document.cookie = 'token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     }
   }
 
@@ -70,6 +74,24 @@ export class ApiClient {
   async logout() {
     await this.request('/auth/logout', { method: 'POST' });
     this.clearToken();
+  }
+
+  async getMe() {
+    return this.request('/auth/me');
+  }
+
+  async updateProfile(userData: any) {
+    return this.request('/auth/profile', {
+      method: 'PUT',
+      body: JSON.stringify(userData),
+    });
+  }
+
+  async changePassword(oldPassword: string, newPassword: string) {
+    return this.request('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ oldPassword, newPassword }),
+    });
   }
 
   // VM methods
