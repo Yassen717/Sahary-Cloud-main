@@ -6,10 +6,13 @@ import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
 import { Button } from "./ui/button";
 import { Menu, X, Cloud } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
+import { UserProfileDropdown } from "./UserProfileDropdown";
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const { isAuthenticated, user, logout } = useAuth();
   
   useEffect(() => {
     const handleScroll = () => {
@@ -22,6 +25,11 @@ export default function Header() {
 
   const toggleMenu = () => {
     setIsOpen(!isOpen);
+  };
+
+  const handleLogout = async () => {
+    setIsOpen(false);
+    await logout();
   };
 
   return (
@@ -59,20 +67,28 @@ export default function Header() {
                   Plans
                 </Link>
               </li>
-              <li>
-                <Link href="/dashboard" className="hover:text-primary transition-colors">
-                  Dashboard
-                </Link>
-              </li>
+              {isAuthenticated && (
+                <li>
+                  <Link href="/dashboard" className="hover:text-primary transition-colors">
+                    Dashboard
+                  </Link>
+                </li>
+              )}
             </ul>
           </nav>
           <ThemeToggle />
-          <Button asChild variant="outline" className="mr-2">
-            <Link href="/login">Login</Link>
-          </Button>
-          <Button asChild className="bg-primary hover:bg-primary/90">
-            <Link href="/register">Sign Up</Link>
-          </Button>
+          {isAuthenticated ? (
+            <UserProfileDropdown />
+          ) : (
+            <>
+              <Button asChild variant="outline" className="mr-2">
+                <Link href="/login">Login</Link>
+              </Button>
+              <Button asChild className="bg-primary hover:bg-primary/90">
+                <Link href="/register">Sign Up</Link>
+              </Button>
+            </>
+          )}
         </div>
         
         <div className="md:hidden flex items-center gap-4">
@@ -88,6 +104,19 @@ export default function Header() {
         <div className="md:hidden absolute top-full left-0 w-full bg-white dark:bg-gray-900 shadow-lg py-4">
           <nav className="container mx-auto px-4">
             <ul className="flex flex-col gap-4">
+              {isAuthenticated && user && (
+                <li className="pb-2 border-b">
+                  <div className="flex items-center gap-3 py-2">
+                    <div className="h-10 w-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold">
+                      {user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                    </div>
+                    <div>
+                      <p className="font-medium">{user.name}</p>
+                      <p className="text-xs text-muted-foreground">{user.email}</p>
+                    </div>
+                  </div>
+                </li>
+              )}
               <li>
                 <Link 
                   href="#features" 
@@ -115,34 +144,70 @@ export default function Header() {
                   Plans
                 </Link>
               </li>
-              <li>
-                <Link 
-                  href="/dashboard" 
-                  className="block py-2 hover:text-primary transition-colors"
-                  onClick={() => setIsOpen(false)}
-                >
-                  Dashboard
-                </Link>
-              </li>
-              <li>
-                <Button 
-                  asChild 
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Link href="/login">Login</Link>
-                </Button>
-              </li>
-              <li>
-                <Button 
-                  asChild 
-                  className="w-full bg-primary hover:bg-primary/90"
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Link href="/register">Sign Up</Link>
-                </Button>
-              </li>
+              {isAuthenticated && (
+                <>
+                  <li>
+                    <Link 
+                      href="/dashboard" 
+                      className="block py-2 hover:text-primary transition-colors"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      Dashboard
+                    </Link>
+                  </li>
+                  <li>
+                    <Link 
+                      href="/profile" 
+                      className="block py-2 hover:text-primary transition-colors"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      Profile
+                    </Link>
+                  </li>
+                  <li>
+                    <Link 
+                      href="/settings" 
+                      className="block py-2 hover:text-primary transition-colors"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      Settings
+                    </Link>
+                  </li>
+                </>
+              )}
+              {!isAuthenticated ? (
+                <>
+                  <li>
+                    <Button 
+                      asChild 
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      <Link href="/login">Login</Link>
+                    </Button>
+                  </li>
+                  <li>
+                    <Button 
+                      asChild 
+                      className="w-full bg-primary hover:bg-primary/90"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      <Link href="/register">Sign Up</Link>
+                    </Button>
+                  </li>
+                </>
+              ) : (
+                <li>
+                  <Button 
+                    variant="outline"
+                    className="w-full text-red-600 hover:text-red-600"
+                    onClick={handleLogout}
+                  >
+                    Logout
+                  </Button>
+                </li>
+              )}
             </ul>
           </nav>
         </div>
