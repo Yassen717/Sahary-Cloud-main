@@ -52,14 +52,14 @@
   - ترتيب حسب التاريخ/الاسم/الحالة
   - **Commit:** `feat(vm): add enhanced VM list page with filtering and sorting`
   
-- [ ] 3.2 صفحة تفاصيل VM
+- [x] 3.2 صفحة تفاصيل VM
   - عرض جميع معلومات VM
   - إحصائيات الاستخدام (CPU, RAM, Disk)
   - Logs و Console
   - معلومات الشبكة (IP, Ports)
   - **Commit:** `feat(vm): add VM details page with usage stats and network info`
   
-- [ ] 3.3 صفحة إنشاء VM جديد
+- [x] 3.3 صفحة إنشاء VM جديد
   - نموذج إنشاء VM
   - اختيار المواصفات (CPU, RAM, Storage)
   - اختيار نظام التشغيل
@@ -67,7 +67,7 @@
   - معاينة التكلفة
   - **Commit:** `feat(vm): add VM creation page with specs selection and cost preview`
   
-- [ ] 3.4 إدارة VM
+- [x] 3.4 إدارة VM
   - أزرار Start/Stop/Restart
   - حذف VM مع تأكيد
   - تعديل مواصفات VM
@@ -83,21 +83,21 @@
 ---
 
 ### Phase 4: مراقبة الطاقة الشمسية
-- [ ] 4.1 صفحة Solar Dashboard
+- [x] 4.1 صفحة Solar Dashboard
   - عرض الإنتاج الحالي
   - رسم بياني للإنتاج اليومي
   - رسم بياني للإنتاج الشهري
   - مقارنة مع الأشهر السابقة
   - **Commit:** `feat(solar): add solar dashboard with production charts and analytics`
   
-- [ ] 4.2 Solar Metrics
+- [x] 4.2 Solar Metrics
   - كفاءة النظام
   - مستوى البطارية
   - الاستهلاك الحالي
   - الطاقة المتاحة
   - **Commit:** `feat(solar): add solar metrics display with efficiency and battery level`
   
-- [ ] 4.3 Environmental Impact
+- [x] 4.3 Environmental Impact
   - CO2 المُوفر
   - الأشجار المعادلة
   - الطاقة النظيفة المستخدمة
