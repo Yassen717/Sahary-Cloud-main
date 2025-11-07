@@ -33,12 +33,12 @@ export default function RegisterPage() {
     setError('');
 
     if (formData.password !== formData.confirmPassword) {
-      setError('كلمات المرور غير متطابقة');
+      setError('Passwords do not match');
       return;
     }
 
     if (formData.password.length < 6) {
-      setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+      setError('Password must be at least 6 characters');
       return;
     }
 
@@ -53,7 +53,7 @@ export default function RegisterPage() {
       console.log('Registration successful:', response);
       router.push('/dashboard');
     } catch (err: any) {
-      setError(err.message || 'فشل إنشاء الحساب');
+      setError(err.message || 'Registration failed');
     } finally {
       setLoading(false);
     }
@@ -64,21 +64,21 @@ export default function RegisterPage() {
       <Card className="w-full max-w-md mx-4">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold text-center">
-            إنشاء حساب جديد
+            Create Account
           </CardTitle>
           <CardDescription className="text-center">
-            أدخل بياناتك لإنشاء حساب في Sahary Cloud
+            Enter your details to create your Sahary Cloud account
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleRegister} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name">الاسم الكامل</Label>
+              <Label htmlFor="name">Full Name</Label>
               <Input
                 id="name"
                 name="name"
                 type="text"
-                placeholder="أحمد محمد"
+                placeholder="John Doe"
                 value={formData.name}
                 onChange={handleChange}
                 required
@@ -87,7 +87,7 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="email">البريد الإلكتروني</Label>
+              <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 name="email"
@@ -101,7 +101,7 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">كلمة المرور</Label>
+              <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
                 name="password"
@@ -115,7 +115,7 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="confirmPassword">تأكيد كلمة المرور</Label>
+              <Label htmlFor="confirmPassword">Confirm Password</Label>
               <Input
                 id="confirmPassword"
                 name="confirmPassword"
@@ -142,23 +142,23 @@ export default function RegisterPage() {
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  جاري إنشاء الحساب...
+                  Creating account...
                 </>
               ) : (
-                'إنشاء حساب'
+                'Create Account'
               )}
             </Button>
 
             <div className="text-center text-sm">
-              <span className="text-muted-foreground">لديك حساب بالفعل؟ </span>
+              <span className="text-muted-foreground">Already have an account? </span>
               <Link href="/login" className="text-primary hover:underline">
-                تسجيل الدخول
+                Login
               </Link>
             </div>
 
             <div className="text-center text-sm">
               <Link href="/" className="text-muted-foreground hover:underline">
-                العودة للصفحة الرئيسية
+                Back to home
               </Link>
             </div>
           </form>

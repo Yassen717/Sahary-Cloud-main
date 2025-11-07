@@ -22,7 +22,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (expired === 'true') {
-      setError('انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى.');
+      setError('Your session has expired. Please login again.');
     }
   }, [expired]);
 
@@ -42,7 +42,7 @@ export default function LoginPage() {
         router.push('/dashboard');
       }
     } catch (err: any) {
-      setError(err.message || 'فشل تسجيل الدخول');
+      setError(err.message || 'Login failed');
     } finally {
       setLoading(false);
     }
@@ -53,16 +53,16 @@ export default function LoginPage() {
       <Card className="w-full max-w-md mx-4">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold text-center">
-            تسجيل الدخول
+            Login
           </CardTitle>
           <CardDescription className="text-center">
-            أدخل بريدك الإلكتروني وكلمة المرور للدخول
+            Enter your email and password to login
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">البريد الإلكتروني</Label>
+              <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 type="email"
@@ -75,7 +75,7 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">كلمة المرور</Label>
+              <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
                 type="password"
@@ -101,23 +101,23 @@ export default function LoginPage() {
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  جاري تسجيل الدخول...
+                  Logging in...
                 </>
               ) : (
-                'تسجيل الدخول'
+                'Login'
               )}
             </Button>
 
             <div className="text-center text-sm">
-              <span className="text-muted-foreground">ليس لديك حساب؟ </span>
+              <span className="text-muted-foreground">Don't have an account? </span>
               <Link href="/register" className="text-primary hover:underline">
-                إنشاء حساب جديد
+                Sign up
               </Link>
             </div>
 
             <div className="text-center text-sm">
               <Link href="/" className="text-muted-foreground hover:underline">
-                العودة للصفحة الرئيسية
+                Back to home
               </Link>
             </div>
           </form>
