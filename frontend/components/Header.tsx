@@ -12,7 +12,12 @@ import { UserProfileDropdown } from "./UserProfileDropdown";
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const { isAuthenticated, user, logout } = useAuth();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   
   useEffect(() => {
     const handleScroll = () => {
@@ -77,7 +82,17 @@ export default function Header() {
             </ul>
           </nav>
           <ThemeToggle />
-          {isAuthenticated ? (
+          {!mounted ? (
+            // Show loading state during SSR
+            <>
+              <Button asChild variant="outline" className="mr-2">
+                <Link href="/login">Login</Link>
+              </Button>
+              <Button asChild className="bg-primary hover:bg-primary/90">
+                <Link href="/register">Sign Up</Link>
+              </Button>
+            </>
+          ) : isAuthenticated ? (
             <UserProfileDropdown />
           ) : (
             <>
