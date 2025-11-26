@@ -114,21 +114,21 @@
 ---
 
 ### Phase 5: الفواتير والمدفوعات
-- [ ] 5.1 صفحة Billing Dashboard
+- [x] 5.1 صفحة Billing Dashboard
   - عرض الفواتير الحالية
   - تاريخ الفواتير
   - الفواتير المدفوعة/المعلقة
   - إجمالي التكاليف
   - **Commit:** `feat(billing): add billing dashboard with invoice history and totals`
   
-- [ ] 5.2 صفحة تفاصيل الفاتورة
+- [x] 5.2 صفحة تفاصيل الفاتورة
   - تفاصيل كل فاتورة
   - تفصيل التكاليف (VMs, Storage, Bandwidth)
   - تحميل PDF
   - طباعة الفاتورة
   - **Commit:** `feat(billing): add invoice details page with PDF download and print`
   
-- [ ] 5.3 Usage Tracking
+- [x] 5.3 Usage Tracking
   - رسم بياني للاستخدام
   - تكلفة كل VM
   - توقع التكلفة الشهرية
@@ -390,6 +390,6 @@
 
 ---
 
-**آخر تحديث:** 2025-11-07  
-**الحالة:** Phase 1 & 2 مكتمل ✅  
-**التقدم:** 12/100 مهمة (12%)
+**آخر تحديث:** 2025-11-26  
+**الحالة:** Phase 1, 2, 3, 4 & 5 (partial) مكتمل ✅  
+**التقدم:** 22/100 مهمة (22%)
