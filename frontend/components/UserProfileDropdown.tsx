@@ -18,30 +18,36 @@ export function UserProfileDropdown() {
 
   if (!user) return null;
 
-  // Get initials from name
+  // Get initials from name with null check
   const getInitials = (name: string) => {
+    if (!name) return '??';
     return name
       .split(' ')
+      .filter(n => n) // Remove empty strings
       .map((n) => n[0])
       .join('')
       .toUpperCase()
       .slice(0, 2);
   };
 
+  // Get safe user name with fallback
+  const userName = user.name || user.email || 'User';
+  const userInitials = getInitials(userName);
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="focus:outline-none">
         <Avatar className="h-9 w-9 cursor-pointer ring-2 ring-transparent hover:ring-primary/50 transition-all">
-          <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.name}`} />
+          <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${userName}`} />
           <AvatarFallback className="bg-primary text-primary-foreground">
-            {getInitials(user.name)}
+            {userInitials}
           </AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>
           <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none">{user.name}</p>
+            <p className="text-sm font-medium leading-none">{userName}</p>
             <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
           </div>
         </DropdownMenuLabel>
