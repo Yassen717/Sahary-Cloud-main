@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Server, Zap, DollarSign, Activity } from 'lucide-react';
+import { Loader2, Server, Zap, DollarSign, Activity, Play, Square } from 'lucide-react';
+import { StatsCard } from '@/components/dashboard/StatsCard';
+import { SolarChart } from '@/components/dashboard/SolarChart';
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
@@ -20,7 +22,7 @@ export default function DashboardPage() {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      
+
       // Load VMs
       const vmsData = await apiClient.getVMs();
       setVms(vmsData.vms || []);
@@ -44,7 +46,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -52,121 +54,150 @@ export default function DashboardPage() {
   if (error) {
     return (
       <div className="container mx-auto p-6">
-        <Card className="border-red-500">
+        <Card className="border-destructive animate-fade-in">
           <CardHeader>
-            <CardTitle className="text-red-600">خطأ في الاتصال</CardTitle>
+            <CardTitle className="text-destructive">Connection Error</CardTitle>
             <CardDescription>{error}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={loadDashboardData}>إعادة المحاولة</Button>
+            <Button onClick={loadDashboardData} className="transition-all-smooth hover:scale-105">
+              Retry
+            </Button>
           </CardContent>
         </Card>
       </div>
     );
   }
 
+  const runningVMs = vms.filter(vm => vm.status === 'running').length;
+
   return (
-    <div className="container mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-6">Dashboard</h1>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total VMs</CardTitle>
-            <Server className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{vms.length}</div>
-            <p className="text-xs text-muted-foreground">
-              {vms.filter(vm => vm.status === 'running').length} running
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Solar Production</CardTitle>
-            <Zap className="h-4 w-4 text-yellow-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {solarStatus?.currentProduction || 0} kW
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {solarStatus?.efficiency || 0}% efficiency
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Monthly Usage</CardTitle>
-            <DollarSign className="h-4 w-4 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              ${usage?.totalCost?.toFixed(2) || '0.00'}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {usage?.totalHours || 0} hours
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">System Status</CardTitle>
-            <Activity className="h-4 w-4 text-blue-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {solarStatus?.batteryLevel || 0}%
-            </div>
-            <p className="text-xs text-muted-foreground">Battery Level</p>
-          </CardContent>
-        </Card>
+    <div className="container mx-auto p-6 space-y-6">
+      <div className="animate-fade-in">
+        <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
+        <p className="text-muted-foreground">Welcome back! Here's your overview</p>
       </div>
 
-      {/* VMs List */}
-      <Card>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatsCard
+          title="Total VMs"
+          value={vms.length}
+          description={`${runningVMs} running`}
+          icon={Server}
+          iconColor="text-primary"
+          delay={0}
+          trend={runningVMs > 0 ? { value: 12, isPositive: true } : undefined}
+        />
+
+        <StatsCard
+          title="Solar Production"
+          value={`${solarStatus?.currentProduction || 0} kW`}
+          description={`${solarStatus?.efficiency || 0}% efficiency`}
+          icon={Zap}
+          iconColor="text-yellow-500"
+          delay={100}
+          trend={{ value: 8, isPositive: true }}
+        />
+
+        <StatsCard
+          title="Monthly Usage"
+          value={`$${usage?.totalCost?.toFixed(2) || '0.00'}`}
+          description={`${usage?.totalHours || 0} hours`}
+          icon={DollarSign}
+          iconColor="text-green-500"
+          delay={200}
+          trend={{ value: 3, isPositive: false }}
+        />
+
+        <StatsCard
+          title="System Status"
+          value={`${solarStatus?.batteryLevel || 0}%`}
+          description="Battery Level"
+          icon={Activity}
+          iconColor="text-blue-500"
+          delay={300}
+        />
+      </div>
+
+      {/* Solar Chart */}
+      <SolarChart />
+
+      {/* VMs Grid */}
+      <Card className="animate-fade-in opacity-0 stagger-3">
         <CardHeader>
           <CardTitle>Your Virtual Machines</CardTitle>
           <CardDescription>Manage your VPS instances</CardDescription>
         </CardHeader>
         <CardContent>
           {vms.length === 0 ? (
-            <p className="text-center text-muted-foreground py-8">
-              No VMs found. Create your first VM to get started.
-            </p>
+            <div className="text-center py-12">
+              <Server className="h-16 w-16 mx-auto text-muted-foreground/50 mb-4" />
+              <p className="text-muted-foreground mb-4">
+                No VMs found. Create your first VM to get started.
+              </p>
+              <Button className="transition-all-smooth hover:scale-105">
+                Create VM
+              </Button>
+            </div>
           ) : (
-            <div className="space-y-4">
-              {vms.map((vm) => (
-                <div
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {vms.map((vm, index) => (
+                <Card
                   key={vm.id}
-                  className="flex items-center justify-between p-4 border rounded-lg"
+                  className="hover-lift border-2 transition-all-smooth animate-scale-in opacity-0"
+                  style={{ animationDelay: `${index * 50}ms`, animationFillMode: 'forwards' }}
                 >
-                  <div>
-                    <h3 className="font-semibold">{vm.name}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {vm.cpu} CPU • {vm.ram}GB RAM • {vm.storage}GB Storage
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`px-2 py-1 text-xs rounded-full ${
-                        vm.status === 'running'
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}
-                    >
-                      {vm.status}
-                    </span>
-                    <Button size="sm" variant="outline">
-                      Manage
-                    </Button>
-                  </div>
-                </div>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <CardTitle className="text-lg">{vm.name}</CardTitle>
+                        <CardDescription className="text-xs mt-1">
+                          {vm.cpu} CPU • {vm.ram}GB RAM • {vm.storage}GB
+                        </CardDescription>
+                      </div>
+                      <span
+                        className={`px-2 py-1 text-xs rounded-full flex items-center gap-1 transition-all-smooth ${vm.status === 'running'
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                            : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
+                          }`}
+                      >
+                        {vm.status === 'running' && (
+                          <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse-slow" />
+                        )}
+                        {vm.status}
+                      </span>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant={vm.status === 'running' ? 'destructive' : 'default'}
+                        className="flex-1 transition-all-smooth hover:scale-105"
+                      >
+                        {vm.status === 'running' ? (
+                          <>
+                            <Square className="h-3 w-3 mr-1" />
+                            Stop
+                          </>
+                        ) : (
+                          <>
+                            <Play className="h-3 w-3 mr-1" />
+                            Start
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 transition-all-smooth hover:scale-105"
+                      >
+                        Manage
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
               ))}
             </div>
           )}
