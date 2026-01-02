@@ -9,18 +9,19 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2, User, Lock, Activity } from 'lucide-react';
+import { Loader2, User, Lock, Activity, Mail, CheckCircle2, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export default function ProfilePage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  
+  const [saved, setSaved] = useState(false);
+
   // Profile form state
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  
+
   // Password form state
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -36,13 +37,18 @@ export default function ProfilePage() {
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setSaved(false);
 
     try {
       await apiClient.updateProfile({ name, email });
+      setSaved(true);
       toast({
         title: 'Success',
         description: 'Profile updated successfully',
       });
+
+      // Reset saved state after animation
+      setTimeout(() => setSaved(false), 2000);
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -56,7 +62,7 @@ export default function ProfilePage() {
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (newPassword !== confirmPassword) {
       toast({
         title: 'Error',
@@ -100,7 +106,7 @@ export default function ProfilePage() {
   if (!user) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -116,44 +122,57 @@ export default function ProfilePage() {
 
   return (
     <div className="container mx-auto p-6 max-w-4xl">
-      <div className="mb-6">
+      <div className="mb-6 animate-fade-in">
         <h1 className="text-3xl font-bold">Profile Settings</h1>
         <p className="text-muted-foreground">Manage your account settings and preferences</p>
       </div>
 
-      <div className="flex items-center gap-6 mb-8 p-6 bg-card rounded-lg border">
-        <Avatar className="h-20 w-20">
-          <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.name}`} />
-          <AvatarFallback className="bg-primary text-primary-foreground text-2xl">
-            {getInitials(user.name)}
-          </AvatarFallback>
-        </Avatar>
-        <div>
-          <h2 className="text-2xl font-semibold">{user.name}</h2>
-          <p className="text-muted-foreground">{user.email}</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Role: <span className="font-medium capitalize">{user.role}</span>
-          </p>
+      {/* Profile Header Card */}
+      <div className="relative overflow-hidden rounded-lg border bg-card mb-8 animate-fade-in stagger-1">
+        <div className="absolute inset-0 gradient-green-subtle opacity-50"></div>
+        <div className="relative flex items-center gap-6 p-6">
+          <div className="relative group">
+            <div className="absolute inset-0 bg-gradient-to-r from-primary to-green-500 rounded-full blur opacity-75 group-hover:opacity-100 transition-all-smooth animate-pulse-slow"></div>
+            <Avatar className="h-24 w-24 relative border-4 border-background transition-all-smooth group-hover:scale-110">
+              <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.name}`} />
+              <AvatarFallback className="bg-primary text-primary-foreground text-3xl font-bold">
+                {getInitials(user.name)}
+              </AvatarFallback>
+            </Avatar>
+          </div>
+          <div className="flex-1">
+            <h2 className="text-2xl font-semibold">{user.name}</h2>
+            <p className="text-muted-foreground flex items-center gap-2 mt-1">
+              <Mail className="h-4 w-4" />
+              {user.email}
+            </p>
+            <p className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
+              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
+                {user.role}
+              </span>
+            </p>
+          </div>
         </div>
       </div>
 
-      <Tabs defaultValue="profile" className="space-y-6">
+      {/* Tabs Section */}
+      <Tabs defaultValue="profile" className="space-y-6 animate-fade-in stagger-2">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="profile">
+          <TabsTrigger value="profile" className="transition-all-smooth">
             <User className="h-4 w-4 mr-2" />
             Profile
           </TabsTrigger>
-          <TabsTrigger value="password">
+          <TabsTrigger value="password" className="transition-all-smooth">
             <Lock className="h-4 w-4 mr-2" />
             Password
           </TabsTrigger>
-          <TabsTrigger value="activity">
+          <TabsTrigger value="activity" className="transition-all-smooth">
             <Activity className="h-4 w-4 mr-2" />
             Activity
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="profile">
+        <TabsContent value="profile" className="animate-fade-in">
           <Card>
             <CardHeader>
               <CardTitle>Personal Information</CardTitle>
@@ -169,6 +188,7 @@ export default function ProfilePage() {
                     onChange={(e) => setName(e.target.value)}
                     required
                     disabled={loading}
+                    className="transition-all-smooth focus:ring-2 focus:ring-primary"
                   />
                 </div>
 
@@ -181,14 +201,24 @@ export default function ProfilePage() {
                     onChange={(e) => setEmail(e.target.value)}
                     required
                     disabled={loading}
+                    className="transition-all-smooth focus:ring-2 focus:ring-primary"
                   />
                 </div>
 
-                <Button type="submit" disabled={loading}>
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="transition-all-smooth hover:scale-105 relative"
+                >
                   {loading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Saving...
+                    </>
+                  ) : saved ? (
+                    <>
+                      <CheckCircle2 className="mr-2 h-4 w-4 animate-scale-in" />
+                      Saved!
                     </>
                   ) : (
                     'Save Changes'
@@ -199,7 +229,7 @@ export default function ProfilePage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="password">
+        <TabsContent value="password" className="animate-fade-in">
           <Card>
             <CardHeader>
               <CardTitle>Change Password</CardTitle>
@@ -216,6 +246,7 @@ export default function ProfilePage() {
                     onChange={(e) => setOldPassword(e.target.value)}
                     required
                     disabled={loading}
+                    className="transition-all-smooth focus:ring-2 focus:ring-primary"
                   />
                 </div>
 
@@ -229,6 +260,7 @@ export default function ProfilePage() {
                     required
                     disabled={loading}
                     minLength={8}
+                    className="transition-all-smooth focus:ring-2 focus:ring-primary"
                   />
                   <p className="text-xs text-muted-foreground">
                     Password must be at least 8 characters
@@ -244,10 +276,15 @@ export default function ProfilePage() {
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required
                     disabled={loading}
+                    className="transition-all-smooth focus:ring-2 focus:ring-primary"
                   />
                 </div>
 
-                <Button type="submit" disabled={loading}>
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="transition-all-smooth hover:scale-105"
+                >
                   {loading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -262,7 +299,7 @@ export default function ProfilePage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="activity">
+        <TabsContent value="activity" className="animate-fade-in">
           <Card>
             <CardHeader>
               <CardTitle>Account Activity</CardTitle>
@@ -270,23 +307,37 @@ export default function ProfilePage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                <div className="flex items-center justify-between py-3 border-b">
-                  <div>
-                    <p className="font-medium">Account Created</p>
-                    <p className="text-sm text-muted-foreground">Your account was created</p>
+                <div className="flex items-start gap-4 py-4 border-b transition-all-smooth hover:bg-muted/50 px-2 rounded">
+                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <CheckCircle2 className="h-5 w-5 text-primary" />
                   </div>
-                  <p className="text-sm text-muted-foreground">Recently</p>
+                  <div className="flex-1">
+                    <p className="font-medium">Account Created</p>
+                    <p className="text-sm text-muted-foreground">Your account was successfully created</p>
+                  </div>
+                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                    <Clock className="h-3 w-3" />
+                    Recently
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-3 border-b">
-                  <div>
+
+                <div className="flex items-start gap-4 py-4 border-b transition-all-smooth hover:bg-muted/50 px-2 rounded">
+                  <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
+                    <Activity className="h-5 w-5 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div className="flex-1">
                     <p className="font-medium">Last Login</p>
                     <p className="text-sm text-muted-foreground">You logged in to your account</p>
                   </div>
-                  <p className="text-sm text-muted-foreground">Today</p>
+                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                    <Clock className="h-3 w-3" />
+                    Today
+                  </div>
                 </div>
-                <div className="text-center py-8 text-muted-foreground">
-                  <Activity className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>More activity details coming soon</p>
+
+                <div className="text-center py-8">
+                  <Activity className="h-12 w-12 mx-auto text-muted-foreground/30 mb-3 animate-float" />
+                  <p className="text-muted-foreground text-sm">More activity details coming soon</p>
                 </div>
               </div>
             </CardContent>
