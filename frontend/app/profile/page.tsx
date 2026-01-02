@@ -9,14 +9,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2, User, Lock, Activity, Mail, CheckCircle2, Clock } from 'lucide-react';
+import { Loader2, User, Lock, Activity, Mail, CheckCircle2, Clock, LogIn } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useRouter } from 'next/navigation';
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Profile form state
   const [name, setName] = useState('');
@@ -28,11 +32,40 @@ export default function ProfilePage() {
   const [confirmPassword, setConfirmPassword] = useState('');
 
   useEffect(() => {
-    if (user) {
-      setName(user.name);
-      setEmail(user.email);
-    }
-  }, [user]);
+    // Try to use the auth context first
+    const checkAuth = async () => {
+      try {
+        // Check if we have a token
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+
+        if (!token) {
+          setAuthError('You need to be logged in to view this page');
+          setAuthLoading(false);
+          return;
+        }
+
+        // Try to get user info from the API
+        try {
+          const response = await apiClient.getMe();
+          const userData = response.data || response.user || response;
+
+          setCurrentUser(userData);
+          setName(userData.name || userData.firstName + ' ' + userData.lastName || '');
+          setEmail(userData.email || '');
+          setAuthLoading(false);
+        } catch (apiError: any) {
+          // If API fails, show error
+          setAuthError(apiError.message || 'Failed to load profile');
+          setAuthLoading(false);
+        }
+      } catch (error: any) {
+        setAuthError(error.message || 'Authentication error');
+        setAuthLoading(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,15 +136,59 @@ export default function ProfilePage() {
     }
   };
 
-  if (!user) {
+  if (authLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+          <p className="text-muted-foreground">Loading profile...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authError || !currentUser) {
+    return (
+      <div className="container mx-auto p-6 max-w-2xl">
+        <Card className="animate-fade-in border-amber-500">
+          <CardHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="h-12 w-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                <LogIn className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <CardTitle>Authentication Required</CardTitle>
+                <CardDescription>{authError || 'Please log in to view your profile'}</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              You need to be logged in to access your profile page. Please log in or create an account to continue.
+            </p>
+            <div className="flex gap-3">
+              <Button
+                onClick={() => router.push('/login')}
+                className="transition-all-smooth hover:scale-105"
+              >
+                Go to Login
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => router.push('/register')}
+                className="transition-all-smooth hover:scale-105"
+              >
+                Create Account
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   const getInitials = (name: string) => {
+    if (!name) return 'U';
     return name
       .split(' ')
       .map((n) => n[0])
@@ -134,21 +211,21 @@ export default function ProfilePage() {
           <div className="relative group">
             <div className="absolute inset-0 bg-gradient-to-r from-primary to-green-500 rounded-full blur opacity-75 group-hover:opacity-100 transition-all-smooth animate-pulse-slow"></div>
             <Avatar className="h-24 w-24 relative border-4 border-background transition-all-smooth group-hover:scale-110">
-              <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.name}`} />
+              <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${currentUser.name || currentUser.email}`} />
               <AvatarFallback className="bg-primary text-primary-foreground text-3xl font-bold">
-                {getInitials(user.name)}
+                {getInitials(currentUser.name || currentUser.email)}
               </AvatarFallback>
             </Avatar>
           </div>
           <div className="flex-1">
-            <h2 className="text-2xl font-semibold">{user.name}</h2>
+            <h2 className="text-2xl font-semibold">{currentUser.name || 'User'}</h2>
             <p className="text-muted-foreground flex items-center gap-2 mt-1">
               <Mail className="h-4 w-4" />
-              {user.email}
+              {currentUser.email}
             </p>
             <p className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
-                {user.role}
+                {currentUser.role || 'USER'}
               </span>
             </p>
           </div>
