@@ -178,7 +178,7 @@ class JWTUtils {
     try {
       const exp = this.getTokenExpiration(token);
       if (!exp) return true;
-      
+
       return Date.now() >= exp * 1000;
     } catch (error) {
       return true;
@@ -194,7 +194,7 @@ class JWTUtils {
     try {
       const exp = this.getTokenExpiration(token);
       if (!exp) return 0;
-      
+
       const now = Math.floor(Date.now() / 1000);
       return Math.max(0, exp - now);
     } catch (error) {
@@ -314,7 +314,10 @@ class JWTUtils {
    * @returns {Promise<void>}
    */
   static async blacklistToken(token, redis) {
-    if (!redis) return;
+    if (!redis || typeof redis.setex !== 'function') {
+      console.log('Redis not available for token blacklisting:');
+      return;
+    }
 
     try {
       const decoded = jwt.decode(token);
@@ -336,7 +339,10 @@ class JWTUtils {
    * @returns {Promise<boolean>} Is token blacklisted
    */
   static async isTokenBlacklisted(token, redis) {
-    if (!redis) return false;
+    if (!redis || typeof redis.get !== 'function') {
+      console.log('Redis not available for token blacklist check:');
+      return false;
+    }
 
     try {
       const result = await redis.get(`blacklist:${token}`);

@@ -536,14 +536,34 @@ class AuthService {
    */
   static async removeSession(accessToken) {
     try {
-      await prisma.session.deleteMany({
+      // For SQLite, we need to search within the JSON data field
+      // Get all sessions and filter in memory since SQLite JSON support is limited
+      const sessions = await prisma.session.findMany({
         where: {
-          data: {
-            path: ['accessToken'],
-            equals: accessToken
-          }
+          userId: { not: null } // Just get all active sessions
         }
       });
+
+      // Find sessions with matching accessToken
+      const sessionsToDelete = sessions.filter(session => {
+        try {
+          const data = typeof session.data === 'string' ? JSON.parse(session.data) : session.data;
+          return data.accessToken === accessToken;
+        } catch (e) {
+          return false;
+        }
+      });
+
+      // Delete matching sessions
+      if (sessionsToDelete.length > 0) {
+        await prisma.session.deleteMany({
+          where: {
+            id: {
+              in: sessionsToDelete.map(s => s.id)
+            }
+          }
+        });
+      }
     } catch (error) {
       console.error('Failed to remove session:', error);
     }
@@ -566,9 +586,9 @@ class AuthService {
           action,
           resource,
           resourceId,
-          ipAddress: metadata.ipAddress,
-          userAgent: metadata.userAgent,
-          newValues: metadata,
+          ipAddress: metadata.ipAddress || null,
+          userAgent: metadata.userAgent || null,
+          newValues: Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null,
         }
       });
     } catch (error) {
