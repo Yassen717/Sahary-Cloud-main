@@ -5,6 +5,7 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider } from '@/lib/auth-context';
 import { initErrorTracking } from '@/lib/error-tracking';
+import Script from 'next/script';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 
@@ -99,6 +100,26 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
+        {/* Skip to main content link for keyboard users */}
+        <a href="#main-content" className="skip-link">
+          Skip to main content
+        </a>
+
+        {/* Keyboard navigation detection */}
+        <Script id="keyboard-nav-detection">
+          {`
+            // Detect keyboard navigation
+            document.addEventListener('mousedown', () => {
+              document.body.classList.remove('using-keyboard');
+            });
+            document.addEventListener('keydown', (e) => {
+              if (e.key === 'Tab') {
+                document.body.classList.add('using-keyboard');
+              }
+            });
+          `}
+        </Script>
+
         {/* JSON-LD Structured Data */}
         <script
           type="application/ld+json"
@@ -132,7 +153,7 @@ export default function RootLayout({
           <AuthProvider>
             <div className="flex flex-col min-h-screen">
               <Header />
-              <main className="flex-grow">
+              <main id="main-content" className="flex-grow" role="main" aria-label="Main content">
                 {children}
               </main>
               <Footer />
