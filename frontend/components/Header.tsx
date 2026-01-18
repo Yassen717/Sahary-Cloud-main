@@ -79,6 +79,11 @@ export default function Header() {
                   Plans
                 </Link>
               </li>
+              <li>
+                <Link href="/help" className="hover:text-primary transition-colors">
+                  Help
+                </Link>
+              </li>
               {isAuthenticated && (
                 <li>
                   <Link href="/dashboard" className="hover:text-primary transition-colors">
