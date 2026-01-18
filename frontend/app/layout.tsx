@@ -64,23 +64,6 @@ export const metadata: Metadata = {
     creator: '@saharycloud' // Update with actual Twitter handle
   },
 
-  // Verification (add your actual verification codes)
-  // verification: {
-  //   google: 'your-google-verification-code',
-  //   yandex: 'your-yandex-verification-code',
-  // },
-
-  // Theme and appearance
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
-    { media: '(prefers-color-scheme: dark)', color: '#0a0a0a' }
-  ],
-  viewport: {
-    width: 'device-width',
-    initialScale: 1,
-    maximumScale: 5,
-  },
-
   // Robots
   robots: {
     index: true,
@@ -95,6 +78,18 @@ export const metadata: Metadata = {
   },
 };
 
+// Separate viewport export (required in Next.js 14)
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#0a0a0a' }
+  ],
+};
+
+
 
 export default function RootLayout({
   children,
@@ -103,7 +98,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
+      <body className={inter.className}>
         {/* JSON-LD Structured Data */}
         <script
           type="application/ld+json"
@@ -128,9 +123,6 @@ export default function RootLayout({
             })
           }}
         />
-      </head>
-      <body className={inter.className}>
-
         <ThemeProvider
           attribute="class"
           defaultTheme="light"
