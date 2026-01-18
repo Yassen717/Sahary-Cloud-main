@@ -90,7 +90,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Request logging middleware
 if (process.env.NODE_ENV !== 'test') {
   app.use(requestLogger);
-  
+
   // Performance monitoring
   const performanceMonitor = require('./middlewares/performanceMonitor');
   app.use(performanceMonitor);
@@ -114,7 +114,7 @@ const setupSession = (client) => {
 // Health check endpoint
 app.get('/health', async (req, res) => {
   const dbHealth = await checkDatabaseHealth();
-  
+
   res.status(dbHealth.status === 'healthy' ? 200 : 503).json({
     status: dbHealth.status === 'healthy' ? 'OK' : 'ERROR',
     timestamp: new Date().toISOString(),
@@ -157,43 +157,43 @@ app.use(errorHandler);
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully');
-  
+
   // Stop jobs
   if (process.env.NODE_ENV !== 'test') {
     const usageCollector = require('./jobs/usageCollector');
     usageCollector.stop();
-    
+
     const solarDataCollector = require('./jobs/solarDataCollector');
     solarDataCollector.stop();
-    
+
     const cacheCleanup = require('./jobs/cacheCleanup');
     cacheCleanup.stop();
   }
-  
+
   // Disconnect Redis
   await redisService.disconnect();
-  
+
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   console.log('SIGINT received, shutting down gracefully');
-  
+
   // Stop jobs
   if (process.env.NODE_ENV !== 'test') {
     const usageCollector = require('./jobs/usageCollector');
     usageCollector.stop();
-    
+
     const solarDataCollector = require('./jobs/solarDataCollector');
     solarDataCollector.stop();
-    
+
     const cacheCleanup = require('./jobs/cacheCleanup');
     cacheCleanup.stop();
   }
-  
+
   // Disconnect Redis
   await redisService.disconnect();
-  
+
   process.exit(0);
 });
 
@@ -203,30 +203,35 @@ if (process.env.NODE_ENV !== 'test') {
     try {
       // Connect to database
       await connectDatabase();
-      
-      // Connect to Redis
+
+      // Connect to Redis (optional)
       await redisService.connect();
-      redisClient = redisService.getClient();
-      
-      // Setup session middleware after Redis connection
-      setupSession(redisClient);
-      
+
+      // Only setup Redis-dependent features if connected
+      if (redisService.isReady()) {
+        redisClient = redisService.getClient();
+        // Setup session middleware after Redis connection
+        setupSession(redisClient);
+      } else {
+        console.warn('⚠️  Skipping Redis-dependent features (sessions)');
+      }
+
       // Start usage collector
       const usageCollector = require('./jobs/usageCollector');
       usageCollector.start();
-      
+
       // Start invoice generator
       const invoiceGenerator = require('./jobs/invoiceGenerator');
       invoiceGenerator.start();
-      
+
       // Start solar data collector
       const solarDataCollector = require('./jobs/solarDataCollector');
       solarDataCollector.start();
-      
+
       // Start cache cleanup job
       const cacheCleanup = require('./jobs/cacheCleanup');
       cacheCleanup.start();
-      
+
       // Start HTTP server
       app.listen(PORT, HOST, () => {
         console.log(`🚀 Sahary Cloud API Server running on http://${HOST}:${PORT}`);
@@ -245,7 +250,7 @@ if (process.env.NODE_ENV !== 'test') {
       process.exit(1);
     }
   };
-  
+
   startServer();
 }
 

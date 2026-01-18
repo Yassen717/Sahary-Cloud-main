@@ -68,12 +68,12 @@ async function main() {
       maxVMs: 1,
       monthlyPrice: 5.00,
       hourlyPrice: 0.007,
-      features: {
+      features: JSON.stringify({
         ssd_storage: true,
         backup_included: false,
         support_level: 'community',
         solar_powered: true
-      }
+      })
     },
     {
       name: 'Professional',
@@ -85,13 +85,13 @@ async function main() {
       maxVMs: 3,
       monthlyPrice: 20.00,
       hourlyPrice: 0.028,
-      features: {
+      features: JSON.stringify({
         ssd_storage: true,
         backup_included: true,
         support_level: 'email',
         solar_powered: true,
         load_balancer: true
-      }
+      })
     },
     {
       name: 'Enterprise',
@@ -103,7 +103,7 @@ async function main() {
       maxVMs: 10,
       monthlyPrice: 80.00,
       hourlyPrice: 0.111,
-      features: {
+      features: JSON.stringify({
         ssd_storage: true,
         backup_included: true,
         support_level: 'priority',
@@ -111,7 +111,7 @@ async function main() {
         load_balancer: true,
         dedicated_support: true,
         custom_images: true
-      }
+      })
     }
   ];
 
@@ -126,7 +126,7 @@ async function main() {
   // Create admin user
   console.log('👤 Creating admin user...');
   const hashedPassword = await bcrypt.hash('admin123!@#', 12);
-  
+
   const adminUser = await prisma.user.upsert({
     where: { email: 'admin@saharycloud.com' },
     update: {},
@@ -144,7 +144,7 @@ async function main() {
   // Create demo user
   console.log('👤 Creating demo user...');
   const demoPassword = await bcrypt.hash('demo123', 12);
-  
+
   const demoUser = await prisma.user.upsert({
     where: { email: 'demo@saharycloud.com' },
     update: {},
@@ -168,7 +168,7 @@ async function main() {
   for (let i = 0; i < 24; i++) {
     const timestamp = new Date(now.getTime() - (i * 60 * 60 * 1000)); // i hours ago
     const hour = timestamp.getHours();
-    
+
     // Simulate solar production based on time of day
     let production = 0;
     if (hour >= 6 && hour <= 18) {
@@ -176,11 +176,11 @@ async function main() {
       const dayProgress = (hour - 6) / 12;
       production = Math.sin(dayProgress * Math.PI) * 100 + Math.random() * 20;
     }
-    
+
     const consumption = 50 + Math.random() * 30; // Base consumption + variation
     const efficiency = production > 0 ? Math.min(95, 80 + Math.random() * 15) : 0;
     const co2Saved = (production / 1000) * 0.5; // Rough calculation
-    
+
     solarDataPoints.push({
       production: Math.max(0, production),
       consumption,
@@ -195,34 +195,36 @@ async function main() {
   }
 
   await prisma.solarData.createMany({
-    data: solarDataPoints,
-    skipDuplicates: true
+    data: solarDataPoints
   });
 
   // Create sample VM for demo user
   console.log('🖥️ Creating sample VM...');
-  await prisma.virtualMachine.upsert({
-    where: { 
-      userId_name: {
-        userId: demoUser.id,
-        name: 'demo-web-server'
-      }
-    },
-    update: {},
-    create: {
-      name: 'demo-web-server',
-      description: 'Demo web server for testing',
-      status: 'RUNNING',
-      cpu: 1,
-      ram: 1024,
-      storage: 20,
-      bandwidth: 1000,
-      hourlyRate: 0.007,
+  // Check if VM exists
+  const existingVM = await prisma.virtualMachine.findFirst({
+    where: {
       userId: demoUser.id,
-      ipAddress: '192.168.1.100',
-      dockerImage: 'nginx:alpine'
+      name: 'demo-web-server'
     }
   });
+
+  if (!existingVM) {
+    await prisma.virtualMachine.create({
+      data: {
+        name: 'demo-web-server',
+        description: 'Demo web server for testing',
+        status: 'RUNNING',
+        cpu: 1,
+        ram: 1024,
+        storage: 20,
+        bandwidth: 1000,
+        hourlyRate: 0.007,
+        userId: demoUser.id,
+        ipAddress: '192.168.1.100',
+        dockerImage: 'nginx:alpine'
+      }
+    });
+  }
 
   console.log('✅ Database seeding completed successfully!');
   console.log(`

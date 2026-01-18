@@ -1,12 +1,33 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { apiClient } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Server, Zap, DollarSign, Activity, Play, Square } from 'lucide-react';
 import { StatsCard } from '@/components/dashboard/StatsCard';
-import { SolarChart } from '@/components/dashboard/SolarChart';
+
+// Lazy load heavy chart component
+const SolarChart = dynamic(
+  () => import('@/components/dashboard/SolarChart').then(mod => ({ default: mod.SolarChart })),
+  {
+    loading: () => (
+      <Card>
+        <CardHeader>
+          <CardTitle>Solar Production</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-64 flex items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        </CardContent>
+      </Card>
+    ),
+    ssr: false
+  }
+);
+
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
@@ -158,8 +179,8 @@ export default function DashboardPage() {
                       </div>
                       <span
                         className={`px-2 py-1 text-xs rounded-full flex items-center gap-1 transition-all-smooth ${vm.status === 'running'
-                            ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                            : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                          : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
                           }`}
                       >
                         {vm.status === 'running' && (

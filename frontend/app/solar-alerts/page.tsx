@@ -81,9 +81,13 @@ export default function SolarAlertsPage() {
     const handleResolveAlert = (id: string) => {
         const alert = activeAlerts.find(a => a.id === id);
         if (alert) {
-            const resolved = { ...alert, resolved: true, resolvedAt: new Date() };
+            const resolved: typeof alert & { resolved: true; resolvedAt: Date } = {
+                ...alert,
+                resolved: true,
+                resolvedAt: new Date()
+            };
             setActiveAlerts(activeAlerts.filter(a => a.id !== id));
-            setResolvedAlerts([resolved, ...resolvedAlerts]);
+            setResolvedAlerts([resolved as any, ...resolvedAlerts]);
         }
     };
 

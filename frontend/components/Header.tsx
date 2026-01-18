@@ -1,13 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
 import { Button } from "./ui/button";
 import { Menu, X, Cloud } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { UserProfileDropdown } from "./UserProfileDropdown";
+
+// Lazy load user profile dropdown
+const UserProfileDropdown = dynamic(
+  () => import('./UserProfileDropdown').then(mod => ({ default: mod.UserProfileDropdown })),
+  { ssr: false }
+);
+
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
@@ -18,12 +25,12 @@ export default function Header() {
   useEffect(() => {
     setMounted(true);
   }, []);
-  
+
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 10);
     };
-    
+
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
@@ -40,8 +47,8 @@ export default function Header() {
   return (
     <header className={cn(
       "fixed top-0 w-full z-50 transition-all duration-300",
-      isScrolled 
-        ? "bg-white/90 dark:bg-gray-900/90 backdrop-blur-md shadow-md py-2" 
+      isScrolled
+        ? "bg-white/90 dark:bg-gray-900/90 backdrop-blur-md shadow-md py-2"
         : "bg-transparent py-4"
     )}>
       <div className="container mx-auto px-4 flex justify-between items-center">
@@ -53,7 +60,7 @@ export default function Header() {
             Sahary Cloud
           </span>
         </Link>
-        
+
         <div className="hidden md:flex items-center gap-6">
           <nav>
             <ul className="flex items-center gap-6">
@@ -105,7 +112,7 @@ export default function Header() {
             </>
           )}
         </div>
-        
+
         <div className="md:hidden flex items-center gap-4">
           <ThemeToggle />
           <Button variant="outline" size="icon" onClick={toggleMenu} aria-label="Toggle menu">
@@ -113,7 +120,7 @@ export default function Header() {
           </Button>
         </div>
       </div>
-      
+
       {/* Mobile menu */}
       {isOpen && (
         <div className="md:hidden absolute top-full left-0 w-full bg-white dark:bg-gray-900 shadow-lg py-4">
@@ -133,8 +140,8 @@ export default function Header() {
                 </li>
               )}
               <li>
-                <Link 
-                  href="#features" 
+                <Link
+                  href="#features"
                   className="block py-2 hover:text-primary transition-colors"
                   onClick={() => setIsOpen(false)}
                 >
@@ -142,8 +149,8 @@ export default function Header() {
                 </Link>
               </li>
               <li>
-                <Link 
-                  href="#about" 
+                <Link
+                  href="#about"
                   className="block py-2 hover:text-primary transition-colors"
                   onClick={() => setIsOpen(false)}
                 >
@@ -151,8 +158,8 @@ export default function Header() {
                 </Link>
               </li>
               <li>
-                <Link 
-                  href="#plans" 
+                <Link
+                  href="#plans"
                   className="block py-2 hover:text-primary transition-colors"
                   onClick={() => setIsOpen(false)}
                 >
@@ -162,8 +169,8 @@ export default function Header() {
               {isAuthenticated && (
                 <>
                   <li>
-                    <Link 
-                      href="/dashboard" 
+                    <Link
+                      href="/dashboard"
                       className="block py-2 hover:text-primary transition-colors"
                       onClick={() => setIsOpen(false)}
                     >
@@ -171,8 +178,8 @@ export default function Header() {
                     </Link>
                   </li>
                   <li>
-                    <Link 
-                      href="/profile" 
+                    <Link
+                      href="/profile"
                       className="block py-2 hover:text-primary transition-colors"
                       onClick={() => setIsOpen(false)}
                     >
@@ -180,8 +187,8 @@ export default function Header() {
                     </Link>
                   </li>
                   <li>
-                    <Link 
-                      href="/settings" 
+                    <Link
+                      href="/settings"
                       className="block py-2 hover:text-primary transition-colors"
                       onClick={() => setIsOpen(false)}
                     >
@@ -193,8 +200,8 @@ export default function Header() {
               {!isAuthenticated ? (
                 <>
                   <li>
-                    <Button 
-                      asChild 
+                    <Button
+                      asChild
                       variant="outline"
                       className="w-full"
                       onClick={() => setIsOpen(false)}
@@ -203,8 +210,8 @@ export default function Header() {
                     </Button>
                   </li>
                   <li>
-                    <Button 
-                      asChild 
+                    <Button
+                      asChild
                       className="w-full bg-primary hover:bg-primary/90"
                       onClick={() => setIsOpen(false)}
                     >
@@ -214,7 +221,7 @@ export default function Header() {
                 </>
               ) : (
                 <li>
-                  <Button 
+                  <Button
                     variant="outline"
                     className="w-full text-red-600 hover:text-red-600"
                     onClick={handleLogout}

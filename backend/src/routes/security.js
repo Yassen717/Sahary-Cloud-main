@@ -1,15 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const securityController = require('../controllers/securityController');
-const { protect, authorize } = require('../middlewares/auth');
+const { authenticate, requireRole } = require('../middlewares/auth');
 
 /**
  * Security Routes
  * All routes require admin authentication
  */
 
-router.use(protect);
-router.use(authorize('ADMIN', 'SUPER_ADMIN'));
+router.use(authenticate);
+router.use(requireRole('ADMIN', 'SUPER_ADMIN'));
 
 // Security monitoring
 router.get('/events', securityController.getSecurityEvents);

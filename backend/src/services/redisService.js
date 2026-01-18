@@ -27,17 +27,17 @@ class RedisService {
         password: process.env.REDIS_PASSWORD || undefined,
         socket: {
           reconnectStrategy: (retries) => {
-            if (retries > 10) {
-              console.error('Redis reconnection failed after 10 attempts');
-              return new Error('Redis reconnection failed');
+            if (retries > 3) {
+              console.warn('⚠️  Redis reconnection stopped after 3 attempts');
+              return false; // Stop reconnecting
             }
-            return Math.min(retries * 100, 3000);
+            return Math.min(retries * 100, 1000);
           }
         }
       });
 
       this.client.on('error', (err) => {
-        console.error('Redis Client Error:', err);
+        console.warn('⚠️  Redis Client Error:', err.message);
         this.isConnected = false;
       });
 
@@ -61,8 +61,13 @@ class RedisService {
 
       await this.client.connect();
     } catch (error) {
-      console.error('Failed to connect to Redis:', error);
-      throw error;
+      console.warn('⚠️  Redis connection failed:', error.message);
+      console.warn('⚠️  Server will start WITHOUT Redis caching');
+      console.warn('⚠️  Session and caching features won\'t work until Redis is running');
+      console.warn('⚠️  To start Redis: sudo systemctl start redis  OR  docker run -d -p 6379:6379 redis');
+      this.client = null;
+      this.isConnected = false;
+      // Don't throw - allow server to start without Redis
     }
   }
 
@@ -422,7 +427,7 @@ class RedisService {
    */
   async cache(prefix, identifier, fetchFunction, ttl = null) {
     const key = `${prefix}:${identifier}`;
-    
+
     try {
       // Try to get from cache
       const cached = await this.get(key);
@@ -432,10 +437,10 @@ class RedisService {
 
       // Fetch fresh data
       const data = await fetchFunction();
-      
+
       // Cache the result
       await this.set(key, data, ttl);
-      
+
       return data;
     } catch (error) {
       console.error(`Cache error for ${key}:`, error);
@@ -513,7 +518,7 @@ class RedisService {
     try {
       const info = await this.client.info();
       const dbSize = await this.client.dbSize();
-      
+
       return {
         connected: this.isConnected,
         dbSize,
@@ -536,7 +541,7 @@ class RedisService {
   parseInfo(info) {
     const lines = info.split('\r\n');
     const result = {};
-    
+
     for (const line of lines) {
       if (line && !line.startsWith('#')) {
         const [key, value] = line.split(':');
@@ -545,7 +550,7 @@ class RedisService {
         }
       }
     }
-    
+
     return result;
   }
 

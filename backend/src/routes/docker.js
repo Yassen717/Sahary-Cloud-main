@@ -1,21 +1,15 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const dockerController = require('../controllers/dockerController');
-const authMiddleware = require('../middleware/auth');
-const roleMiddleware = require('../middleware/role');
-const rateLimitMiddleware = require('../middleware/rateLimit');
+const { authenticate } = require('../middlewares/auth');
+const { requirePermission } = require('../middlewares/rbac');
+const { apiRateLimit, sanitizeInput, xssProtection } = require('../middlewares/security');
 
 const router = express.Router();
 
-// Apply authentication to all Docker routes
-router.use(authMiddleware);
-
-// Apply rate limiting
-router.use(rateLimitMiddleware({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many Docker API requests, please try again later',
-}));
+// Apply security middleware to all routes
+router.use(sanitizeInput());
+router.use(xssProtection());
 
 /**
  * @route   POST /api/docker/containers
@@ -23,7 +17,9 @@ router.use(rateLimitMiddleware({
  * @access  Private (Admin only)
  */
 router.post('/containers',
-  roleMiddleware(['admin']),
+  apiRateLimit(),
+  authenticate,
+  requirePermission('docker:manage'),
   [
     body('vmId')
       .notEmpty()
@@ -74,6 +70,8 @@ router.post('/containers',
  * @access  Private (Admin and User - own containers only)
  */
 router.post('/containers/:containerId/start',
+  apiRateLimit(),
+  authenticate,
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -88,6 +86,8 @@ router.post('/containers/:containerId/start',
  * @access  Private (Admin and User - own containers only)
  */
 router.post('/containers/:containerId/stop',
+  apiRateLimit(),
+  authenticate,
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -106,6 +106,8 @@ router.post('/containers/:containerId/stop',
  * @access  Private (Admin and User - own containers only)
  */
 router.post('/containers/:containerId/restart',
+  apiRateLimit(),
+  authenticate,
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -124,7 +126,9 @@ router.post('/containers/:containerId/restart',
  * @access  Private (Admin only)
  */
 router.delete('/containers/:containerId',
-  roleMiddleware(['admin']),
+  apiRateLimit(),
+  authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -143,6 +147,8 @@ router.delete('/containers/:containerId',
  * @access  Private (Admin and User - own containers only)
  */
 router.get('/containers/:containerId/status',
+  apiRateLimit(),
+  authenticate,
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -157,6 +163,8 @@ router.get('/containers/:containerId/status',
  * @access  Private (Admin and User - own containers only)
  */
 router.get('/containers/:containerId/stats',
+  apiRateLimit(),
+  authenticate,
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -171,6 +179,8 @@ router.get('/containers/:containerId/stats',
  * @access  Private (Admin sees all, User sees own only)
  */
 router.get('/containers',
+  apiRateLimit(),
+  authenticate,
   [
     query('vmId')
       .optional()
@@ -190,7 +200,9 @@ router.get('/containers',
  * @access  Private (Admin only)
  */
 router.post('/images/pull',
-  roleMiddleware(['admin']),
+  apiRateLimit(),
+  authenticate,
+  requirePermission('docker:manage'),
   [
     body('imageName')
       .notEmpty()
@@ -206,7 +218,9 @@ router.post('/images/pull',
  * @access  Private (Admin only)
  */
 router.get('/system/info',
-  roleMiddleware(['admin']),
+  apiRateLimit(),
+  authenticate,
+  requirePermission('docker:manage'),
   dockerController.getSystemInfo
 );
 
@@ -216,7 +230,9 @@ router.get('/system/info',
  * @access  Private (Admin only)
  */
 router.post('/networks',
-  roleMiddleware(['admin']),
+  apiRateLimit(),
+  authenticate,
+  requirePermission('docker:manage'),
   [
     body('networkName')
       .optional()
@@ -232,6 +248,8 @@ router.post('/networks',
  * @access  Private (Admin and User - own containers only)
  */
 router.get('/containers/:containerId/health',
+  apiRateLimit(),
+  authenticate,
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -246,6 +264,8 @@ router.get('/containers/:containerId/health',
  * @access  Private (Admin and User - own containers only)
  */
 router.get('/containers/:containerId/logs',
+  apiRateLimit(),
+  authenticate,
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -276,6 +296,8 @@ router.get('/containers/:containerId/logs',
  * @access  Private (Admin and User - own containers only)
  */
 router.post('/containers/:containerId/exec',
+  apiRateLimit(),
+  authenticate,
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -297,6 +319,8 @@ router.post('/containers/:containerId/exec',
  * @access  Private (Admin and User - own containers only)
  */
 router.post('/containers/:containerId/backup',
+  apiRateLimit(),
+  authenticate,
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -315,6 +339,8 @@ router.post('/containers/:containerId/backup',
  * @access  Private (Admin and User - own backups only)
  */
 router.post('/backups/:backupId/restore',
+  apiRateLimit(),
+  authenticate,
   [
     param('backupId')
       .isLength({ min: 12, max: 64 })
@@ -344,7 +370,9 @@ router.post('/backups/:backupId/restore',
  * @access  Private (Admin only)
  */
 router.post('/cleanup',
-  roleMiddleware(['admin']),
+  apiRateLimit(),
+  authenticate,
+  requirePermission('docker:manage'),
   dockerController.cleanup
 );
 
@@ -354,7 +382,9 @@ router.post('/cleanup',
  * @access  Private (Admin only)
  */
 router.get('/connection',
-  roleMiddleware(['admin']),
+  apiRateLimit(),
+  authenticate,
+  requirePermission('docker:manage'),
   dockerController.checkConnection
 );
 

@@ -1,4 +1,5 @@
 import { getStorageItem, setStorageItem, removeStorageItem } from './storage';
+import { cache, withCache } from './cache';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
 
@@ -46,8 +47,9 @@ export class ApiClient {
     };
 
     if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${this.token}`;
     }
+
 
     const response = await fetch(`${this.baseURL}${endpoint}`, {
       ...options,
@@ -64,21 +66,29 @@ export class ApiClient {
 
   // Auth methods
   async login(email: string, password: string) {
-    const data = await this.request('/auth/login', {
+    const response = await this.request('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
-    if (data.token) {
-      this.setToken(data.token);
+
+    if (response.data?.tokens?.accessToken) {
+      this.setToken(response.data.tokens.accessToken);
     }
-    return data;
+
+    return response;
   }
 
   async register(userData: any) {
-    return this.request('/auth/register', {
+    const response = await this.request('/auth/register', {
       method: 'POST',
       body: JSON.stringify(userData),
     });
+
+    if (response.data?.tokens?.accessToken) {
+      this.setToken(response.data.tokens.accessToken);
+    }
+
+    return response;
   }
 
   async logout() {
@@ -106,7 +116,11 @@ export class ApiClient {
 
   // VM methods
   async getVMs() {
-    return this.request('/vms');
+    return withCache(
+      () => this.request('/vms'),
+      () => 'vms:list',
+      { ttl: 2 * 60 * 1000, staleWhileRevalidate: true } // 2 minutes, with stale-while-revalidate
+    )();
   }
 
   async getVM(id: string) {
@@ -114,10 +128,13 @@ export class ApiClient {
   }
 
   async createVM(vmData: any) {
-    return this.request('/vms', {
+    const result = await this.request('/vms', {
       method: 'POST',
       body: JSON.stringify(vmData),
     });
+    // Invalidate VMs cache after creation
+    cache.invalidate('vms:list');
+    return result;
   }
 
   async updateVM(id: string, vmData: any) {
@@ -128,9 +145,12 @@ export class ApiClient {
   }
 
   async deleteVM(id: string) {
-    return this.request(`/vms/${id}`, {
+    const result = await this.request(`/vms/${id}`, {
       method: 'DELETE',
     });
+    // Invalidate VMs cache after deletion
+    cache.invalidate('vms:list');
+    return result;
   }
 
   async startVM(id: string) {
@@ -147,11 +167,19 @@ export class ApiClient {
 
   // Solar methods
   async getSolarStatus() {
-    return this.request('/solar/status');
+    return withCache(
+      () => this.request('/solar/status'),
+      () => 'solar:status',
+      { ttl: 1 * 60 * 1000, staleWhileRevalidate: true } // 1 minute, with stale-while-revalidate
+    )();
   }
 
   async getSolarProduction() {
-    return this.request('/solar/production');
+    return withCache(
+      () => this.request('/solar/production'),
+      () => 'solar:production',
+      { ttl: 5 * 60 * 1000 } // 5 minutes
+    )();
   }
 
   async getEnvironmentalImpact() {
@@ -164,7 +192,11 @@ export class ApiClient {
   }
 
   async getUsage() {
-    return this.request('/billing/usage');
+    return withCache(
+      () => this.request('/billing/usage'),
+      () => 'billing:usage',
+      { ttl: 5 * 60 * 1000 } // 5 minutes
+    )();
   }
 
   async payInvoice(id: string) {
@@ -191,6 +223,6 @@ export class ApiClient {
 // Create singleton instance only on client side
 let apiClientInstance: ApiClient | null = null;
 
-export const apiClient = typeof window !== 'undefined' 
+export const apiClient = typeof window !== 'undefined'
   ? (apiClientInstance || (apiClientInstance = new ApiClient()))
   : new ApiClient(); // Fallback for SSR (won't have token)

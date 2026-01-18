@@ -1,15 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const cacheController = require('../controllers/cacheController');
-const { protect, authorize } = require('../middlewares/auth');
+const { authenticate, requireRole } = require('../middlewares/auth');
 
 /**
  * Cache Management Routes
  * All routes require admin authentication
  */
 
-router.use(protect);
-router.use(authorize('ADMIN', 'SUPER_ADMIN'));
+router.use(authenticate);
+router.use(requireRole('ADMIN', 'SUPER_ADMIN'));
 
 // Cache statistics and monitoring
 router.get('/stats', cacheController.getStats);

@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -19,7 +19,7 @@ model User {
   lastName    String
   phone       String?
   avatar      String?
-  role        Role     @default(USER)
+  role        String   @default("USER")
   isActive    Boolean  @default(true)
   isVerified  Boolean  @default(false)
   emailVerificationToken String?
@@ -47,7 +47,7 @@ model VirtualMachine {
   id          String    @id @default(cuid())
   name        String
   description String?
-  status      VMStatus  @default(STOPPED)
+  status      String   @default("STOPPED")
   
   // Resource specifications
   cpu         Int       // CPU cores
@@ -90,7 +90,7 @@ model Invoice {
   tax         Decimal       @default(0.00)
   discount    Decimal       @default(0.00)
   currency    String        @default("USD")
-  status      InvoiceStatus @default(PENDING)
+  status      String    @default("PENDING")
   
   // Billing period
   billingPeriodStart DateTime
@@ -145,12 +145,12 @@ model Payment {
   id          String        @id @default(cuid())
   amount      Decimal
   currency    String        @default("USD")
-  status      PaymentStatus @default(PENDING)
-  method      PaymentMethod
+  status      String        @default("PENDING")
+  method      String
   
   // Payment gateway details
   gatewayId   String?       // Stripe payment intent ID
-  gatewayResponse Json?
+  gatewayResponse String?
   
   // Timestamps
   createdAt   DateTime      @default(now())
@@ -208,7 +208,7 @@ model SolarData {
   cloudCover      Float? // Cloud cover percentage
   
   // System status
-  systemStatus    SolarSystemStatus @default(NORMAL)
+  systemStatus    String    @default("NORMAL")
   
   timestamp   DateTime @default(now())
 
@@ -221,7 +221,7 @@ model Session {
   sessionId   String   @unique
   
   // Session data
-  data        Json?
+  data        String?
   ipAddress   String?
   userAgent   String?
   
@@ -242,11 +242,11 @@ model Notification {
   id          String             @id @default(cuid())
   title       String
   message     String
-  type        NotificationType   @default(INFO)
+  type        String             @default("INFO")
   isRead      Boolean            @default(false)
   
   // Metadata
-  metadata    Json?
+  metadata    String?
   
   createdAt   DateTime           @default(now())
 
@@ -263,11 +263,11 @@ model Backup {
   name        String
   description String?
   size        BigInt       @default(0) // Size in bytes
-  status      BackupStatus @default(PENDING)
+  status      String       @default("PENDING")
   
   // Backup details
   backupPath  String?
-  backupType  BackupType   @default(FULL)
+  backupType  String       @default("FULL")
   dockerImageId String?    // Docker image ID for container backups
   
   // Timestamps
@@ -296,8 +296,8 @@ model AuditLog {
   userAgent   String?
   
   // Changes
-  oldValues   Json?
-  newValues   Json?
+  oldValues   String?
+  newValues   String?
   
   timestamp   DateTime   @default(now())
 
@@ -326,7 +326,7 @@ model PricingPlan {
   hourlyPrice  Decimal @default(0.00)
   
   // Features
-  features    Json?
+  features    String?
   
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -353,7 +353,7 @@ model SystemSetting {
 model SolarAlert {
   id          String        @id @default(cuid())
   type        String        // Alert type (LOW_PRODUCTION, LOW_BATTERY, etc.)
-  severity    AlertSeverity @default(WARNING)
+  severity    String        @default("WARNING")
   message     String
   data        String?       // JSON string with additional data
   resolved    Boolean       @default(false)
@@ -367,7 +367,7 @@ model SolarAlert {
 // Emergency Log Model - سجلات الطوارئ
 model EmergencyLog {
   id          String        @id @default(cuid())
-  severity    AlertSeverity
+  severity    String
   action      String
   data        String?       // JSON string with additional data
   timestamp   DateTime      @default(now())
@@ -383,84 +383,4 @@ model SystemStatus {
   timestamp   DateTime @default(now())
 
   @@map("system_status")
-}
-
-// Enums - التعدادات
-
-enum Role {
-  USER
-  ADMIN
-  SUPER_ADMIN
-}
-
-enum VMStatus {
-  RUNNING
-  STOPPED
-  STARTING
-  STOPPING
-  RESTARTING
-  ERROR
-  SUSPENDED
-}
-
-enum InvoiceStatus {
-  DRAFT
-  PENDING
-  PAID
-  OVERDUE
-  CANCELLED
-  REFUNDED
-}
-
-enum PaymentStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
-  CANCELLED
-  REFUNDED
-}
-
-enum PaymentMethod {
-  STRIPE
-  PAYPAL
-  BANK_TRANSFER
-  CRYPTO
-}
-
-enum SolarSystemStatus {
-  NORMAL
-  WARNING
-  ERROR
-  MAINTENANCE
-  OFFLINE
-}
-
-enum NotificationType {
-  INFO
-  SUCCESS
-  WARNING
-  ERROR
-  SYSTEM
-}
-
-enum BackupStatus {
-  PENDING
-  IN_PROGRESS
-  COMPLETED
-  FAILED
-  CANCELLED
-}
-
-enum BackupType {
-  FULL
-  INCREMENTAL
-  DIFFERENTIAL
-}
-
-enum AlertSeverity {
-  INFO
-  WARNING
-  CRITICAL
-  EMERGENCY
 }

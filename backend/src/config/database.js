@@ -14,15 +14,18 @@ const connectDatabase = async () => {
   try {
     await prisma.$connect();
     console.log('✅ Database connected successfully');
-    
+
     // Test the connection
     await prisma.$queryRaw`SELECT 1`;
     console.log('✅ Database connection test passed');
-    
+
     return true;
   } catch (error) {
-    console.error('❌ Database connection failed:', error);
-    throw error;
+    console.error('❌ Database connection failed:', error.message);
+    console.warn('⚠️  Server will start WITHOUT database connection');
+    console.warn('⚠️  Database-dependent features will not work until PostgreSQL is running');
+    console.warn('⚠️  To start PostgreSQL: sudo systemctl start postgresql');
+    return false; // Don't throw, just return false
   }
 };
 
@@ -43,7 +46,7 @@ const checkDatabaseHealth = async () => {
     const startTime = Date.now();
     await prisma.$queryRaw`SELECT 1`;
     const responseTime = Date.now() - startTime;
-    
+
     return {
       status: 'healthy',
       responseTime: `${responseTime}ms`,
