@@ -100,7 +100,11 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div 
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
+        role="region"
+        aria-label="Dashboard statistics"
+      >
         <StatsCard
           title="Total VMs"
           value={vms.length}
@@ -152,8 +156,8 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           {vms.length === 0 ? (
-            <div className="text-center py-12">
-              <Server className="h-16 w-16 mx-auto text-muted-foreground/50 mb-4" />
+            <div className="text-center py-12" role="status" aria-label="No virtual machines">
+              <Server className="h-16 w-16 mx-auto text-muted-foreground/50 mb-4" aria-hidden="true" />
               <p className="text-muted-foreground mb-4">
                 No VMs found. Create your first VM to get started.
               </p>
@@ -162,12 +166,18 @@ export default function DashboardPage() {
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div 
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+              role="list"
+              aria-label="Virtual machines list"
+            >
               {vms.map((vm, index) => (
                 <Card
                   key={vm.id}
                   className="hover-lift border-2 transition-all-smooth animate-scale-in opacity-0"
                   style={{ animationDelay: `${index * 50}ms`, animationFillMode: 'forwards' }}
+                  role="listitem"
+                  aria-label={`Virtual machine ${vm.name}`}
                 >
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
@@ -182,9 +192,11 @@ export default function DashboardPage() {
                           ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
                           : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
                           }`}
+                        role="status"
+                        aria-label={`Status: ${vm.status}`}
                       >
                         {vm.status === 'running' && (
-                          <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse-slow" />
+                          <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse-slow" aria-hidden="true" />
                         )}
                         {vm.status}
                       </span>
@@ -196,15 +208,16 @@ export default function DashboardPage() {
                         size="sm"
                         variant={vm.status === 'running' ? 'destructive' : 'default'}
                         className="flex-1 transition-all-smooth hover:scale-105"
+                        aria-label={vm.status === 'running' ? `Stop ${vm.name}` : `Start ${vm.name}`}
                       >
                         {vm.status === 'running' ? (
                           <>
-                            <Square className="h-3 w-3 mr-1" />
+                            <Square className="h-3 w-3 mr-1" aria-hidden="true" />
                             Stop
                           </>
                         ) : (
                           <>
-                            <Play className="h-3 w-3 mr-1" />
+                            <Play className="h-3 w-3 mr-1" aria-hidden="true" />
                             Start
                           </>
                         )}
@@ -213,6 +226,7 @@ export default function DashboardPage() {
                         size="sm"
                         variant="outline"
                         className="flex-1 transition-all-smooth hover:scale-105"
+                        aria-label={`Manage ${vm.name}`}
                       >
                         Manage
                       </Button>

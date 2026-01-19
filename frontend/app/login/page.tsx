@@ -60,7 +60,7 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-4" aria-label="Login form">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -71,6 +71,9 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 disabled={loading}
+                aria-required="true"
+                aria-invalid={error ? 'true' : 'false'}
+                aria-describedby={error ? 'login-error' : undefined}
               />
             </div>
 
@@ -84,11 +87,19 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 disabled={loading}
+                aria-required="true"
+                aria-invalid={error ? 'true' : 'false'}
+                aria-describedby={error ? 'login-error' : undefined}
               />
             </div>
 
             {error && (
-              <div className="p-3 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded-md">
+              <div 
+                id="login-error"
+                className="p-3 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded-md"
+                role="alert"
+                aria-live="assertive"
+              >
                 {error}
               </div>
             )}
@@ -97,10 +108,11 @@ export default function LoginPage() {
               type="submit"
               className="w-full"
               disabled={loading}
+              aria-busy={loading}
             >
               {loading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
                   Logging in...
                 </>
               ) : (

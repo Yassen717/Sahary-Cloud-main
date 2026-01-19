@@ -45,14 +45,18 @@ export default function Header() {
   };
 
   return (
-    <header className={cn(
-      "fixed top-0 w-full z-50 transition-all duration-300",
-      isScrolled
-        ? "bg-white/90 dark:bg-gray-900/90 backdrop-blur-md shadow-md py-2"
-        : "bg-transparent py-4"
-    )}>
+    <header 
+      className={cn(
+        "fixed top-0 w-full z-50 transition-all duration-300",
+        isScrolled
+          ? "bg-white/90 dark:bg-gray-900/90 backdrop-blur-md shadow-md py-2"
+          : "bg-transparent py-4"
+      )}
+      role="banner"
+      aria-label="Main navigation"
+    >
       <div className="container mx-auto px-4 flex justify-between items-center">
-        <Link href="/" className="flex items-center gap-2">
+        <Link href="/" className="flex items-center gap-2" aria-label="Sahary Cloud home">
           <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center transform rotate-12 hover:rotate-0 transition-transform duration-300">
             <Cloud size={24} className="text-white" />
           </div>
@@ -62,8 +66,8 @@ export default function Header() {
         </Link>
 
         <div className="hidden md:flex items-center gap-6">
-          <nav>
-            <ul className="flex items-center gap-6">
+          <nav aria-label="Primary navigation">
+            <ul className="flex items-center gap-6" role="list">
               <li>
                 <Link href="#features" className="hover:text-primary transition-colors">
                   Features
@@ -120,7 +124,14 @@ export default function Header() {
 
         <div className="md:hidden flex items-center gap-4">
           <ThemeToggle />
-          <Button variant="outline" size="icon" onClick={toggleMenu} aria-label="Toggle menu">
+          <Button 
+            variant="outline" 
+            size="icon" 
+            onClick={toggleMenu} 
+            aria-label={isOpen ? "Close menu" : "Open menu"}
+            aria-expanded={isOpen}
+            aria-controls="mobile-menu"
+          >
             {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
         </div>
@@ -128,9 +139,14 @@ export default function Header() {
 
       {/* Mobile menu */}
       {isOpen && (
-        <div className="md:hidden absolute top-full left-0 w-full bg-white dark:bg-gray-900 shadow-lg py-4">
-          <nav className="container mx-auto px-4">
-            <ul className="flex flex-col gap-4">
+        <div 
+          id="mobile-menu"
+          className="md:hidden absolute top-full left-0 w-full bg-white dark:bg-gray-900 shadow-lg py-4"
+          role="dialog"
+          aria-label="Mobile navigation menu"
+        >
+          <nav className="container mx-auto px-4" aria-label="Mobile navigation">
+            <ul className="flex flex-col gap-4" role="list">
               {isAuthenticated && user && (
                 <li className="pb-2 border-b">
                   <div className="flex items-center gap-3 py-2">

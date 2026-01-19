@@ -8,6 +8,7 @@ import { initErrorTracking } from '@/lib/error-tracking';
 import Script from 'next/script';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import { KeyboardShortcutsDialog } from '@/components/keyboard-shortcuts-dialog';
 
 // Initialize error tracking
 if (typeof window !== 'undefined') {
@@ -159,6 +160,9 @@ export default function RootLayout({
               <Footer />
             </div>
             <Toaster />
+            <div className="fixed bottom-4 right-4 z-50">
+              <KeyboardShortcutsDialog />
+            </div>
           </AuthProvider>
         </ThemeProvider>
       </body>
