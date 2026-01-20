@@ -4,14 +4,31 @@
 
 /**
  * Sanitize HTML string to prevent XSS attacks
+ * Uses DOMParser for safer sanitization
  * @param dirty Untrusted HTML string
  * @returns Sanitized HTML string
  */
 export function sanitizeHtml(dirty: string): string {
-    // Create a temporary div element
-    const div = document.createElement('div');
-    div.textContent = dirty;
-    return div.innerHTML;
+    if (typeof window === 'undefined') return dirty;
+    
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(dirty, 'text/html');
+    
+    // Remove all script tags
+    const scripts = doc.querySelectorAll('script');
+    scripts.forEach(script => script.remove());
+    
+    // Remove event handlers
+    const allElements = doc.querySelectorAll('*');
+    allElements.forEach(el => {
+        Array.from(el.attributes).forEach(attr => {
+            if (attr.name.startsWith('on')) {
+                el.removeAttribute(attr.name);
+            }
+        });
+    });
+    
+    return doc.body.innerHTML;
 }
 
 /**
@@ -113,12 +130,36 @@ export function checkPasswordStrength(password: string): {
 }
 
 /**
- * Generate CSRF token (client-side placeholder)
- * In production, this should come from the server
+ * Generate CSRF token
  * @returns CSRF token
  */
 export function generateCsrfToken(): string {
-    return Math.random().toString(36).substring(2) + Date.now().toString(36);
+    if (typeof window === 'undefined') return '';
+    
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Store CSRF token in sessionStorage
+ * @param token CSRF token
+ */
+export function storeCsrfToken(token: string): void {
+    if (typeof window !== 'undefined') {
+        sessionStorage.setItem('csrf_token', token);
+    }
+}
+
+/**
+ * Get stored CSRF token
+ * @returns CSRF token or null
+ */
+export function getCsrfToken(): string | null {
+    if (typeof window !== 'undefined') {
+        return sessionStorage.getItem('csrf_token');
+    }
+    return null;
 }
 
 /**
@@ -149,3 +190,82 @@ export const securityHeaders = {
     'Permissions-Policy':
         'camera=(), microphone=(), geolocation=(), interest-cohort=()',
 };
+
+/**
+ * Rate limiter for client-side requests
+ */
+class RateLimiter {
+    private requests: Map<string, number[]> = new Map();
+    private limit: number;
+    private window: number;
+
+    constructor(limit: number = 10, windowMs: number = 60000) {
+        this.limit = limit;
+        this.window = windowMs;
+    }
+
+    canMakeRequest(key: string): boolean {
+        const now = Date.now();
+        const requests = this.requests.get(key) || [];
+        
+        // Remove old requests outside the window
+        const validRequests = requests.filter(time => now - time < this.window);
+        
+        if (validRequests.length >= this.limit) {
+            return false;
+        }
+        
+        validRequests.push(now);
+        this.requests.set(key, validRequests);
+        return true;
+    }
+
+    reset(key: string): void {
+        this.requests.delete(key);
+    }
+}
+
+export const rateLimiter = new RateLimiter();
+
+/**
+ * Detect suspicious patterns in input
+ * @param input User input
+ * @returns True if suspicious
+ */
+export function detectSuspiciousInput(input: string): boolean {
+    const suspiciousPatterns = [
+        /<script/i,
+        /javascript:/i,
+        /on\w+\s*=/i,
+        /<iframe/i,
+        /eval\(/i,
+        /document\.cookie/i,
+        /\.\.\/\.\.\//, // Path traversal
+    ];
+    
+    return suspiciousPatterns.some(pattern => pattern.test(input));
+}
+
+/**
+ * Log security event
+ * @param event Security event details
+ */
+export function logSecurityEvent(event: {
+    type: string;
+    severity: 'low' | 'medium' | 'high';
+    details: string;
+}): void {
+    if (process.env.NODE_ENV === 'development') {
+        console.warn('[Security Event]', event);
+    }
+    
+    // In production, send to monitoring service
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'production') {
+        // Send to your monitoring service
+        fetch('/api/security/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(event),
+        }).catch(() => {});
+    }
+}
