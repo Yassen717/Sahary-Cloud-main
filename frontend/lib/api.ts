@@ -1,5 +1,6 @@
 import { getStorageItem, setStorageItem, removeStorageItem } from './storage';
 import { cache, withCache } from './cache';
+import { rateLimiter, logSecurityEvent, getCsrfToken } from './security';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
 
@@ -41,6 +42,17 @@ export class ApiClient {
     // Initialize token on first request
     this.initToken();
 
+    // Rate limiting check
+    const rateLimitKey = `${endpoint}-${this.token || 'anonymous'}`;
+    if (!rateLimiter.canMakeRequest(rateLimitKey)) {
+      logSecurityEvent({
+        type: 'RATE_LIMIT_EXCEEDED',
+        severity: 'medium',
+        details: `Rate limit exceeded for endpoint: ${endpoint}`,
+      });
+      throw new Error('Too many requests. Please try again later.');
+    }
+
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...options.headers,
@@ -50,6 +62,13 @@ export class ApiClient {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${this.token}`;
     }
 
+    // Add CSRF token for state-changing requests
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(options.method || 'GET')) {
+      const csrfToken = getCsrfToken();
+      if (csrfToken) {
+        (headers as Record<string, string>)['X-CSRF-Token'] = csrfToken;
+      }
+    }
 
     const response = await fetch(`${this.baseURL}${endpoint}`, {
       ...options,
@@ -58,6 +77,16 @@ export class ApiClient {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: 'Request failed' }));
+      
+      // Log security-related errors
+      if (response.status === 401 || response.status === 403) {
+        logSecurityEvent({
+          type: 'AUTH_ERROR',
+          severity: 'medium',
+          details: `${response.status} error on ${endpoint}`,
+        });
+      }
+      
       throw new Error(error.message || `HTTP ${response.status}`);
     }
 
