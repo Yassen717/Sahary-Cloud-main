@@ -9,6 +9,7 @@ import Script from 'next/script';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { KeyboardShortcutsDialog } from '@/components/keyboard-shortcuts-dialog';
+import { SecurityMonitor } from '@/components/security-monitor';
 
 // Initialize error tracking
 if (typeof window !== 'undefined') {
@@ -152,6 +153,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
+            <SecurityMonitor />
             <div className="flex flex-col min-h-screen">
               <Header />
               <main id="main-content" className="flex-grow" role="main" aria-label="Main content">
