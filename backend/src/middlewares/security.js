@@ -21,7 +21,6 @@ class SecurityMiddleware {
       skipFailedRequests = false,
       keyGenerator = (req) => req.ip,
       skip = () => false,
-      onLimitReached = null,
     } = options;
 
     // Try to use Redis store if available
@@ -29,7 +28,7 @@ class SecurityMiddleware {
     try {
       const RedisStore = require('rate-limit-redis');
       const redisClient = createClient({ url: process.env.REDIS_URL });
-      
+
       store = new RedisStore({
         sendCommand: (...args) => redisClient.sendCommand(args),
       });
@@ -54,11 +53,14 @@ class SecurityMiddleware {
       keyGenerator,
       skip,
       store,
-      onLimitReached: (req, res, options) => {
+      handler: (req, res) => {
         console.warn(`Rate limit exceeded for IP: ${req.ip}, Path: ${req.path}`);
-        if (onLimitReached) {
-          onLimitReached(req, res, options);
-        }
+        res.status(429).json({
+          success: false,
+          error: 'Rate limit exceeded',
+          message,
+          retryAfter: Math.ceil(windowMs / 1000),
+        });
       },
     });
   }
@@ -99,9 +101,6 @@ class SecurityMiddleware {
         // Use email if provided, otherwise IP
         const email = req.body?.email;
         return email ? `auth:${email}` : `auth:${req.ip}`;
-      },
-      onLimitReached: (req, res, options) => {
-        console.warn(`Auth rate limit exceeded for: ${req.body?.email || req.ip}`);
       },
     });
   }
@@ -150,7 +149,7 @@ class SecurityMiddleware {
         delayMs: 100, // add 100ms delay
         maxDelayMs: 5000, // max 5 second delay
       }),
-      
+
       // Second layer: Block after excessive requests
       SecurityMiddleware.createAdvancedRateLimit({
         windowMs: 60 * 1000, // 1 minute
@@ -176,7 +175,7 @@ class SecurityMiddleware {
     return (req, res, next) => {
       const key = req.body?.email || req.ip;
       const now = Date.now();
-      
+
       if (!attempts.has(key)) {
         attempts.set(key, { count: 0, lockoutUntil: 0 });
       }
@@ -205,13 +204,13 @@ class SecurityMiddleware {
 
       // Monitor response to count failed attempts
       const originalSend = res.send;
-      res.send = function(data) {
+      res.send = function (data) {
         const response = typeof data === 'string' ? JSON.parse(data) : data;
-        
+
         if (res.statusCode === 401 || (response && !response.success)) {
           // Failed attempt
           attempt.count++;
-          
+
           if (attempt.count >= MAX_ATTEMPTS) {
             attempt.lockoutUntil = now + LOCKOUT_TIME;
             console.warn(`Account locked due to brute force: ${key}`);
@@ -242,11 +241,11 @@ class SecurityMiddleware {
             .replace(/on\w+\s*=/gi, '')
             .replace(/[<>]/g, '');
         }
-        
+
         if (Array.isArray(obj)) {
           return obj.map(sanitize);
         }
-        
+
         if (typeof obj === 'object' && obj !== null) {
           const sanitized = {};
           for (const [key, value] of Object.entries(obj)) {
@@ -254,14 +253,14 @@ class SecurityMiddleware {
           }
           return sanitized;
         }
-        
+
         return obj;
       };
 
       if (req.body) {
         req.body = sanitize(req.body);
       }
-      
+
       if (req.query) {
         req.query = sanitize(req.query);
       }
@@ -287,21 +286,21 @@ class SecurityMiddleware {
         if (typeof obj === 'string') {
           return suspiciousPatterns.some(pattern => pattern.test(obj));
         }
-        
+
         if (Array.isArray(obj)) {
           return obj.some(checkForSQLInjection);
         }
-        
+
         if (typeof obj === 'object' && obj !== null) {
           return Object.values(obj).some(checkForSQLInjection);
         }
-        
+
         return false;
       };
 
-      const hasSuspiciousContent = 
-        checkForSQLInjection(req.body) || 
-        checkForSQLInjection(req.query) || 
+      const hasSuspiciousContent =
+        checkForSQLInjection(req.body) ||
+        checkForSQLInjection(req.query) ||
         checkForSQLInjection(req.params);
 
       if (hasSuspiciousContent) {
@@ -336,21 +335,21 @@ class SecurityMiddleware {
         if (typeof obj === 'string') {
           return xssPatterns.some(pattern => pattern.test(obj));
         }
-        
+
         if (Array.isArray(obj)) {
           return obj.some(checkForXSS);
         }
-        
+
         if (typeof obj === 'object' && obj !== null) {
           return Object.values(obj).some(checkForXSS);
         }
-        
+
         return false;
       };
 
-      const hasXSSContent = 
-        checkForXSS(req.body) || 
-        checkForXSS(req.query) || 
+      const hasXSSContent =
+        checkForXSS(req.body) ||
+        checkForXSS(req.query) ||
         checkForXSS(req.params);
 
       if (hasXSSContent) {
@@ -376,7 +375,7 @@ class SecurityMiddleware {
 
     return (req, res, next) => {
       const contentLength = parseInt(req.headers['content-length'] || '0');
-      
+
       if (contentLength > maxSize) {
         return res.status(413).json({
           success: false,
@@ -432,21 +431,21 @@ class SecurityMiddleware {
     return (req, res, next) => {
       // Prevent clickjacking
       res.setHeader('X-Frame-Options', 'DENY');
-      
+
       // Prevent MIME type sniffing
       res.setHeader('X-Content-Type-Options', 'nosniff');
-      
+
       // Enable XSS protection
       res.setHeader('X-XSS-Protection', '1; mode=block');
-      
+
       // Strict transport security (HTTPS only)
       if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
         res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
       }
-      
+
       // Referrer policy
       res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-      
+
       // Permissions policy
       res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
 
@@ -461,10 +460,10 @@ class SecurityMiddleware {
   static securityLogging() {
     return (req, res, next) => {
       const startTime = Date.now();
-      
+
       // Log suspicious requests
-      const isSuspicious = 
-        req.path.includes('..') || 
+      const isSuspicious =
+        req.path.includes('..') ||
         req.path.includes('admin') ||
         req.path.includes('config') ||
         req.headers['user-agent']?.includes('bot') ||
@@ -477,7 +476,7 @@ class SecurityMiddleware {
       // Log response time and status
       res.on('finish', () => {
         const duration = Date.now() - startTime;
-        
+
         if (res.statusCode >= 400) {
           console.warn(`Error response: ${res.statusCode} ${req.method} ${req.path} (${duration}ms) from ${req.ip}`);
         }
@@ -498,18 +497,18 @@ class SecurityMiddleware {
 
       const runNext = (error) => {
         if (error) return next(error);
-        
+
         if (index >= middlewares.length) {
           return next();
         }
 
         const middleware = middlewares[index++];
-        
+
         if (Array.isArray(middleware)) {
           // Handle middleware arrays (like ddosProtection)
           return SecurityMiddleware.combineSecurityMiddlewares(middleware)(req, res, runNext);
         }
-        
+
         middleware(req, res, runNext);
       };
 
