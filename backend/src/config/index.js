@@ -1,5 +1,14 @@
 require('dotenv').config();
 
+// Validate environment variables on startup (skip in test)
+if (process.env.NODE_ENV !== 'test') {
+  const { validateEnv, printEnvSummary } = require('./env.validation');
+  validateEnv();
+  if (process.env.LOG_LEVEL === 'debug' || process.env.NODE_ENV === 'development') {
+    printEnvSummary();
+  }
+}
+
 const config = {
   // Server configuration
   server: {
@@ -21,15 +30,15 @@ const config = {
 
   // JWT configuration
   jwt: {
-    secret: process.env.JWT_SECRET || 'sahary-cloud-jwt-secret',
+    secret: process.env.JWT_SECRET,
     expiresIn: process.env.JWT_EXPIRE || '30d',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'sahary-cloud-refresh-secret',
+    refreshSecret: process.env.JWT_REFRESH_SECRET,
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRE || '7d',
   },
 
   // Session configuration
   session: {
-    secret: process.env.SESSION_SECRET || 'sahary-cloud-session-secret',
+    secret: process.env.SESSION_SECRET,
     maxAge: parseInt(process.env.SESSION_MAX_AGE) || 24 * 60 * 60 * 1000, // 24 hours
   },
 
@@ -69,6 +78,10 @@ const config = {
   docker: {
     host: process.env.DOCKER_HOST || 'unix:///var/run/docker.sock',
     registry: process.env.DOCKER_REGISTRY || 'registry.saharycloud.com',
+    tlsVerify: process.env.DOCKER_TLS_VERIFY === 'true',
+    certPath: process.env.DOCKER_CERT_PATH || '',
+    vmNetwork: process.env.DOCKER_VM_NETWORK || 'sahary-vm-network',
+    vmSubnet: process.env.DOCKER_VM_SUBNET || '172.25.0.0/16',
   },
 
   // File upload configuration
@@ -109,19 +122,5 @@ const config = {
     enableEmailNotifications: process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'false',
   },
 };
-
-// Validation
-const requiredEnvVars = [
-  'DATABASE_URL',
-  'JWT_SECRET',
-  'JWT_REFRESH_SECRET',
-];
-
-const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
-
-if (missingEnvVars.length > 0 && process.env.NODE_ENV !== 'test') {
-  console.error('Missing required environment variables:', missingEnvVars);
-  process.exit(1);
-}
 
 module.exports = config;
