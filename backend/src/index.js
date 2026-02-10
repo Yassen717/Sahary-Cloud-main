@@ -7,6 +7,7 @@ const session = require('express-session');
 const RedisStore = require('connect-redis').default;
 const { connectDatabase, checkDatabaseHealth } = require('./config/database');
 const redisService = require('./services/redisService');
+const dockerService = require('./services/dockerService');
 const logger = require('./utils/logger');
 const { errorHandler, notFoundHandler, handleUnhandledRejection, handleUncaughtException } = require('./middlewares/errorHandler');
 const { requestLogger } = require('./middlewares/requestLogger');
@@ -114,6 +115,7 @@ const setupSession = (client) => {
 // Health check endpoint
 app.get('/health', async (req, res) => {
   const dbHealth = await checkDatabaseHealth();
+  const dockerHealth = await dockerService.getHealthStatus();
 
   res.status(dbHealth.status === 'healthy' ? 200 : 503).json({
     status: dbHealth.status === 'healthy' ? 'OK' : 'ERROR',
@@ -122,7 +124,8 @@ app.get('/health', async (req, res) => {
     environment: process.env.NODE_ENV,
     version: process.env.npm_package_version || '1.0.0',
     database: dbHealth,
-    redis: redisClient ? 'connected' : 'disconnected'
+    redis: redisClient ? 'connected' : 'disconnected',
+    docker: dockerHealth,
   });
 });
 
@@ -173,6 +176,9 @@ process.on('SIGTERM', async () => {
   // Disconnect Redis
   await redisService.disconnect();
 
+  // Disconnect Docker
+  await dockerService.disconnect();
+
   process.exit(0);
 });
 
@@ -194,6 +200,9 @@ process.on('SIGINT', async () => {
   // Disconnect Redis
   await redisService.disconnect();
 
+  // Disconnect Docker
+  await dockerService.disconnect();
+
   process.exit(0);
 });
 
@@ -206,6 +215,9 @@ if (process.env.NODE_ENV !== 'test') {
 
       // Connect to Redis (optional)
       await redisService.connect();
+
+      // Connect to Docker daemon (optional)
+      await dockerService.connect();
 
       // Only setup Redis-dependent features if connected
       if (redisService.isReady()) {
@@ -240,6 +252,7 @@ if (process.env.NODE_ENV !== 'test') {
         console.log(`❤️  Health Check: http://${HOST}:${PORT}/health`);
         console.log(`🗄️  Database: Connected`);
         console.log(`🔴 Redis: ${redisService.isReady() ? 'Connected' : 'Disconnected'}`);
+        console.log(`🐳 Docker: ${dockerService.isReady() ? 'Connected' : 'Disconnected'}`);
         console.log(`📈 Usage Collector: Started`);
         console.log(`💰 Invoice Generator: Started`);
         console.log(`🌞 Solar Data Collector: Started`);

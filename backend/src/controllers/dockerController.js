@@ -7,12 +7,31 @@ const { validationResult } = require('express-validator');
  */
 class DockerController {
   /**
+   * Check if Docker service is available.
+   * Returns an error response and true (meaning 'handled') if Docker is not ready.
+   * @param {Object} res - Express response object
+   * @returns {boolean} true if request was handled (Docker unavailable), false otherwise
+   */
+  _requireDocker(res) {
+    if (!dockerService.isReady()) {
+      res.status(503).json({
+        success: false,
+        message: 'Docker service is not available. VM management features are disabled.',
+      });
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Create a new container
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
    */
   async createContainer(req, res) {
     try {
+      if (this._requireDocker(res)) return;
+
       // Check validation errors
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -47,6 +66,7 @@ class DockerController {
    */
   async startContainer(req, res) {
     try {
+      if (this._requireDocker(res)) return;
       const { containerId } = req.params;
 
       const containerStatus = await dockerService.startContainer(containerId);
@@ -73,6 +93,7 @@ class DockerController {
    */
   async stopContainer(req, res) {
     try {
+      if (this._requireDocker(res)) return;
       const { containerId } = req.params;
       const { timeout = 10 } = req.body;
 
@@ -100,6 +121,7 @@ class DockerController {
    */
   async restartContainer(req, res) {
     try {
+      if (this._requireDocker(res)) return;
       const { containerId } = req.params;
       const { timeout = 10 } = req.body;
 
@@ -127,6 +149,7 @@ class DockerController {
    */
   async removeContainer(req, res) {
     try {
+      if (this._requireDocker(res)) return;
       const { containerId } = req.params;
       const { force = false } = req.body;
 
@@ -153,6 +176,7 @@ class DockerController {
    */
   async getContainerStatus(req, res) {
     try {
+      if (this._requireDocker(res)) return;
       const { containerId } = req.params;
 
       const containerStatus = await dockerService.getContainerStatus(containerId);
@@ -185,6 +209,7 @@ class DockerController {
    */
   async getContainerStats(req, res) {
     try {
+      if (this._requireDocker(res)) return;
       const { containerId } = req.params;
 
       const stats = await dockerService.getContainerStats(containerId);
@@ -210,8 +235,9 @@ class DockerController {
    */
   async listContainers(req, res) {
     try {
+      if (this._requireDocker(res)) return;
       const { vmId, status } = req.query;
-      
+
       const filters = {};
       if (vmId) filters['label'] = [`sahary.vm.id=${vmId}`];
       if (status) filters['status'] = [status];
@@ -240,6 +266,7 @@ class DockerController {
    */
   async pullImage(req, res) {
     try {
+      if (this._requireDocker(res)) return;
       const { imageName } = req.body;
 
       if (!imageName) {
