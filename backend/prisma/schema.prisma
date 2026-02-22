@@ -78,6 +78,10 @@ model VirtualMachine {
   usageRecords UsageRecord[]
   backups     Backup[]
 
+  @@index([userId])
+  @@index([userId, status])
+  @@index([status])
+  @@index([dockerContainerId])
   @@map("virtual_machines")
 }
 
@@ -112,6 +116,11 @@ model Invoice {
   items       InvoiceItem[]
   payments    Payment[]
 
+  @@index([userId])
+  @@index([userId, status])
+  @@index([status])
+  @@index([dueDate])
+  @@index([createdAt])
   @@map("invoices")
 }
 
@@ -161,6 +170,8 @@ model Payment {
   invoiceId   String
   invoice     Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
+  @@index([invoiceId])
+  @@index([status])
   @@map("payments")
 }
 
@@ -187,6 +198,10 @@ model UsageRecord {
   vmId        String?
   vm          VirtualMachine? @relation(fields: [vmId], references: [id], onDelete: SetNull)
 
+  @@index([userId])
+  @@index([vmId])
+  @@index([userId, timestamp])
+  @@index([timestamp])
   @@map("usage_records")
 }
 
@@ -212,6 +227,8 @@ model SolarData {
   
   timestamp   DateTime @default(now())
 
+  @@index([timestamp])
+  @@index([systemStatus])
   @@map("solar_data")
 }
 
@@ -234,6 +251,8 @@ model Session {
   userId      String?
   user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
+  @@index([expiresAt])
   @@map("sessions")
 }
 
@@ -254,6 +273,9 @@ model Notification {
   userId      String
   user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
+  @@index([userId, isRead])
+  @@index([createdAt])
   @@map("notifications")
 }
 
@@ -281,6 +303,9 @@ model Backup {
   userId      String
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([vmId])
+  @@index([userId])
+  @@index([status])
   @@map("backups")
 }
 
@@ -305,6 +330,10 @@ model AuditLog {
   userId      String?
   user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
 
+  @@index([userId])
+  @@index([action])
+  @@index([resource, resourceId])
+  @@index([timestamp])
   @@map("audit_logs")
 }
 
@@ -361,6 +390,9 @@ model SolarAlert {
   createdAt   DateTime      @default(now())
   resolvedAt  DateTime?
 
+  @@index([resolved])
+  @@index([severity])
+  @@index([createdAt])
   @@map("solar_alerts")
 }
 
@@ -372,6 +404,7 @@ model EmergencyLog {
   data        String?       // JSON string with additional data
   timestamp   DateTime      @default(now())
 
+  @@index([timestamp])
   @@map("emergency_logs")
 }
 
@@ -382,5 +415,6 @@ model SystemStatus {
   message     String
   timestamp   DateTime @default(now())
 
+  @@index([timestamp])
   @@map("system_status")
 }
