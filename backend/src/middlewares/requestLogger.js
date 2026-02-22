@@ -2,7 +2,7 @@ const logger = require('../utils/logger');
 
 /**
  * Request Logger Middleware
- * Logs HTTP requests with timing information
+ * Logs HTTP requests with timing information and correlation IDs
  */
 
 const requestLogger = (req, res, next) => {
@@ -10,6 +10,7 @@ const requestLogger = (req, res, next) => {
 
   // Log request start
   logger.http(`→ ${req.method} ${req.originalUrl}`, {
+    correlationId: req.correlationId,
     method: req.method,
     url: req.originalUrl,
     ip: req.ip,
@@ -21,7 +22,7 @@ const requestLogger = (req, res, next) => {
   const originalSend = res.send;
   res.send = function (data) {
     const responseTime = Date.now() - startTime;
-    
+
     // Log response
     logger.logRequest(req, res, responseTime);
 
@@ -38,6 +39,7 @@ const requestLogger = (req, res, next) => {
  */
 const errorRequestLogger = (err, req, res, next) => {
   logger.error('Request Error', {
+    correlationId: req.correlationId,
     error: err.message,
     stack: err.stack,
     method: req.method,

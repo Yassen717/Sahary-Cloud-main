@@ -11,6 +11,9 @@ const dockerService = require('./services/dockerService');
 const logger = require('./utils/logger');
 const { errorHandler, notFoundHandler, handleUnhandledRejection, handleUncaughtException } = require('./middlewares/errorHandler');
 const { requestLogger } = require('./middlewares/requestLogger');
+const { correlationId } = require('./middlewares/correlationId');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./config/swagger');
 require('dotenv').config();
 
 // Handle unhandled rejections and uncaught exceptions
@@ -23,6 +26,9 @@ const HOST = process.env.HOST || 'localhost';
 
 // Redis client for sessions (will be initialized in startServer)
 let redisClient;
+
+// Correlation ID — must be first so all logs contain the ID
+app.use(correlationId);
 
 // Security middleware
 app.use(helmet({
@@ -111,6 +117,21 @@ const setupSession = (client) => {
     }
   }));
 };
+
+// API Documentation — available in non-production environments
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+    customSiteTitle: 'Sahary Cloud API Docs',
+    swaggerOptions: {
+      persistAuthorization: true,
+      docExpansion: 'list',
+    },
+  }));
+  app.get('/api-docs.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(swaggerSpec);
+  });
+}
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
