@@ -3,7 +3,7 @@ const AuthController = require('../controllers/authController');
 const { validate } = require('../middlewares/validation');
 const { authenticate, optionalAuth, requireEmailVerification } = require('../middlewares/auth');
 const { authRateLimit, apiRateLimit, bruteForceProtection, sanitizeInput, xssProtection } = require('../middlewares/security');
-const { 
+const {
   registerSchema,
   loginSchema,
   updateProfileSchema,
@@ -25,20 +25,64 @@ router.use(sanitizeInput());
 router.use(xssProtection());
 
 /**
- * @route   POST /api/v1/auth/register
- * @desc    Register a new user
- * @access  Public
+ * @swagger
+ * /auth/register:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Register a new user
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/RegisterRequest'
+ *     responses:
+ *       201:
+ *         description: User registered successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       400:
+ *         description: Validation error or email already registered
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
-router.post('/register', 
+router.post('/register',
   authRateLimit(),
   validate(registerSchema),
   AuthController.register
 );
 
 /**
- * @route   POST /api/v1/auth/login
- * @desc    Login user
- * @access  Public
+ * @swagger
+ * /auth/login:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Login and get tokens
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/LoginRequest'
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       401:
+ *         description: Invalid credentials
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.post('/login',
   authRateLimit(),
@@ -48,9 +92,31 @@ router.post('/login',
 );
 
 /**
- * @route   POST /api/v1/auth/refresh
- * @desc    Refresh access token
- * @access  Public
+ * @swagger
+ * /auth/refresh:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Refresh access token
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: New access token issued
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.post('/refresh',
   apiRateLimit(),
@@ -58,9 +124,16 @@ router.post('/refresh',
 );
 
 /**
- * @route   POST /api/v1/auth/logout
- * @desc    Logout user
- * @access  Private
+ * @swagger
+ * /auth/logout:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Logout current session
+ *     responses:
+ *       200:
+ *         description: Logged out successfully
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.post('/logout',
   apiRateLimit(),
@@ -126,9 +199,25 @@ router.post('/resend-verification',
 );
 
 /**
- * @route   GET /api/v1/auth/profile
- * @desc    Get current user profile
- * @access  Private
+ * @swagger
+ * /auth/profile:
+ *   get:
+ *     tags: [Auth]
+ *     summary: Get current user profile
+ *     responses:
+ *       200:
+ *         description: User profile
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/profile',
   apiRateLimit(),

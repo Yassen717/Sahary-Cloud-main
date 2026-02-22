@@ -4,7 +4,7 @@ const { validate } = require('../middlewares/validation');
 const { authenticate, requireEmailVerification } = require('../middlewares/auth');
 const { requirePermission, requireAnyPermission } = require('../middlewares/rbac');
 const { apiRateLimit, sanitizeInput, xssProtection } = require('../middlewares/security');
-const { 
+const {
   createVMSchema,
   updateVMSchema,
   vmActionSchema,
@@ -26,9 +26,36 @@ router.use(sanitizeInput());
 router.use(xssProtection());
 
 /**
- * @route   POST /api/v1/vms
- * @desc    Create a new VM
- * @access  Private (User+)
+ * @swagger
+ * /vms:
+ *   post:
+ *     tags: [VMs]
+ *     summary: Create a new virtual machine
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateVMRequest'
+ *     responses:
+ *       201:
+ *         description: VM created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   $ref: '#/components/schemas/VirtualMachine'
+ *       400:
+ *         description: Validation error or resource limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.post('/',
   apiRateLimit(),
@@ -40,9 +67,40 @@ router.post('/',
 );
 
 /**
- * @route   GET /api/v1/vms
- * @desc    Get user's VMs
- * @access  Private (User+)
+ * @swagger
+ * /vms:
+ *   get:
+ *     tags: [VMs]
+ *     summary: Get all VMs for the current user
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [RUNNING, STOPPED, PAUSED, ERROR]
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
+ *     responses:
+ *       200:
+ *         description: List of VMs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/VirtualMachine'
+ *                 pagination:
+ *                   $ref: '#/components/schemas/Pagination'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/',
   apiRateLimit(),
@@ -143,9 +201,23 @@ router.delete('/:id',
 );
 
 /**
- * @route   POST /api/v1/vms/:id/start
- * @desc    Start VM
- * @access  Private (Owner or Admin)
+ * @swagger
+ * /vms/{id}/start:
+ *   post:
+ *     tags: [VMs]
+ *     summary: Start a VM
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: VM started
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       503:
+ *         $ref: '#/components/responses/ServiceUnavailable'
  */
 router.post('/:id/start',
   apiRateLimit(),
@@ -156,9 +228,23 @@ router.post('/:id/start',
 );
 
 /**
- * @route   POST /api/v1/vms/:id/stop
- * @desc    Stop VM
- * @access  Private (Owner or Admin)
+ * @swagger
+ * /vms/{id}/stop:
+ *   post:
+ *     tags: [VMs]
+ *     summary: Stop a running VM
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: VM stopped
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       503:
+ *         $ref: '#/components/responses/ServiceUnavailable'
  */
 router.post('/:id/stop',
   apiRateLimit(),
