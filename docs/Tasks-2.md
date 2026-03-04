@@ -565,34 +565,46 @@
 ---
 
 ### 8.2 Deployment Guide
-**Status:** ❌ Not Started  
+**Status:** ✅ COMPLETED  
 **Priority:** HIGH  
-**Estimated Time:** 2 hours
+**Completed:** 2026-03-04
 
-**Tasks:**
-- [ ] Create production deployment guide
-- [ ] Document infrastructure requirements
-- [ ] Add troubleshooting section
-- [ ] Create backup/restore guide
-- [ ] Add monitoring setup guide
+**What Was Done:**
+- ✅ Created `docs/DEPLOYMENT_GUIDE.md`
+- ✅ Infrastructure requirements table (CPU, RAM, disk, ports)
+- ✅ Server setup (Node.js, Docker, nginx, certbot)
+- ✅ Full environment variables section for production
+- ✅ Database setup and migration commands
+- ✅ PM2 and systemd service options for running backend
+- ✅ nginx reverse proxy config for API + frontend
+- ✅ SSL/HTTPS with Certbot auto-renewal
+- ✅ Health checks, log file locations, PM2 monitoring
+- ✅ Database backup (manual + automated cron) and restore
+- ✅ Troubleshooting table for common errors
 
-**Commit:** `docs(deploy): add comprehensive production deployment guide`
+**Commit:** See next commit
 
 ---
 
 ### 8.3 Developer Guide
-**Status:** ⚠️ Partial  
+**Status:** ✅ COMPLETED  
 **Priority:** MEDIUM  
-**Estimated Time:** 2 hours
+**Completed:** 2026-03-04
 
-**Tasks:**
-- [ ] Create development setup guide
-- [ ] Document code architecture
-- [ ] Add contribution guidelines
-- [ ] Create coding standards document
-- [ ] Add testing guidelines
+**What Was Done:**
+- ✅ Created `docs/DEVELOPER_GUIDE.md`
+- ✅ Prerequisites and local setup (5-step quickstart)
+- ✅ Full project structure map with annotations
+- ✅ All npm scripts documented for backend and frontend
+- ✅ Code architecture: request lifecycle, service layer pattern
+- ✅ API conventions: response shape, status codes, Swagger UI link
+- ✅ Database workflow: schema changes, indexes, Prisma Studio
+- ✅ New feature checklist (backend + frontend)
+- ✅ Coding standards for JS and TypeScript
+- ✅ Testing guidelines with example test
+- ✅ Contribution workflow with PR checklist
 
-**Commit:** `docs(dev): add developer guide and contribution guidelines`
+**Commit:** See next commit
 
 ---
 
