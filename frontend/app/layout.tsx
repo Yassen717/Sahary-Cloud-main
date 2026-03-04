@@ -10,6 +10,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { KeyboardShortcutsDialog } from '@/components/keyboard-shortcuts-dialog';
 import { SecurityMonitor } from '@/components/security-monitor';
+import WebVitalsReporter from '@/components/web-vitals-reporter';
 
 // Initialize error tracking
 if (typeof window !== 'undefined') {
@@ -102,6 +103,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
+        {/* Web Vitals — invisible, fires Core Web Vitals listeners */}
+        <WebVitalsReporter />
         {/* Skip to main content link for keyboard users */}
         <a href="#main-content" className="skip-link">
           Skip to main content
