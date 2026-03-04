@@ -59,6 +59,8 @@
     "rate-limit-redis": "^4.2.0",
     "redis": "^4.6.11",
     "stripe": "^14.9.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
     "uuid": "^9.0.1",
     "validator": "^13.11.0",
     "winston": "^3.11.0",
