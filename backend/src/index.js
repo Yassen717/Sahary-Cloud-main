@@ -1,3 +1,4 @@
+const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -14,6 +15,7 @@ const { requestLogger } = require('./middlewares/requestLogger');
 const { correlationId } = require('./middlewares/correlationId');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
+const { initSocket } = require('./socket');
 require('dotenv').config();
 
 // Handle unhandled rejections and uncaught exceptions
@@ -265,8 +267,11 @@ if (process.env.NODE_ENV !== 'test') {
       const cacheCleanup = require('./jobs/cacheCleanup');
       cacheCleanup.start();
 
-      // Start HTTP server
-      app.listen(PORT, HOST, () => {
+      // Create HTTP server and attach Socket.io
+      const httpServer = http.createServer(app);
+      initSocket(httpServer);
+
+      httpServer.listen(PORT, HOST, () => {
         console.log(`🚀 Sahary Cloud API Server running on http://${HOST}:${PORT}`);
         console.log(`📊 Environment: ${process.env.NODE_ENV}`);
         console.log(`🔗 API Base URL: http://${HOST}:${PORT}/api`);
@@ -274,6 +279,7 @@ if (process.env.NODE_ENV !== 'test') {
         console.log(`🗄️  Database: Connected`);
         console.log(`🔴 Redis: ${redisService.isReady() ? 'Connected' : 'Disconnected'}`);
         console.log(`🐳 Docker: ${dockerService.isReady() ? 'Connected' : 'Disconnected'}`);
+        console.log(`🖥️  WebSocket: Enabled (/terminal)`);
         console.log(`📈 Usage Collector: Started`);
         console.log(`💰 Invoice Generator: Started`);
         console.log(`🌞 Solar Data Collector: Started`);
