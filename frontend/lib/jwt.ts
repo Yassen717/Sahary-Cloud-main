@@ -43,7 +43,8 @@ export function getUserFromToken(token: string): any {
   return {
     id: decoded.userId || decoded.id,
     email: decoded.email,
-    name: decoded.name,
+    firstName: decoded.firstName ?? '',
+    lastName: decoded.lastName ?? '',
     role: decoded.role,
   };
 }

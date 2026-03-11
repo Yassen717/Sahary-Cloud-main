@@ -211,14 +211,14 @@ export default function ProfilePage() {
           <div className="relative group">
             <div className="absolute inset-0 bg-gradient-to-r from-primary to-green-500 rounded-full blur opacity-75 group-hover:opacity-100 transition-all-smooth animate-pulse-slow"></div>
             <Avatar className="h-24 w-24 relative border-4 border-background transition-all-smooth group-hover:scale-110">
-              <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${currentUser.name || currentUser.email}`} />
+              <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${`${currentUser.firstName ?? ''} ${currentUser.lastName ?? ''}`.trim() || currentUser.email}`} />
               <AvatarFallback className="bg-primary text-primary-foreground text-3xl font-bold">
-                {getInitials(currentUser.name || currentUser.email)}
+                {getInitials(`${currentUser.firstName ?? ''} ${currentUser.lastName ?? ''}`.trim() || currentUser.email)}
               </AvatarFallback>
             </Avatar>
           </div>
           <div className="flex-1">
-            <h2 className="text-2xl font-semibold">{currentUser.name || 'User'}</h2>
+            <h2 className="text-2xl font-semibold">{`${currentUser.firstName ?? ''} ${currentUser.lastName ?? ''}`.trim() || 'User'}</h2>
             <p className="text-muted-foreground flex items-center gap-2 mt-1">
               <Mail className="h-4 w-4" />
               {currentUser.email}

@@ -50,7 +50,8 @@ import {
 interface User {
   id: string;
   email: string;
-  name: string;
+  firstName: string;
+  lastName: string;
   role: 'user' | 'admin';
   status: 'active' | 'suspended' | 'pending';
   createdAt: string;
@@ -144,7 +145,7 @@ export default function UsersManagementPage() {
     if (searchQuery) {
       filtered = filtered.filter(user =>
         user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.name.toLowerCase().includes(searchQuery.toLowerCase())
+        `${user.firstName} ${user.lastName}`.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
@@ -360,7 +361,7 @@ export default function UsersManagementPage() {
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-semibold">{user.name}</h3>
+                      <h3 className="font-semibold">{`${user.firstName} ${user.lastName}`.trim()}</h3>
                       {getRoleBadge(user.role)}
                       {getStatusBadge(user.status)}
                     </div>

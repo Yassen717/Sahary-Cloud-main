@@ -31,7 +31,7 @@ export function UserProfileDropdown() {
   };
 
   // Get safe user name with fallback
-  const userName = user.name || user.email || 'User';
+  const userName = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || user.email || 'User';
   const userInitials = getInitials(userName);
 
   return (

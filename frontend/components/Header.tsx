@@ -151,10 +151,10 @@ export default function Header() {
                 <li className="pb-2 border-b">
                   <div className="flex items-center gap-3 py-2">
                     <div className="h-10 w-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold">
-                      {user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                      {`${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase() || user.email?.[0]?.toUpperCase() || 'U'}
                     </div>
                     <div>
-                      <p className="font-medium">{user.name}</p>
+                      <p className="font-medium">{`${user.firstName} ${user.lastName}`.trim() || user.email}</p>
                       <p className="text-xs text-muted-foreground">{user.email}</p>
                     </div>
                   </div>
