@@ -164,6 +164,7 @@ app.get('/api', (req, res) => {
 
 // Routes
 app.use('/api/v1/auth', require('./routes/auth'));
+app.use('/api/v1/hosting', require('./routes/hosting'));
 app.use('/api/v1/vms', require('./routes/vms'));
 app.use('/api/v1/docker', require('./routes/docker'));
 app.use('/api/v1/payments', require('./routes/payments'));
