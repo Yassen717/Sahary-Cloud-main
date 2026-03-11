@@ -102,6 +102,25 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Blocking script: apply saved theme BEFORE first paint to prevent flash */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var theme = localStorage.getItem('theme');
+                  if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                    document.documentElement.classList.add('dark');
+                  } else {
+                    document.documentElement.classList.remove('dark');
+                  }
+                } catch(e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
       <body className={inter.className}>
         {/* Web Vitals — invisible, fires Core Web Vitals listeners */}
         <WebVitalsReporter />
@@ -151,15 +170,16 @@ export default function RootLayout({
         />
         <ThemeProvider
           attribute="class"
-          defaultTheme="light"
+          defaultTheme="system"
           enableSystem
           disableTransitionOnChange
+          storageKey="theme"
         >
           <AuthProvider>
             <SecurityMonitor />
             <div className="flex flex-col min-h-screen">
               <Header />
-              <main id="main-content" className="flex-grow" role="main" aria-label="Main content">
+              <main id="main-content" className="flex-grow pt-20" role="main" aria-label="Main content">
                 {children}
               </main>
               <Footer />
