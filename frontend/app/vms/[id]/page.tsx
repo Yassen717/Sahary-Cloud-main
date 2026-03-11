@@ -2,17 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { apiClient } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  Loader2, 
-  Server, 
-  Play, 
-  Square, 
-  RotateCw, 
+import {
+  Loader2,
+  Server,
+  Play,
+  Square,
+  RotateCw,
   Trash2,
   ArrowLeft,
   Cpu,
@@ -20,10 +21,13 @@ import {
   Network,
   Activity,
   Clock,
-  AlertCircle
+  AlertCircle,
+  Terminal
 } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
+
+const VmTerminal = dynamic(() => import('@/components/vm/VmTerminal'), { ssr: false });
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,6 +48,7 @@ interface VM {
   storage: number;
   ipAddress?: string;
   os?: string;
+  dockerContainerId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -209,7 +214,7 @@ export default function VMDetailsPage() {
             Back to VMs
           </Link>
         </Button>
-        
+
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
             <div className="p-3 bg-primary/10 rounded-lg">
@@ -222,7 +227,7 @@ export default function VMDetailsPage() {
               </p>
             </div>
           </div>
-          
+
           <Badge className={getStatusColor(vm.status)}>
             {vm.status}
           </Badge>
@@ -244,7 +249,7 @@ export default function VMDetailsPage() {
               )}
               Start
             </Button>
-            
+
             <Button
               variant="outline"
               onClick={() => handleAction('stop')}
@@ -257,7 +262,7 @@ export default function VMDetailsPage() {
               )}
               Stop
             </Button>
-            
+
             <Button
               variant="outline"
               onClick={() => handleAction('restart')}
@@ -270,7 +275,7 @@ export default function VMDetailsPage() {
               )}
               Restart
             </Button>
-            
+
             <div className="ml-auto">
               <Button
                 variant="destructive"
@@ -290,6 +295,10 @@ export default function VMDetailsPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="stats">Statistics</TabsTrigger>
           <TabsTrigger value="network">Network</TabsTrigger>
+          <TabsTrigger value="console">
+            <Terminal className="mr-1.5 h-3.5 w-3.5" />
+            Console
+          </TabsTrigger>
           <TabsTrigger value="logs">Logs</TabsTrigger>
         </TabsList>
 
@@ -536,6 +545,15 @@ export default function VMDetailsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Console Tab */}
+        <TabsContent value="console" className="space-y-6">
+          <VmTerminal
+            vmId={vm.id}
+            containerId={vm.dockerContainerId ?? null}
+            status={vm.status}
+          />
         </TabsContent>
 
         {/* Logs Tab */}
