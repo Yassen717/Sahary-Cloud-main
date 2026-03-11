@@ -377,18 +377,22 @@
 ---
 
 ### 5.3 VM Console (WebSocket)
-**Status:** ❌ Not Started  
+**Status:** ✅ COMPLETED  
 **Priority:** MEDIUM  
-**Estimated Time:** 4 hours
+**Completed:** 2026-03-11
 
-**Tasks:**
-- [ ] Add Socket.io to backend
-- [ ] Implement Docker exec WebSocket proxy
-- [ ] Create terminal component in frontend
-- [ ] Add authentication for WebSocket
-- [ ] Test terminal functionality
+**What Was Done:**
+- ✅ Installed `socket.io` in backend, `socket.io-client` + `@xterm/xterm` + `@xterm/addon-fit` in frontend
+- ✅ Created `backend/src/socket/terminal.js` — JWT-authenticated PTY handler via Docker exec (TTY mode)
+- ✅ Created `backend/src/socket/index.js` — Socket.io server init on `/terminal` namespace
+- ✅ Updated `backend/src/index.js` to use `http.createServer` + `initSocket`
+- ✅ Created `frontend/hooks/useVmTerminal.ts` — xterm.js + socket.io-client lifecycle hook
+- ✅ Created `frontend/components/vm/VmTerminal.tsx` — dark terminal panel with toolbar (Connect/Disconnect/Clear)
+- ✅ Added **Console** tab to the VM detail page (`app/vms/[id]/page.tsx`) via dynamic import (no SSR)
+- ✅ Ownership check: backend verifies `VM.userId === socket.user.id` before opening exec session
+- ✅ TypeScript check passes with 0 errors; all JS files pass `node --check`
 
-**Commit:** `feat(vm): add WebSocket-based VM console terminal`
+**Commit:** `feat(vm): add WebSocket-based VM console terminal with xterm.js`
 
 ---
 
