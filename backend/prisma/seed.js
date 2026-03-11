@@ -123,6 +123,49 @@ async function main() {
     });
   }
 
+  // Create hosting plans
+  console.log('🌐 Creating hosting plans...');
+  const hostingPlans = [
+    {
+      name: 'Starter',
+      description: 'Perfect for personal sites and small projects',
+      diskGB: 1,
+      bandwidthGB: 10,
+      maxDomains: 1,
+      maxDatabases: 1,
+      maxFtpAccounts: 1,
+      monthlyPrice: 3.00,
+    },
+    {
+      name: 'Pro',
+      description: 'For growing websites and small businesses',
+      diskGB: 10,
+      bandwidthGB: 100,
+      maxDomains: 5,
+      maxDatabases: 5,
+      maxFtpAccounts: 5,
+      monthlyPrice: 8.00,
+    },
+    {
+      name: 'Business',
+      description: 'High-performance hosting for demanding sites',
+      diskGB: 30,
+      bandwidthGB: 500,
+      maxDomains: 20,
+      maxDatabases: 20,
+      maxFtpAccounts: 20,
+      monthlyPrice: 18.00,
+    },
+  ];
+
+  for (const plan of hostingPlans) {
+    await prisma.hostingPlan.upsert({
+      where: { name: plan.name },
+      update: plan,
+      create: plan,
+    });
+  }
+
   // Create admin user
   console.log('👤 Creating admin user...');
   const hashedPassword = await bcrypt.hash('admin123!@#', 12);
@@ -230,7 +273,8 @@ async function main() {
   console.log(`
 📊 Created:
 - ${systemSettings.length} system settings
-- ${pricingPlans.length} pricing plans
+- ${pricingPlans.length} VM pricing plans
+- ${hostingPlans.length} hosting plans (Starter / Pro / Business)
 - 1 admin user (admin@saharycloud.com / admin123!@#)
 - 1 demo user (demo@saharycloud.com / demo123)
 - ${solarDataPoints.length} solar data points
