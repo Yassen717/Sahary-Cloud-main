@@ -38,6 +38,7 @@ model User {
   notifications   Notification[]
   auditLogs       AuditLog[]
   backups         Backup[]
+  hostingAccounts HostingAccount[]
 
   @@map("users")
 }
@@ -417,4 +418,82 @@ model SystemStatus {
 
   @@index([timestamp])
   @@map("system_status")
+}
+
+// Hosting Plan Model - خطط الاستضافة المشتركة
+model HostingPlan {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  description   String?
+
+  // Resource limits
+  diskGB        Int      // Disk quota in GB
+  bandwidthGB   Int      // Monthly bandwidth quota in GB
+  maxDomains    Int      @default(1)
+  maxDatabases  Int      @default(1)
+  maxFtpAccounts Int     @default(1)
+
+  // Pricing
+  monthlyPrice  Decimal  @default(0.00)
+
+  // Stripe integration
+  stripeProductId String?
+  stripePriceId   String?
+
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  hostingAccounts HostingAccount[]
+
+  @@map("hosting_plans")
+}
+
+// Hosting Account Model - حسابات الاستضافة
+model HostingAccount {
+  id            String   @id @default(cuid())
+
+  // Primary domain / subdomain
+  domain        String   @unique
+
+  // Resource quotas (copied from plan at creation time)
+  diskQuota     Int      // GB
+  bandwidthQuota Int     // GB / month
+
+  // Current usage (updated by cron)
+  diskUsed      Float    @default(0) // GB
+  bandwidthUsed Float    @default(0) // GB used this cycle
+
+  // Status
+  status        String   @default("ACTIVE") // ACTIVE | SUSPENDED | TERMINATED
+
+  // FTP credentials
+  ftpUser       String?  @unique
+  ftpPassword   String?  // hashed
+
+  // Primary database credentials
+  dbName        String?
+  dbUser        String?
+  dbPassword    String?  // hashed
+
+  // SSL
+  sslEnabled    Boolean  @default(false)
+  sslExpiresAt  DateTime?
+
+  // Timestamps
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  terminatedAt  DateTime?
+
+  // Relations
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId        String
+  plan          HostingPlan  @relation(fields: [planId], references: [id])
+
+  @@index([userId])
+  @@index([domain])
+  @@index([status])
+  @@map("hosting_accounts")
 }
