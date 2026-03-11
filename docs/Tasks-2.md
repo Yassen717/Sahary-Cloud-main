@@ -1,5 +1,185 @@
 # Critical Tasks - Sahary Cloud Platform
 
+---
+
+## ⚠️ MVP PIVOT — March 2026
+
+**New direction: Shared Web Hosting (not VPS/VM).**
+
+The platform is pivoting to focus on **shared web hosting** as the MVP product. Docker-based VM management is being deferred. The core value proposition is: affordable, solar-powered shared hosting with a clean control panel.
+
+**What this means for open tasks:**
+- Tasks marked `🚫 POST-MVP` are deferred — do not work on them until core hosting is shipped.
+- Tasks marked `✅ KEEP` remain relevant for the shared hosting MVP.
+- See [`docs/mvp.md`](./mvp.md) for the definitive MVP feature list and roadmap.
+
+---
+
+## 🎯 Priority 0: Shared Hosting Core (MVP — BUILD THESE FIRST)
+
+### 0.1 Hosting Account Model & Provisioning
+**Status:** ✅ Completed — 2026-03-11
+**Priority:** CRITICAL
+
+**What Was Done:**
+- ✅ Added `HostingPlan` model to Prisma schema (name, diskGB, bandwidthGB, maxDomains, maxDatabases, maxFtpAccounts, monthlyPrice, Stripe fields)
+- ✅ Added `HostingAccount` model to Prisma schema (userId, planId, domain, diskQuota, bandwidthQuota, diskUsed, bandwidthUsed, status, ftpUser/Password, dbName/User/Password, SSL fields)
+- ✅ Seeded default plans: `Starter` (1 GB / $3/mo), `Pro` (10 GB / $8/mo), `Business` (30 GB / $18/mo)
+- ✅ Created `hostingService.js` with account provisioning logic (credential generation, domain validation)
+- ✅ Created `hostingController.js` with full HTTP layer and input validation
+- ✅ Created `src/routes/hosting.js` and registered at `/api/v1/hosting`
+- ✅ Created migration `20260311000000_add_hosting_models` (apply when DB is up)
+- ⚠️ Migration SQL is written — run `npx prisma migrate dev` once the DB is running
+
+**Endpoints:**
+- `GET  /api/v1/hosting/plans` — public, list plans
+- `POST /api/v1/hosting/accounts` — provision account (auth required) `{ planId, domain }`
+- `GET  /api/v1/hosting/accounts/me` — get current user's account (auth required)
+- `DELETE /api/v1/hosting/accounts/:id` — terminate account (auth required)
+
+**Commit:** `feat(hosting): add hosting account model and provisioning API`
+
+---
+
+### 0.2 Domain & Subdomain Management
+**Status:** ❌ Not Started
+**Priority:** CRITICAL
+
+**Tasks:**
+- [ ] Auto-assign a subdomain on signup: `<username>.sahary.cloud`
+- [ ] Allow users to add a custom domain (store + verify via DNS TXT record)
+- [ ] Backend: `POST /api/hosting/domains` — add domain
+- [ ] Backend: `GET /api/hosting/domains` — list user's domains
+- [ ] Backend: `DELETE /api/hosting/domains/:id` — remove domain
+- [ ] Show DNS pointing instructions in the control panel frontend
+
+**Commit:** `feat(hosting): add domain and subdomain management`
+
+---
+
+### 0.3 Nginx Virtual Host Management
+**Status:** ❌ Not Started
+**Priority:** CRITICAL
+
+**Tasks:**
+- [ ] Backend service: `vhostService.js` — generate and write Nginx vhost config per account
+- [ ] On account creation: write `/etc/nginx/sites-available/<domain>.conf` + symlink + reload
+- [ ] On domain add/remove: update vhost config and reload Nginx
+- [ ] On account termination: remove vhost config + reload
+- [ ] Handle both subdomain and custom domain configs
+
+**Commit:** `feat(hosting): add Nginx virtual host provisioning service`
+
+---
+
+### 0.4 SSL Auto-Provisioning (Let's Encrypt)
+**Status:** ❌ Not Started
+**Priority:** HIGH
+
+**Tasks:**
+- [ ] Install `acme-client` or wrap `certbot` CLI in a Node service
+- [ ] On domain verification success: run `certbot --nginx -d <domain>` (or acme HTTP-01 challenge)
+- [ ] Store cert expiry date in `HostingAccount` model
+- [ ] Add cron job: renew certs expiring within 30 days
+- [ ] Update Nginx vhost to use SSL after cert issued
+
+**Commit:** `feat(hosting): add Let's Encrypt SSL auto-provisioning`
+
+---
+
+### 0.5 File Manager (Web-based)
+**Status:** ❌ Not Started
+**Priority:** HIGH
+
+**Tasks:**
+- [ ] Backend: `GET /api/hosting/files?path=` — list directory
+- [ ] Backend: `POST /api/hosting/files/upload` — upload file (multipart, scoped to user's document root)
+- [ ] Backend: `DELETE /api/hosting/files` — delete file/folder
+- [ ] Backend: `POST /api/hosting/files/rename` — rename/move file
+- [ ] Frontend: File manager page at `/dashboard/hosting/files` — tree view, upload, delete, rename
+- [ ] Enforce path restriction: all file operations limited to `/var/www/<account>/public_html`
+
+**Commit:** `feat(hosting): add web-based file manager with sandboxed file operations`
+
+---
+
+### 0.6 Database Provisioning (MySQL)
+**Status:** ❌ Not Started
+**Priority:** HIGH
+
+**Tasks:**
+- [ ] Add MySQL service to `docker-compose.dev.yml`
+- [ ] Backend service: `mysqlProvisionService.js` — `CREATE DATABASE`, `CREATE USER`, `GRANT` per account
+- [ ] On account creation: auto-provision one database + user with random password
+- [ ] Backend: `GET /api/hosting/databases` — list user's databases + credentials
+- [ ] Backend: `POST /api/hosting/databases` — create additional database (within plan limits)
+- [ ] Backend: `DELETE /api/hosting/databases/:id` — remove database
+- [ ] Show credentials (read-only display) in frontend control panel
+
+**Commit:** `feat(hosting): add MySQL database auto-provisioning per hosting account`
+
+---
+
+### 0.7 FTP Account Provisioning
+**Status:** ❌ Not Started
+**Priority:** MEDIUM
+
+**Tasks:**
+- [ ] Add vsftpd or Pure-FTPd to server setup (or use SFTP via SSH key injection)
+- [ ] On account creation: create OS/FTP user scoped to `/var/www/<account>/public_html`
+- [ ] Store hashed FTP credentials in `HostingAccount`
+- [ ] Backend: `POST /api/hosting/ftp/reset-password` — reset FTP password
+- [ ] Show FTP credentials in frontend control panel
+
+**Commit:** `feat(hosting): add FTP account provisioning with sandboxed access`
+
+---
+
+### 0.8 Control Panel Frontend (User Hosting Dashboard)
+**Status:** ❌ Not Started
+**Priority:** CRITICAL
+
+**Tasks:**
+- [ ] Page: `/dashboard/hosting` — hosting account overview (plan, usage bars for disk/bandwidth, status)
+- [ ] Page: `/dashboard/hosting/domains` — domain list, add/remove, DNS instructions, SSL status badge
+- [ ] Page: `/dashboard/hosting/files` — file manager (task 0.5)
+- [ ] Page: `/dashboard/hosting/databases` — database list + credentials
+- [ ] Page: `/dashboard/hosting/ftp` — FTP credentials + reset password
+- [ ] Replace VM-centric dashboard links with hosting-centric ones
+
+**Commit:** `feat(frontend): add hosting control panel pages`
+
+---
+
+### 0.9 Subscription Plans & Upgrade/Downgrade
+**Status:** ⚠️ Partial (billing models exist, hosting plans do not)
+**Priority:** HIGH
+
+**Tasks:**
+- [ ] Connect `HostingPlan` to Stripe Products/Prices
+- [ ] Page: `/pricing` — public plans page (Starter / Pro / Business)
+- [ ] Page: `/dashboard/subscription` — current plan, usage vs limits, upgrade/downgrade button
+- [ ] On plan change: update disk/bandwidth quota in `HostingAccount`
+- [ ] Block operations when quota is exceeded (upload, new DB, etc.)
+
+**Commit:** `feat(billing): connect hosting plans to Stripe subscriptions`
+
+---
+
+### 0.10 Usage Metering for Hosting
+**Status:** ❌ Not Started
+**Priority:** HIGH
+
+**Tasks:**
+- [ ] Daily cron job: scan `/var/www/<account>` for disk usage (`du -sb`) → store in `UsageRecord`
+- [ ] Daily cron job: read Nginx access logs or byte counters for bandwidth per account
+- [ ] Backend: `GET /api/hosting/usage` — return current cycle disk + bandwidth usage
+- [ ] Frontend: show usage bars in control panel (used / quota)
+
+**Commit:** `feat(hosting): add disk and bandwidth usage metering`
+
+---
+
 ## 🚨 Priority 1: Critical Production Blockers
 
 ### 1.1 Database Migration to PostgreSQL
@@ -164,17 +344,16 @@
 
 ### 2.4 HTTPS & SSL Configuration
 **Status:** ❌ Not Started  
-**Priority:** HIGH  
+**Priority:** HIGH — ✅ KEEP (MVP)
 **Estimated Time:** 2 hours
 
 **Tasks:**
-- [ ] Add SSL certificate configuration
-- [ ] Force HTTPS in production
-- [ ] Configure HSTS headers
-- [ ] Add SSL certificate renewal automation
+- [ ] Force HTTPS in production (reverse proxy / Nginx)
+- [ ] Configure HSTS headers via Helmet
+- [ ] SSL for the API domain (separate from per-hosting-account SSL in task 0.4)
 - [ ] Test SSL configuration
 
-**Commit:** `security(ssl): add HTTPS configuration and certificate management`
+**Commit:** `security(ssl): add HTTPS configuration and HSTS headers`
 
 ---
 
@@ -182,15 +361,10 @@
 
 ### 3.1 Frontend Unit Tests
 **Status:** ❌ Not Started  
-**Priority:** HIGH  
+**Priority:** 🚫 POST-MVP  
 **Estimated Time:** 4 hours
 
-**Tasks:**
-- [ ] Setup Jest + React Testing Library
-- [ ] Add tests for auth context
-- [ ] Add tests for API client
-- [ ] Add tests for utility functions
-- [ ] Add tests for critical components
+> Deferred until core hosting features are shipped.
 
 **Commit:** `test(frontend): add unit tests for core functionality`
 
@@ -198,15 +372,10 @@
 
 ### 3.2 Frontend Integration Tests
 **Status:** ❌ Not Started  
-**Priority:** MEDIUM  
+**Priority:** 🚫 POST-MVP  
 **Estimated Time:** 3 hours
 
-**Tasks:**
-- [ ] Setup Playwright or Cypress
-- [ ] Add login/register flow tests
-- [ ] Add VM management flow tests
-- [ ] Add dashboard data loading tests
-- [ ] Add error handling tests
+> Deferred. After MVP is live, replace VM flows with hosting flows.
 
 **Commit:** `test(frontend): add integration tests for user flows`
 
@@ -214,15 +383,10 @@
 
 ### 3.3 Backend Integration Tests Enhancement
 **Status:** ⚠️ Partial  
-**Priority:** MEDIUM  
+**Priority:** 🚫 POST-MVP  
 **Estimated Time:** 2 hours
 
-**Tasks:**
-- [ ] Add Docker service tests
-- [ ] Add payment integration tests
-- [ ] Add solar data collection tests
-- [ ] Add background job tests
-- [ ] Increase test coverage to 80%+
+> Deferred. Rewrite scope to cover hosting provisioning flows once built.
 
 **Commit:** `test(backend): enhance integration tests and increase coverage`
 
@@ -230,15 +394,9 @@
 
 ### 3.4 E2E Testing
 **Status:** ❌ Not Started  
-**Priority:** MEDIUM  
-**Estimated Time:** 4 hours
+**Priority:** 🚫 POST-MVP  
 
-**Tasks:**
-- [ ] Setup E2E test environment
-- [ ] Add complete user journey tests
-- [ ] Add VM lifecycle tests
-- [ ] Add billing flow tests
-- [ ] Add admin panel tests
+> Deferred until hosting provisioning is complete.
 
 **Commit:** `test(e2e): add end-to-end tests for critical user journeys`
 
@@ -296,15 +454,9 @@
 
 ### 4.4 Monitoring & Alerting
 **Status:** ❌ Not Started  
-**Priority:** HIGH  
-**Estimated Time:** 3 hours
+**Priority:** 🚫 POST-MVP  
 
-**Tasks:**
-- [ ] Setup Prometheus metrics collection
-- [ ] Configure Grafana dashboards
-- [ ] Add health check monitoring
-- [ ] Configure alerting rules
-- [ ] Add uptime monitoring
+> Prometheus + Grafana are overkill for MVP. The existing `/health` endpoint is sufficient. Revisit after launch.
 
 **Commit:** `feat(monitoring): add Prometheus metrics and Grafana dashboards`
 
@@ -312,15 +464,9 @@
 
 ### 4.5 Load Balancing & Scaling
 **Status:** ❌ Not Started  
-**Priority:** MEDIUM  
-**Estimated Time:** 3 hours
+**Priority:** 🚫 POST-MVP  
 
-**Tasks:**
-- [ ] Configure nginx as reverse proxy
-- [ ] Add load balancing for multiple backend instances
-- [ ] Implement horizontal scaling strategy
-- [ ] Add auto-scaling configuration
-- [ ] Test under load
+> Not needed until traffic justifies it. Single-node deployment is fine for MVP.
 
 **Commit:** `feat(scaling): add load balancing and horizontal scaling support`
 
@@ -377,8 +523,8 @@
 ---
 
 ### 5.3 VM Console (WebSocket)
-**Status:** ✅ COMPLETED  
-**Priority:** MEDIUM  
+**Status:** ✅ COMPLETED (code preserved, feature deferred for VPS product)  
+**Priority:** 🚫 NOT FOR SHARED HOSTING MVP  
 **Completed:** 2026-03-11
 
 **What Was Done:**
@@ -398,39 +544,19 @@
 
 ### 5.4 Real-time Notifications
 **Status:** ❌ Not Started  
-**Priority:** MEDIUM  
-**Estimated Time:** 3 hours
+**Priority:** 🚫 POST-MVP  
 
-**Tasks:**
-- [ ] Implement WebSocket for real-time updates
-- [ ] Add notification system in frontend
-- [ ] Create notification preferences
-- [ ] Add push notification support
-- [ ] Test notification delivery
+> Polling or simple toast notifications are sufficient for MVP. WebSocket push is a nice-to-have.
 
 **Commit:** `feat(notifications): add real-time notification system with WebSocket`
 
 ---
 
 ### 5.5 Solar API Integration
-**Status:** ✅ Implemented with Mock Data  
-**Priority:** MEDIUM  
-**Estimated Time:** 3 hours
+**Status:** ✅ Implemented with Mock Data — 🚫 Real Integration POST-MVP  
+**Priority:** LOW (keep mock data for now)  
 
-**Current State:**
-- ✅ Solar service implemented
-- ✅ Solar routes and controllers
-- ✅ Solar data model in database
-- ✅ Solar alert system
-- ✅ Emergency log system
-- ✅ Frontend displays solar data
-- ⚠️ Currently using mock/simulated data
-
-**Tasks:**
-- [ ] Integrate with actual solar monitoring hardware/API (when available)
-- [ ] Add real-time data streaming (WebSocket)
-- [ ] Implement data validation and sanitization
-- [ ] Test with real solar data
+> The solar display is a key differentiator and looks great with mock data. Real hardware integration deferred until MVP is live and hardware is available. Do not spend time on this now.
 
 **Commit:** `feat(solar): integrate real solar monitoring API with data validation`
 
