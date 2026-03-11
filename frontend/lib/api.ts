@@ -126,7 +126,7 @@ export class ApiClient {
   }
 
   async getMe() {
-    return this.request('/auth/me');
+    return this.request('/auth/profile');
   }
 
   async updateProfile(userData: any) {
