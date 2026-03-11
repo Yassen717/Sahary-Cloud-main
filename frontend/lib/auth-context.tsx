@@ -9,7 +9,8 @@ import { getStorageItem } from './storage';
 interface User {
   id: string;
   email: string;
-  name: string;
+  firstName: string;
+  lastName: string;
   role: string;
 }
 
@@ -82,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string, redirectTo?: string) => {
     const response = await apiClient.login(email, password);
-    setUser(response.user);
+    setUser(response.data?.user ?? null);
     
     // Redirect to the original page or dashboard
     if (redirectTo) {
@@ -94,8 +95,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (userData: any) => {
     const response = await apiClient.register(userData);
-    if (response.token) {
-      setUser(response.user);
+    if (response.data?.tokens?.accessToken) {
+      setUser(response.data.user ?? null);
       router.push('/dashboard');
     }
   };

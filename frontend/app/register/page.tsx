@@ -10,9 +10,12 @@ import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
+
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
-    name: '',
+    firstName: '',
+    lastName: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -37,8 +40,15 @@ export default function RegisterPage() {
       return;
     }
 
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters');
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+
+    if (!PASSWORD_REGEX.test(formData.password)) {
+      setError(
+        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)'
+      );
       return;
     }
 
@@ -46,7 +56,8 @@ export default function RegisterPage() {
 
     try {
       const response = await apiClient.register({
-        name: formData.name,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
         email: formData.email,
         password: formData.password,
       });
@@ -72,18 +83,33 @@ export default function RegisterPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleRegister} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
-              <Input
-                id="name"
-                name="name"
-                type="text"
-                placeholder="John Doe"
-                value={formData.name}
-                onChange={handleChange}
-                required
-                disabled={loading}
-              />
+            <div className="flex gap-3">
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="firstName">First Name</Label>
+                <Input
+                  id="firstName"
+                  name="firstName"
+                  type="text"
+                  placeholder="John"
+                  value={formData.firstName}
+                  onChange={handleChange}
+                  required
+                  disabled={loading}
+                />
+              </div>
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="lastName">Last Name</Label>
+                <Input
+                  id="lastName"
+                  name="lastName"
+                  type="text"
+                  placeholder="Doe"
+                  value={formData.lastName}
+                  onChange={handleChange}
+                  required
+                  disabled={loading}
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -112,6 +138,9 @@ export default function RegisterPage() {
                 required
                 disabled={loading}
               />
+              <p className="text-xs text-muted-foreground">
+                Min 8 characters with uppercase, lowercase, number &amp; special char (@$!%*?&amp;)
+              </p>
             </div>
 
             <div className="space-y-2">
