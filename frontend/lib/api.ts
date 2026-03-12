@@ -247,6 +247,45 @@ export class ApiClient {
       body: JSON.stringify({ status }),
     });
   }
+
+  // Hosting methods
+  async getHostingPlans() {
+    return this.request('/hosting/plans');
+  }
+
+  async getHostingAccount() {
+    return this.request('/hosting/accounts/me');
+  }
+
+  async createHostingAccount(planId: string, domain?: string) {
+    return this.request('/hosting/accounts', {
+      method: 'POST',
+      body: JSON.stringify({ planId, ...(domain ? { domain } : {}) }),
+    });
+  }
+
+  async terminateHostingAccount(id: string) {
+    return this.request(`/hosting/accounts/${id}`, { method: 'DELETE' });
+  }
+
+  async getHostingDomains() {
+    return this.request('/hosting/domains');
+  }
+
+  async addHostingDomain(domain: string) {
+    return this.request('/hosting/domains', {
+      method: 'POST',
+      body: JSON.stringify({ domain }),
+    });
+  }
+
+  async verifyHostingDomain(id: string) {
+    return this.request(`/hosting/domains/${id}/verify`, { method: 'POST' });
+  }
+
+  async removeHostingDomain(id: string) {
+    return this.request(`/hosting/domains/${id}`, { method: 'DELETE' });
+  }
 }
 
 // Create singleton instance only on client side
