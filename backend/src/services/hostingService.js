@@ -1,6 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const dns = require('dns').promises;
 const path = require('path');
 
 const prisma = new PrismaClient();
@@ -91,7 +92,7 @@ class HostingService {
    *
    * @param {string} userId  - authenticated user id
    * @param {string} planId  - chosen HostingPlan id
-   * @param {string} domain  - primary domain/subdomain for this account
+   * @param {string} [domain] - primary domain; omit to auto-assign <username>.sahary.cloud
    * @returns {{ account: object, credentials: object }}
    *          account — sanitized HostingAccount (no hashed passwords)
    *          credentials — plain-text ftp + db credentials (shown once only)
@@ -107,6 +108,14 @@ class HostingService {
     const existing = await prisma.hostingAccount.findFirst({ where: { userId } });
     if (existing) {
       throw new Error('User already has a hosting account');
+    }
+
+    // Auto-assign subdomain if no domain provided
+    if (!domain) {
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+      if (!user) throw new Error('User not found');
+      const emailPrefix = user.email.split('@')[0].replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 32) || 'user';
+      domain = await HostingService._uniqueSubdomain(emailPrefix);
     }
 
     // Domain uniqueness check (also enforced by DB unique index)
@@ -282,9 +291,56 @@ class HostingService {
     await prisma.hostingDomain.delete({ where: { id: domainId } });
   }
 
+  /**
+   * Verify domain ownership by checking for the DNS TXT record.
+   * The user must have added `sahary-verify=<verifyToken>` as a TXT record.
+   */
+  static async verifyDomain(userId, domainId) {
+    const account = await HostingService._requireActiveAccount(userId);
+
+    const record = await prisma.hostingDomain.findUnique({ where: { id: domainId } });
+    if (!record) throw new Error('Domain not found');
+    if (record.accountId !== account.id) throw new Error('Forbidden');
+    if (record.isVerified) return record; // already verified
+
+    let txtRecords;
+    try {
+      txtRecords = await dns.resolveTxt(record.domain);
+    } catch {
+      throw new Error('DNS lookup failed — make sure the TXT record has propagated');
+    }
+
+    const flat = txtRecords.flat();
+    const expected = `sahary-verify=${record.verifyToken}`;
+    if (!flat.includes(expected)) {
+      throw new Error('TXT record not found — add the verification record and try again');
+    }
+
+    return prisma.hostingDomain.update({
+      where: { id: domainId },
+      data: { isVerified: true },
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Generate a unique `<prefix>.sahary.cloud` subdomain, appending a numeric
+   * suffix if the base is already taken.
+   */
+  static async _uniqueSubdomain(prefix) {
+    let candidate = `${prefix}.${BASE_DOMAIN}`;
+    let taken = await prisma.hostingAccount.findUnique({ where: { domain: candidate } });
+    let i = 2;
+    while (taken) {
+      candidate = `${prefix}${i}.${BASE_DOMAIN}`;
+      taken = await prisma.hostingAccount.findUnique({ where: { domain: candidate } });
+      i++;
+    }
+    return candidate;
+  }
 
   static async _requireActiveAccount(userId) {
     const account = await prisma.hostingAccount.findFirst({

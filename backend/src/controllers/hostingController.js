@@ -44,15 +44,11 @@ class HostingController {
         return res.status(400).json({ success: false, message: 'planId is required' });
       }
 
-      if (!domain) {
-        return res.status(400).json({ success: false, message: 'domain is required' });
-      }
-
-      if (!isValidDomain(domain)) {
+      if (domain && !isValidDomain(domain)) {
         return res.status(400).json({ success: false, message: 'Invalid domain format' });
       }
 
-      const result = await HostingService.createAccount(userId, planId, domain.toLowerCase());
+      const result = await HostingService.createAccount(userId, planId, domain ? domain.toLowerCase() : undefined);
 
       res.status(201).json({
         success: true,
@@ -150,6 +146,24 @@ class HostingController {
     try {
       await HostingService.removeDomain(req.user.userId, req.params.id);
       res.status(200).json({ success: true, message: 'Domain removed' });
+    } catch (error) {
+      const status = HostingController._errorStatus(error);
+      res.status(status).json({ success: false, message: error.message });
+    }
+  }
+
+  /**
+   * POST /api/v1/hosting/domains/:id/verify
+   * Authenticated — trigger DNS TXT ownership check for a custom domain.
+   */
+  static async verifyDomain(req, res) {
+    try {
+      const record = await HostingService.verifyDomain(req.user.userId, req.params.id);
+      res.status(200).json({
+        success: true,
+        message: record.isVerified ? 'Domain verified successfully' : 'Verification pending',
+        data: record,
+      });
     } catch (error) {
       const status = HostingController._errorStatus(error);
       res.status(status).json({ success: false, message: error.message });

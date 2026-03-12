@@ -19,6 +19,7 @@ router.delete('/accounts/:id', authenticate, HostingController.terminateAccount)
 // ─── Domain management (authenticated) ───────────────────────────────────────
 router.get('/domains', authenticate, HostingController.listDomains);
 router.post('/domains', authenticate, HostingController.addDomain);
+router.post('/domains/:id/verify', authenticate, HostingController.verifyDomain);
 router.delete('/domains/:id', authenticate, HostingController.removeDomain);
 
 module.exports = router;
