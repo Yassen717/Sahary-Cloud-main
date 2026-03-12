@@ -8,12 +8,17 @@ const router = express.Router();
 router.use(sanitizeInput());
 router.use(xssProtection());
 
-// Public — list hosting plans
+// ─── Plans (public) ───────────────────────────────────────────────────────────
 router.get('/plans', HostingController.listPlans);
 
-// Protected — account management
+// ─── Account management (authenticated) ──────────────────────────────────────
 router.get('/accounts/me', authenticate, HostingController.getMyAccount);
 router.post('/accounts', authenticate, HostingController.createAccount);
 router.delete('/accounts/:id', authenticate, HostingController.terminateAccount);
+
+// ─── Domain management (authenticated) ───────────────────────────────────────
+router.get('/domains', authenticate, HostingController.listDomains);
+router.post('/domains', authenticate, HostingController.addDomain);
+router.delete('/domains/:id', authenticate, HostingController.removeDomain);
 
 module.exports = router;

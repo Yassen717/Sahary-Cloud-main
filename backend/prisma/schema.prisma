@@ -454,14 +454,17 @@ model HostingPlan {
 model HostingAccount {
   id            String   @id @default(cuid())
 
-  // Primary domain / subdomain
+  // Primary subdomain (auto-assigned: <username>.sahary.cloud)
   domain        String   @unique
+
+  // Absolute path to document root on the server
+  documentRoot  String?  // e.g. /var/www/<id>/public_html
 
   // Resource quotas (copied from plan at creation time)
   diskQuota     Int      // GB
   bandwidthQuota Int     // GB / month
 
-  // Current usage (updated by cron)
+  // Current usage (updated by metering cron)
   diskUsed      Float    @default(0) // GB
   bandwidthUsed Float    @default(0) // GB used this cycle
 
@@ -470,14 +473,14 @@ model HostingAccount {
 
   // FTP credentials
   ftpUser       String?  @unique
-  ftpPassword   String?  // hashed
+  ftpPassword   String?  // bcrypt hash — never returned in API responses
 
   // Primary database credentials
   dbName        String?
   dbUser        String?
-  dbPassword    String?  // hashed
+  dbPassword    String?  // bcrypt hash — never returned in API responses
 
-  // SSL
+  // SSL (primary domain)
   sslEnabled    Boolean  @default(false)
   sslExpiresAt  DateTime?
 
@@ -488,12 +491,39 @@ model HostingAccount {
 
   // Relations
   userId        String
-  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   planId        String
-  plan          HostingPlan  @relation(fields: [planId], references: [id])
+  plan          HostingPlan    @relation(fields: [planId], references: [id])
+  domains       HostingDomain[]
 
   @@index([userId])
   @@index([domain])
   @@index([status])
   @@map("hosting_accounts")
+}
+
+// Additional / Custom Domain Model
+model HostingDomain {
+  id           String   @id @default(cuid())
+  domain       String   @unique
+
+  // DNS verification
+  isVerified   Boolean  @default(false)
+  verifyToken  String?  // TXT record value shown to user
+
+  // SSL per domain
+  sslEnabled   Boolean  @default(false)
+  sslIssuedAt  DateTime?
+  sslExpiresAt DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  accountId    String
+  account      HostingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([domain])
+  @@map("hosting_domains")
 }

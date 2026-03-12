@@ -112,8 +112,10 @@ uploads/
 Dockerfile.dev
 
 # Prisma
-prisma/migrations/
-!prisma/migrations/.gitkeep
+# Migration directories and SQL files are version-controlled (schema history)
+# Only ignore dev.db (SQLite leftover) inside prisma/
+prisma/dev.db
+prisma/*.db
 
 # Test files
 test-results/
