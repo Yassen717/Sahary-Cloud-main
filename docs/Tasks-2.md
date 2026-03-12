@@ -42,16 +42,28 @@ The platform is pivoting to focus on **shared web hosting** as the MVP product. 
 ---
 
 ### 0.2 Domain & Subdomain Management
-**Status:** ❌ Not Started
+**Status:** ✅ Completed — 2026-03-12
 **Priority:** CRITICAL
 
-**Tasks:**
-- [ ] Auto-assign a subdomain on signup: `<username>.sahary.cloud`
-- [ ] Allow users to add a custom domain (store + verify via DNS TXT record)
-- [ ] Backend: `POST /api/hosting/domains` — add domain
-- [ ] Backend: `GET /api/hosting/domains` — list user's domains
-- [ ] Backend: `DELETE /api/hosting/domains/:id` — remove domain
-- [ ] Show DNS pointing instructions in the control panel frontend
+**What Was Done:**
+- ✅ Auto-assign `<emailprefix>.sahary.cloud` subdomain on hosting account creation (domain param now optional in `createAccount`)
+- ✅ Added `_uniqueSubdomain` helper to handle collisions (appends numeric suffix: `john2.sahary.cloud`)
+- ✅ Backend: `POST /api/v1/hosting/domains` — add custom domain (stores + generates DNS TXT `verifyToken`)
+- ✅ Backend: `GET /api/v1/hosting/domains` — list user's custom domains
+- ✅ Backend: `DELETE /api/v1/hosting/domains/:id` — remove custom domain
+- ✅ Backend: `POST /api/v1/hosting/domains/:id/verify` — DNS TXT ownership verification (Node `dns.promises.resolveTxt`)
+- ✅ Frontend: Domain management page at `/dashboard/hosting` with:
+  - Assigned subdomain display
+  - Add custom domain form
+  - Per-domain DNS TXT + A-record pointing instructions (copyable)
+  - Verify / remove buttons
+- ✅ Added hosting API methods to `apiClient` (`getHostingAccount`, `createHostingAccount`, `getHostingDomains`, `addHostingDomain`, `verifyHostingDomain`, `removeHostingDomain`, `terminateHostingAccount`)
+
+**Endpoints:**
+- `GET  /api/v1/hosting/domains` — list custom domains (auth required)
+- `POST /api/v1/hosting/domains` — add domain `{ domain }` (auth required)
+- `POST /api/v1/hosting/domains/:id/verify` — trigger DNS TXT check (auth required)
+- `DELETE /api/v1/hosting/domains/:id` — remove domain (auth required)
 
 **Commit:** `feat(hosting): add domain and subdomain management`
 
