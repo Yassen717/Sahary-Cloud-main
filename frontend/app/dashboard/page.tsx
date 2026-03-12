@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { apiClient } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Server, Zap, DollarSign, Activity, Play, Square } from 'lucide-react';
+import { Loader2, Server, Zap, DollarSign, Activity, Play, Square, Globe, ChevronRight } from 'lucide-react';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 
 // Lazy load heavy chart component
@@ -147,6 +148,24 @@ export default function DashboardPage() {
 
       {/* Solar Chart */}
       <SolarChart />
+
+      {/* Quick navigation */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
+        <Link href="/dashboard/hosting" className="block hover-lift">
+          <Card className="h-full border-2 hover:border-primary/50 transition-all-smooth cursor-pointer">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-5 w-5 text-primary" />
+                  <CardTitle className="text-base">Hosting</CardTitle>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <CardDescription>Manage your domains and subdomain</CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
+      </div>
 
       {/* VMs Grid */}
       <Card className="animate-fade-in opacity-0 stagger-3">

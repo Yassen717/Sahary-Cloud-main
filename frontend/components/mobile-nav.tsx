@@ -12,12 +12,14 @@ import {
   Sun, 
   Receipt, 
   Shield,
+  Globe,
   X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
+  { name: 'Hosting', href: '/dashboard/hosting', icon: Globe },
   { name: 'Virtual Machines', href: '/vms', icon: Server },
   { name: 'Solar', href: '/solar', icon: Sun },
   { name: 'Billing', href: '/billing', icon: Receipt },
