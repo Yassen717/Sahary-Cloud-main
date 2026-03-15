@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const dns = require('dns').promises;
 const path = require('path');
+const VhostService = require('./vhostService');
 
 const prisma = new PrismaClient();
 
@@ -147,24 +148,38 @@ class HostingService {
     const accountId = createId();
     const documentRoot = buildDocumentRoot(accountId);
 
-    const account = await prisma.hostingAccount.create({
-      data: {
-        id: accountId,
-        domain,
-        documentRoot,
-        diskQuota: plan.diskGB,
-        bandwidthQuota: plan.bandwidthGB,
-        status: 'ACTIVE',
-        ftpUser,
-        ftpPassword: ftpCred.hashed,
-        dbName,
-        dbUser,
-        dbPassword: dbCred.hashed,
-        userId,
-        planId,
-      },
-      include: { plan: true, domains: true },
-    });
+    let account;
+    try {
+      account = await prisma.hostingAccount.create({
+        data: {
+          id: accountId,
+          domain,
+          documentRoot,
+          diskQuota: plan.diskGB,
+          bandwidthQuota: plan.bandwidthGB,
+          status: 'ACTIVE',
+          ftpUser,
+          ftpPassword: ftpCred.hashed,
+          dbName,
+          dbUser,
+          dbPassword: dbCred.hashed,
+          userId,
+          planId,
+        },
+        include: { plan: true, domains: true },
+      });
+
+      await VhostService.syncAccountVhost({
+        primaryDomain: account.domain,
+        customDomains: [],
+        documentRoot: account.documentRoot,
+      });
+    } catch (error) {
+      if (account?.id) {
+        await prisma.hostingAccount.delete({ where: { id: account.id } });
+      }
+      throw error;
+    }
 
     // Plain-text credentials returned ONCE — never persisted in plain form
     return {
@@ -220,6 +235,8 @@ class HostingService {
       throw new Error('Account is already terminated');
     }
 
+    await VhostService.removeAccountVhost(account.domain);
+
     const updated = await prisma.hostingAccount.update({
       where: { id: accountId },
       data: { status: 'TERMINATED', terminatedAt: new Date() },
@@ -265,13 +282,27 @@ class HostingService {
 
     const verifyToken = crypto.randomBytes(24).toString('hex');
 
-    return prisma.hostingDomain.create({
+    const created = await prisma.hostingDomain.create({
       data: {
         domain,
         verifyToken,
         accountId: account.id,
       },
     });
+
+    try {
+      const customDomains = await HostingService._getCustomDomains(account.id);
+      await VhostService.syncAccountVhost({
+        primaryDomain: account.domain,
+        customDomains,
+        documentRoot: account.documentRoot,
+      });
+    } catch (error) {
+      await prisma.hostingDomain.delete({ where: { id: created.id } });
+      throw error;
+    }
+
+    return created;
   }
 
   /**
@@ -289,6 +320,29 @@ class HostingService {
     }
 
     await prisma.hostingDomain.delete({ where: { id: domainId } });
+
+    try {
+      const customDomains = await HostingService._getCustomDomains(account.id);
+      await VhostService.syncAccountVhost({
+        primaryDomain: account.domain,
+        customDomains,
+        documentRoot: account.documentRoot,
+      });
+    } catch (error) {
+      await prisma.hostingDomain.create({
+        data: {
+          id: record.id,
+          domain: record.domain,
+          isVerified: record.isVerified,
+          verifyToken: record.verifyToken,
+          sslEnabled: record.sslEnabled,
+          sslIssuedAt: record.sslIssuedAt,
+          sslExpiresAt: record.sslExpiresAt,
+          accountId: record.accountId,
+        },
+      });
+      throw error;
+    }
   }
 
   /**
@@ -316,10 +370,19 @@ class HostingService {
       throw new Error('TXT record not found — add the verification record and try again');
     }
 
-    return prisma.hostingDomain.update({
+    const updated = await prisma.hostingDomain.update({
       where: { id: domainId },
       data: { isVerified: true },
     });
+
+    const customDomains = await HostingService._getCustomDomains(account.id);
+    await VhostService.syncAccountVhost({
+      primaryDomain: account.domain,
+      customDomains,
+      documentRoot: account.documentRoot,
+    });
+
+    return updated;
   }
 
   // ---------------------------------------------------------------------------
@@ -351,6 +414,14 @@ class HostingService {
       throw new Error('No active hosting account found');
     }
     return account;
+  }
+
+  static async _getCustomDomains(accountId) {
+    const records = await prisma.hostingDomain.findMany({
+      where: { accountId, isVerified: true },
+      select: { domain: true },
+    });
+    return records.map((r) => r.domain);
   }
 }
 
