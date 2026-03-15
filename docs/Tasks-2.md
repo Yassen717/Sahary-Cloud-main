@@ -70,15 +70,31 @@ The platform is pivoting to focus on **shared web hosting** as the MVP product. 
 ---
 
 ### 0.3 Nginx Virtual Host Management
-**Status:** ❌ Not Started
+**Status:** ✅ Completed — 2026-03-15
 **Priority:** CRITICAL
 
-**Tasks:**
-- [ ] Backend service: `vhostService.js` — generate and write Nginx vhost config per account
-- [ ] On account creation: write `/etc/nginx/sites-available/<domain>.conf` + symlink + reload
-- [ ] On domain add/remove: update vhost config and reload Nginx
-- [ ] On account termination: remove vhost config + reload
-- [ ] Handle both subdomain and custom domain configs
+**What Was Done:**
+- ✅ Added `backend/src/services/vhostService.js`:
+  - Generates Nginx vhost config with `server_name` including primary subdomain + verified custom domains
+  - Writes config to `sites-available` and ensures symlink in `sites-enabled`
+  - Runs `nginx -t` then reload command, with structured error logging
+- ✅ Integrated vhost sync into account lifecycle in `hostingService.js`:
+  - On account creation: create vhost for primary subdomain
+  - On domain add/remove: reconcile vhost config and reload Nginx
+  - On domain verification: re-sync to include verified custom domain in `server_name`
+  - On account termination: remove vhost config and reload Nginx before status transition
+- ✅ Added rollback safety around provisioning/domain mutations when vhost sync fails
+- ✅ Added environment controls in `env.validation.js` + `.env.example`:
+  - `HOSTING_NGINX_ENABLED`
+  - `HOSTING_NGINX_SITES_AVAILABLE`
+  - `HOSTING_NGINX_SITES_ENABLED`
+  - `HOSTING_NGINX_TEST_COMMAND`
+  - `HOSTING_NGINX_RELOAD_COMMAND`
+  - `HOSTING_WWW_BASE`
+  - `HOSTING_BASE_DOMAIN`
+
+**Operational Note:**
+- Vhost operations are feature-flagged. Set `HOSTING_NGINX_ENABLED=true` on server environments where Nginx paths/permissions are available.
 
 **Commit:** `feat(hosting): add Nginx virtual host provisioning service`
 
@@ -750,117 +766,85 @@ The platform is pivoting to focus on **shared web hosting** as the MVP product. 
 
 ---
 
-## 🎯 Summary
+## 🎯 MVP Execution Snapshot (Shared Hosting)
 
-### ✅ Completed Features:
-- Redis integration with session management
-- Email service with templates
-- JWT authentication and authorization
-- Rate limiting and DDoS protection
-- Input validation and sanitization
-- Error handling and logging
-- Solar monitoring system (mock data)
-- Payment/billing infrastructure
-- Frontend-Backend integration
-- VM management system
-- Admin panel
-- Caching system
+**Last updated:** 2026-03-15
 
-### 🚧 In Progress / Needs Completion:
-- Database migration to PostgreSQL (ready, needs execution)
-- Docker host configuration for VM management
-- Testing infrastructure (unit, integration, E2E)
-- CI/CD pipeline
-- Production deployment setup
-- Monitoring and alerting
+### ✅ Completed For MVP
+- Shared hosting data model + provisioning API foundation (task 0.1)
+- Domain and subdomain management with DNS TXT verification (task 0.2)
+- Auth, sessions, Redis, validation, and logging foundations
+- PostgreSQL migration completed and operational
+- Billing primitives already present (payments/invoices) and ready to be connected to hosting plans
+- Solar dashboard support available with mock data (acceptable for MVP launch)
 
-### 📊 Updated Priority Count:
-**Total Critical Tasks:** 2 (down from 5)  
-**Total High Priority Tasks:** 4 (down from 11)  
-**Total Medium Priority Tasks:** 8 (down from 12)  
-**Total Low Priority Tasks:** 6 (up from 2)  
+### 🚧 Current MVP Blockers (Build Next)
+- 0.4 SSL issuance/renewal automation
+- 0.5 File manager APIs + UI (sandboxed)
+- 0.6 MySQL provisioning service and APIs
+- 0.8 Hosting control panel pages (overview/domains/files/databases/ftp)
+- 0.9 Stripe-hosting plan linkage + plan change flows
+- 0.10 Disk/bandwidth metering + quota enforcement
+- 2.4 Platform HTTPS hardening (API/domain-level)
 
-**Estimated Remaining Time:** ~35 hours (down from ~70 hours)
+### ⏭️ Explicitly Deferred Until After MVP
+- VM/VPS-specific flows (console, VM-centric UX)
+- Real-time WebSocket notifications
+- Full frontend unit/integration/E2E test expansion
+- Prometheus/Grafana, load balancing, i18n expansion
+- CI/CD hardening and advanced deployment automation
 
-**Overall Progress:** ~50% Complete
-
----
-
-## 📅 Recommended Sprint Plan
-
-### Sprint 1 (Week 1): Production Blockers
-- Database Migration to PostgreSQL
-- Redis Production Setup
-- Docker Host Configuration
-- Environment Variables Validation
-- Error Handling & Logging
-
-### Sprint 2 (Week 2): Security & Testing
-- JWT Token Security
-- API Rate Limiting Enhancement
-- Input Validation Hardening
-- Frontend Unit Tests
-- Backend Integration Tests Enhancement
-
-### Sprint 3 (Week 3): Deployment & Monitoring
-- CI/CD Pipeline
-- Docker Production Images
-- Database Backup & Recovery
-- Monitoring & Alerting
-- Email Service Integration
-
-### Sprint 4 (Week 4): Critical Features
-- Payment Gateway Integration
-- Solar API Integration
-- VM Console (WebSocket)
-- Real-time Notifications
-- HTTPS & SSL Configuration
-
-### Sprint 5 (Week 5): Performance & Polish
-- Database Query Optimization
-- API Response Caching
-- Frontend Performance
-- API Documentation
-- Deployment Guide
-
-### Sprint 6 (Week 6): Internationalization & Final Testing
-- i18n Setup
-- E2E Testing
-- Load Balancing & Scaling
-- Developer Guide
-- Final QA and Bug Fixes
+### 📊 Progress View
+- MVP Core (Priority 0): 3/10 complete
+- Critical Production Foundations (Priority 1): 5/5 complete
+- Security MVP Must-Haves: HTTPS/SSL hardening pending
+- Overall MVP Readiness: Foundation complete, hosting runtime features in progress
 
 ---
 
-## 🎉 Integration Status
+## 📅 Recommended Sprint Plan (Pivot-Aligned)
 
-### Backend ✅
-- All core services implemented and working
-- API endpoints functional
-- Database models complete
-- Authentication working
-- Redis caching operational
-- Background jobs running
+### Sprint A (Week 1): Hosting Runtime Foundation
+- Validate task 0.3 in staging (Nginx enabled, config write + reload paths verified)
+- Implement task 0.6 (`mysqlProvisionService.js`) and provision DB on account creation
+- Add/update integration tests for account creation + domain add/remove side effects
 
-### Frontend ✅
-- All pages connected to backend
-- API client fully integrated
-- Authentication flow working
-- Dashboard displays real data
-- VM management UI functional
-- Solar monitoring displays data
-- Billing pages integrated
+### Sprint B (Week 2): Secure Hosting Delivery
+- Implement task 0.4 SSL automation + renewal job
+- Implement task 2.4 platform HTTPS/HSTS hardening
+- Add operational runbook notes for SSL failure/retry paths
 
-### Integration ✅
-- Frontend successfully communicates with backend
-- Data flows correctly between layers
-- Error handling works across stack
-- Caching improves performance
-- Real-time updates functional
+### Sprint C (Week 3): User Control Panel MVP
+- Implement task 0.5 file manager backend and `/dashboard/hosting/files`
+- Implement task 0.8 overview/domains/databases/ftp pages and remove VM-first nav emphasis
+- Validate path sandboxing and permission boundaries
+
+### Sprint D (Week 4): Billing + Usage Enforcement
+- Implement task 0.9 hosting subscription flow with Stripe webhook-driven state changes
+- Implement task 0.10 usage metering (disk/bandwidth) and quota enforcement
+- Finalize launch checklist against `docs/mvp.md` definition of done
 
 ---
 
-**Last Updated:** 2026-01-21  
-**Status:** 50% Complete - Ready for Production Preparation  
-**Next Review:** After PostgreSQL Migration and Docker Configuration  
-**Priority Focus:** Database migration, Docker VM management, Testing, CI/CD
+## 🎉 Integration Status (As of Pivot)
+
+### Backend
+- Core API stack is stable (auth, validation, logging, Redis, PostgreSQL)
+- Shared hosting base endpoints exist (`/api/v1/hosting/plans`, account + domains)
+- Remaining work is infrastructure orchestration (Nginx, SSL, MySQL, metering)
+
+### Frontend
+- App shell, auth flows, and API client integration are stable
+- Shared hosting domain UI exists at `/dashboard/hosting`
+- Remaining work is full hosting control panel surface (files, databases, ftp, usage/subscription UX)
+
+### Product Readiness
+- Platform foundation is production-oriented
+- MVP launch now depends on completing the shared-hosting runtime pipeline end-to-end
+
+---
+
+**Last Updated:** 2026-03-15  
+**Status:** Shared Hosting MVP Execution Mode (Foundation Complete, Runtime Features In Progress)  
+**Next Review:** After Sprint A completion (vhost + MySQL provisioning)  
+**Priority Focus:** 0.4 SSL, 0.5 file manager, 0.6 MySQL, 0.8 control panel, 0.9 billing, 0.10 metering
