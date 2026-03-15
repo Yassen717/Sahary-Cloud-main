@@ -192,6 +192,29 @@ const envSchema = Joi.object({
         .default('172.25.0.0/16')
         .description('Docker VM network subnet'),
 
+    // ── Shared Hosting / Nginx VHost ─────────────────────────────────────────
+    HOSTING_NGINX_ENABLED: Joi.boolean()
+        .default(false)
+        .description('Enable Nginx vhost provisioning actions'),
+    HOSTING_NGINX_SITES_AVAILABLE: Joi.string()
+        .default('/etc/nginx/sites-available')
+        .description('Nginx sites-available directory'),
+    HOSTING_NGINX_SITES_ENABLED: Joi.string()
+        .default('/etc/nginx/sites-enabled')
+        .description('Nginx sites-enabled directory'),
+    HOSTING_NGINX_TEST_COMMAND: Joi.string()
+        .default('nginx -t')
+        .description('Nginx config test command'),
+    HOSTING_NGINX_RELOAD_COMMAND: Joi.string()
+        .default('nginx -s reload')
+        .description('Nginx reload command'),
+    HOSTING_WWW_BASE: Joi.string()
+        .default('/var/www')
+        .description('Base directory for hosting document roots'),
+    HOSTING_BASE_DOMAIN: Joi.string()
+        .default('sahary.cloud')
+        .description('Base domain for auto-assigned hosting subdomains'),
+
     // ── File Upload Configuration ─────────────────────────────────────────────
     MAX_FILE_SIZE: Joi.number()
         .integer()
