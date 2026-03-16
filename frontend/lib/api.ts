@@ -1,6 +1,19 @@
 import { getStorageItem, setStorageItem, removeStorageItem } from './storage';
 import { cache, withCache } from './cache';
 import { rateLimiter, logSecurityEvent, getCsrfToken } from './security';
+import type { components } from './api-types.generated';
+
+export type ApiRegisterRequest = components['schemas']['RegisterRequest'];
+export type ApiCreateVmRequest = Partial<components['schemas']['CreateVMRequest']> & {
+  name: string;
+  os?: string;
+  cpu?: number;
+  ram?: number;
+  storage?: number;
+};
+export type ApiUpdateProfileRequest = Partial<Pick<components['schemas']['User'], 'firstName' | 'lastName' | 'email' | 'phone'>> & {
+  name?: string;
+};
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
 
@@ -107,7 +120,7 @@ export class ApiClient {
     return response;
   }
 
-  async register(userData: any) {
+  async register(userData: ApiRegisterRequest) {
     const response = await this.request('/auth/register', {
       method: 'POST',
       body: JSON.stringify(userData),
@@ -129,7 +142,7 @@ export class ApiClient {
     return this.request('/auth/profile');
   }
 
-  async updateProfile(userData: any) {
+  async updateProfile(userData: ApiUpdateProfileRequest) {
     return this.request('/auth/profile', {
       method: 'PUT',
       body: JSON.stringify(userData),
@@ -156,7 +169,7 @@ export class ApiClient {
     return this.request(`/vms/${id}`);
   }
 
-  async createVM(vmData: any) {
+  async createVM(vmData: ApiCreateVmRequest) {
     const result = await this.request('/vms', {
       method: 'POST',
       body: JSON.stringify(vmData),
