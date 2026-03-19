@@ -14,6 +14,7 @@ The frontend is already TypeScript-first, so the backend should become the typed
 - OpenAPI export and frontend type generation are already wired.
 - Phase 1 now includes real TS implementations for the shared config, env validation, logger, and validation registry modules.
 - Phase 2 has started with a typed `authService.ts` implementation and auth-specific type definitions.
+- Phase 2 now also includes a typed `vmService.ts` implementation and VM-specific type definitions.
 
 ## Migration Principles
 
