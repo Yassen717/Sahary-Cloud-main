@@ -1,6 +1,7 @@
 # Backend TypeScript Migration Plan
 
 ## Objective
+
 Move the backend from JavaScript to TypeScript in stages without breaking the current runtime, API contracts, or delivery of the shared-hosting MVP.
 
 The frontend is already TypeScript-first, so the backend should become the typed source of truth for request/response contracts and business logic.
@@ -12,6 +13,7 @@ The frontend is already TypeScript-first, so the backend should become the typed
 - `allowJs` is enabled, so the repo can migrate incrementally.
 - OpenAPI export and frontend type generation are already wired.
 - Phase 1 now includes real TS implementations for the shared config, env validation, logger, and validation registry modules.
+- Phase 2 has started with a typed `authService.ts` implementation and auth-specific type definitions.
 
 ## Migration Principles
 
