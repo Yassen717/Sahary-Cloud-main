@@ -26,6 +26,7 @@ The platform is pivoting to focus on **shared web hosting** as the MVP product. 
 - ✅ Added scripts: `typecheck`, `typecheck:watch`, `build:ts`, `dev:ts`, `start:ts`
 - ✅ Kept runtime unchanged (`node src/index.js`) to avoid delivery risk
 - ✅ Added migration roadmap in `backend/TYPESCRIPT_MIGRATION_PLAN.md`
+- ✅ Added docs-level migration plan in [`docs/BACKEND_TYPESCRIPT_MIGRATION_PLAN.md`](./BACKEND_TYPESCRIPT_MIGRATION_PLAN.md)
 
 **Phase 2 Progress:**
 - ✅ Added backend OpenAPI export script (`backend`: `npm run openapi:export`)
