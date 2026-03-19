@@ -11,7 +11,7 @@ The frontend is already TypeScript-first, so the backend should become the typed
 - TypeScript toolchain already exists in `backend/tsconfig.json` and `backend/package.json`.
 - `allowJs` is enabled, so the repo can migrate incrementally.
 - OpenAPI export and frontend type generation are already wired.
-- Phase 1 has started with typed TS wrappers for the shared config, env validation, logger, and validation registry modules.
+- Phase 1 now includes real TS implementations for the shared config, env validation, logger, and validation registry modules.
 
 ## Migration Principles
 
