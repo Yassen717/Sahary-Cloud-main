@@ -17,6 +17,7 @@ The frontend is already TypeScript-first, so the backend should become the typed
 - Phase 2 now also includes a typed `vmService.ts` implementation and VM-specific type definitions.
 - Phase 2 now also includes a completed typed `billingService.ts` implementation and billing-specific type definitions.
 - Phase 2 now also includes a completed typed `billingController.ts` implementation for billing HTTP handlers.
+- Phase 2 now also includes a completed typed `billing.ts` route module for billing endpoints.
 
 ## Migration Principles
 
