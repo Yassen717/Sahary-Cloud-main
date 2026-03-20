@@ -796,7 +796,7 @@ class BillingService {
     }
   }
 
-  static async getUserInvoices(userId: string, options: InvoiceQueryOptions = {}): Promise<{ data: InvoiceRecord[]; pagination: Record<string, unknown> }> {
+  static async getUserInvoices(userId: string | null, options: InvoiceQueryOptions = {}): Promise<{ data: InvoiceRecord[]; pagination: Record<string, unknown> }> {
     try {
       const {
         page = 1,
@@ -808,7 +808,11 @@ class BillingService {
         sortOrder = 'desc',
       } = options;
 
-      const where: Record<string, unknown> = { userId };
+      const where: Record<string, unknown> = {};
+
+      if (userId) {
+        where.userId = userId;
+      }
 
       if (status) {
         where.status = status;
