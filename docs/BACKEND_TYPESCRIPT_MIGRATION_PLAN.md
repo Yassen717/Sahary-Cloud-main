@@ -15,6 +15,7 @@ The frontend is already TypeScript-first, so the backend should become the typed
 - Phase 1 now includes real TS implementations for the shared config, env validation, logger, and validation registry modules.
 - Phase 2 has started with a typed `authService.ts` implementation and auth-specific type definitions.
 - Phase 2 now also includes a typed `vmService.ts` implementation and VM-specific type definitions.
+- Phase 2 now also includes a completed typed `billingService.ts` implementation and billing-specific type definitions.
 
 ## Migration Principles
 
