@@ -19,6 +19,7 @@ The frontend is already TypeScript-first, so the backend should become the typed
 - Phase 2 now also includes a completed typed `billingController.ts` implementation for billing HTTP handlers.
 - Phase 2 now also includes a completed typed `billing.ts` route module for billing endpoints.
 - Phase 2 now also includes a completed typed `paymentService.ts` wrapper for payment operations.
+- Phase 2 now also includes a completed typed `paymentController.ts` implementation for payment HTTP handlers.
 
 ## Migration Principles
 
