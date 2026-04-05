@@ -1,4 +1,5 @@
 export type VmStatus = 'RUNNING' | 'STOPPED' | 'STARTING' | 'STOPPING' | 'RESTARTING' | 'ERROR' | 'SUSPENDED' | 'DELETED';
+export type NumericLike = number | string | { toString(): string };
 
 export interface VmUserSummary {
   id: string;
@@ -14,7 +15,7 @@ export interface VmUsageRecordSummary {
   storageUsage: number;
   bandwidthUsage?: number;
   duration?: number;
-  cost?: string | number;
+  cost?: NumericLike;
   timestamp: Date;
 }
 
@@ -41,7 +42,7 @@ export interface VmRecord {
   port?: number | null;
   dockerImage?: string | null;
   dockerContainerId?: string | null;
-  hourlyRate: string | number;
+  hourlyRate: NumericLike;
   createdAt?: Date;
   updatedAt?: Date;
   startedAt?: Date | null;

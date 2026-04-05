@@ -17,16 +17,19 @@ import type {
   UsageQueryOptions,
   UsageRecordInput,
   UsageSummaryResult,
+  NumericLike,
 } from '../types/billing';
 
 type UsageRecord = {
-  vmId: string;
+  id?: string;
+  userId?: string;
+  vmId: string | null;
   cpuUsage: number;
   ramUsage: number;
   storageUsage: number;
   bandwidthUsage: number;
   duration: number;
-  cost: string | number;
+  cost: NumericLike;
   timestamp: Date;
 };
 
@@ -40,36 +43,39 @@ type InvoiceRecord = {
   id: string;
   invoiceNumber: string;
   userId: string;
-  subtotal: number;
-  taxRate: number;
-  taxAmount: number;
-  discountAmount: number;
-  total: number;
-  status: InvoiceStatus;
+  amount: NumericLike;
+  subtotal: NumericLike;
+  tax: NumericLike;
+  discount: NumericLike;
+  status: string;
   billingPeriodStart: Date;
   billingPeriodEnd: Date;
   dueDate: Date;
   currency: string;
-  createdAt?: Date;
+  createdAt: Date;
+  updatedAt?: Date;
   paidAt?: Date | null;
+  paymentMethod?: string | null;
+  paymentId?: string | null;
   items?: unknown[];
+  payments?: unknown[];
   user?: { id: string; email: string; firstName: string; lastName: string };
 };
 
 type PaymentRecord = {
   id: string;
   invoiceId: string;
-  userId: string;
-  amount: number;
+  amount: NumericLike;
   currency: string;
-  paymentMethod: string;
-  status: PaymentStatus;
-  stripePaymentIntentId?: string | null;
-  stripePaymentMethodId?: string | null;
-  metadata?: Record<string, unknown> | null;
+  method: string;
+  status: string;
+  gatewayId?: string | null;
+  gatewayResponse?: string | null;
+  processedAt?: Date | null;
+  invoice?: { userId: string };
 };
 
-const roundTo = (value: number | string, digits = 2): number => Number(Number(value).toFixed(digits));
+const roundTo = (value: NumericLike | null | undefined, digits = 2): number => Number(Number(value ?? 0).toFixed(digits));
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
@@ -110,6 +116,7 @@ class BillingService {
 
       const usageRecord = await prisma.usageRecord.create({
         data: {
+          userId: vm.userId,
           vmId,
           cpuUsage: parseFloat(String(cpuUsage)),
           ramUsage: parseFloat(String(ramUsage)),
@@ -354,11 +361,11 @@ class BillingService {
           action: 'USAGE_TRACKING_STARTED',
           resource: 'usage',
           resourceId: vmId,
-          newValues: {
+          newValues: JSON.stringify({
             vmId,
             vmName: vm.name,
             startedAt: new Date(),
-          },
+          }),
         },
       });
 
@@ -385,11 +392,11 @@ class BillingService {
           action: 'USAGE_TRACKING_STOPPED',
           resource: 'usage',
           resourceId: vmId,
-          newValues: {
+          newValues: JSON.stringify({
             vmId,
             vmName: vm.name,
             stoppedAt: new Date(),
-          },
+          }),
         },
       });
 
@@ -482,7 +489,7 @@ class BillingService {
         select: { id: true, name: true, userId: true },
       }) as Array<{ id: string; name: string; userId: string }>;
 
-      const results = {
+      const results: { success: number; failed: number; total: number; errors: Array<Record<string, unknown>> } = {
         success: 0,
         failed: 0,
         total: runningVMs.length,
@@ -677,10 +684,9 @@ class BillingService {
           billingPeriodStart: startDate,
           billingPeriodEnd: endDate,
           subtotal: roundTo(subtotal),
-          taxRate: parseFloat(taxRate.toFixed(4)),
-          taxAmount: roundTo(taxAmount),
-          discountAmount: 0,
-          total: roundTo(total),
+          tax: roundTo(taxAmount),
+          discount: 0,
+          amount: roundTo(total),
           status: 'PENDING',
           dueDate,
           currency: 'USD',
@@ -704,15 +710,11 @@ class BillingService {
             description: `VM: ${vm.vmName}`,
             quantity: 1,
             unitPrice: roundTo(vm.totalCost),
-            amount: roundTo(vm.totalCost),
-            metadata: {
-              vmId: vm.vmId,
-              vmName: vm.vmName,
-              totalDuration: vm.totalDuration,
-              totalBandwidth: vm.totalBandwidth,
-              averageCPU: vm.averages?.cpu || 0,
-              averageRAM: vm.averages?.ram || 0,
-            },
+            totalPrice: roundTo(vm.totalCost),
+            resourceType: 'VM',
+            resourceId: vm.vmId,
+            usageStart: startDate,
+            usageEnd: endDate,
           },
         })),
       );
@@ -723,11 +725,11 @@ class BillingService {
           action: 'INVOICE_GENERATED',
           resource: 'invoice',
           resourceId: invoice.id,
-          newValues: {
+          newValues: JSON.stringify({
             invoiceNumber: invoice.invoiceNumber,
-            total: invoice.total,
+            amount: invoice.amount,
             billingPeriod: `${adjustedMonth + 1}/${invoiceYear}`,
-          },
+          }),
         },
       });
 
@@ -764,30 +766,32 @@ class BillingService {
 
   static async getInvoiceById(invoiceId: string, userId: string | null = null): Promise<InvoiceRecord | null> {
     try {
-      const where: Record<string, unknown> = { id: invoiceId };
-      if (userId) {
-        where.userId = userId;
-      }
-
-      const invoice = await prisma.invoice.findUnique({
-        where,
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-          items: {
-            orderBy: { createdAt: 'asc' },
-          },
-          payments: {
-            orderBy: { createdAt: 'desc' },
+      const include = {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
           },
         },
-      }) as InvoiceRecord | null;
+        items: {
+          orderBy: { createdAt: 'asc' as const },
+        },
+        payments: {
+          orderBy: { createdAt: 'desc' as const },
+        },
+      };
+
+      const invoice = userId
+        ? await prisma.invoice.findFirst({
+          where: { id: invoiceId, userId },
+          include,
+        })
+        : await prisma.invoice.findUnique({
+          where: { id: invoiceId },
+          include,
+        });
 
       return invoice;
     } catch (error) {
@@ -874,29 +878,33 @@ class BillingService {
       }
 
       let finalDiscountAmount = 0;
+      const invoiceSubtotal = Number(invoice.subtotal);
 
       if (discountAmount) {
         finalDiscountAmount = parseFloat(String(discountAmount));
       } else if (discountPercentage) {
-        finalDiscountAmount = invoice.subtotal * (parseFloat(String(discountPercentage)) / 100);
+        finalDiscountAmount = invoiceSubtotal * (parseFloat(String(discountPercentage)) / 100);
       }
 
-      if (finalDiscountAmount > invoice.subtotal) {
+      if (finalDiscountAmount > invoiceSubtotal) {
         throw new Error('Discount amount cannot exceed subtotal');
       }
 
-      const newSubtotal = invoice.subtotal - finalDiscountAmount;
-      const newTaxAmount = newSubtotal * invoice.taxRate;
+      const currentTax = Number(invoice.tax);
+      const taxRate = invoiceSubtotal > 0
+        ? currentTax / invoiceSubtotal
+        : parseFloat(process.env.TAX_RATE || '0.15');
+
+      const newSubtotal = invoiceSubtotal - finalDiscountAmount;
+      const newTaxAmount = newSubtotal * taxRate;
       const newTotal = newSubtotal + newTaxAmount;
 
       const updatedInvoice = await prisma.invoice.update({
         where: { id: invoiceId },
         data: {
-          discountAmount: roundTo(finalDiscountAmount),
-          discountCode: discountCode || null,
-          discountReason: reason || null,
-          taxAmount: roundTo(newTaxAmount),
-          total: roundTo(newTotal),
+          discount: roundTo(finalDiscountAmount),
+          tax: roundTo(newTaxAmount),
+          amount: roundTo(newTotal),
         },
         include: {
           user: true,
@@ -910,7 +918,7 @@ class BillingService {
           action: 'DISCOUNT_APPLIED',
           resource: 'invoice',
           resourceId: invoiceId,
-          newValues: { discountCode, discountAmount: finalDiscountAmount, reason },
+          newValues: JSON.stringify({ discountCode, discountAmount: finalDiscountAmount, reason }),
         },
       });
 
@@ -923,21 +931,27 @@ class BillingService {
 
   static async updateInvoiceStatus(invoiceId: string, status: InvoiceStatus, metadata: InvoiceStatusUpdateMetadata = {}): Promise<InvoiceRecord> {
     try {
+      const paidAt = metadata.paidAt instanceof Date ? metadata.paidAt : new Date();
+
       const updatedInvoice = await prisma.invoice.update({
         where: { id: invoiceId },
         data: {
           status,
-          ...(status === 'PAID' && { paidAt: metadata.paidAt || new Date() }),
+          ...(status === 'PAID' && { paidAt }),
         },
       }) as InvoiceRecord;
 
+      const actorUserId = typeof metadata.userId === 'string'
+        ? metadata.userId
+        : updatedInvoice.userId;
+
       await prisma.auditLog.create({
         data: {
-          userId: metadata.userId as string || updatedInvoice.userId,
+          userId: actorUserId,
           action: 'INVOICE_STATUS_UPDATED',
           resource: 'invoice',
           resourceId: invoiceId,
-          newValues: { status, ...metadata },
+          newValues: JSON.stringify({ status, ...metadata }),
         },
       });
 
@@ -957,7 +971,7 @@ class BillingService {
         select: { id: true, email: true },
       }) as Array<{ id: string; email: string }>;
 
-      const results = {
+      const results: { success: number; failed: number; total: number; errors: Array<Record<string, unknown>> } = {
         success: 0,
         failed: 0,
         total: users.length,
@@ -996,7 +1010,7 @@ class BillingService {
         },
       }) as InvoiceRecord[];
 
-      const results = {
+      const results: { success: number; failed: number; total: number; errors: Array<Record<string, unknown>> } = {
         success: 0,
         failed: 0,
         total: overdueInvoices.length,
@@ -1041,7 +1055,7 @@ class BillingService {
       const aggregation = await prisma.invoice.aggregate({
         where: { ...where, status: 'PAID' },
         _sum: {
-          total: true,
+          amount: true,
         },
       });
 
@@ -1055,7 +1069,7 @@ class BillingService {
           refunded,
         },
         amounts: {
-          totalProcessed: roundTo(aggregation._sum.total || 0),
+          totalProcessed: roundTo(aggregation._sum?.amount || 0),
         },
       };
     } catch (error) {
@@ -1098,7 +1112,7 @@ class BillingService {
       }
 
       const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(Number(invoice.total) * 100),
+        amount: Math.round(Number(invoice.amount) * 100),
         currency: invoice.currency.toLowerCase(),
         metadata: {
           invoiceId: invoice.id,
@@ -1113,15 +1127,14 @@ class BillingService {
       const payment = await prisma.payment.create({
         data: {
           invoiceId: invoice.id,
-          userId: invoice.userId,
-          amount: invoice.total,
+          amount: roundTo(invoice.amount),
           currency: invoice.currency,
-          paymentMethod: 'STRIPE',
+          method: 'STRIPE',
           status: 'PENDING',
-          stripePaymentIntentId: paymentIntent.id,
-          metadata: {
+          gatewayId: paymentIntent.id,
+          gatewayResponse: JSON.stringify({
             clientSecret: paymentIntent.client_secret,
-          },
+          }),
         },
       }) as PaymentRecord;
 
@@ -1131,24 +1144,24 @@ class BillingService {
           action: 'PAYMENT_INTENT_CREATED',
           resource: 'payment',
           resourceId: payment.id,
-          newValues: {
+          newValues: JSON.stringify({
             invoiceId: invoice.id,
             invoiceNumber: invoice.invoiceNumber,
-            amount: invoice.total,
+            amount: invoice.amount,
             paymentIntentId: paymentIntent.id,
-          },
+          }),
         },
       });
 
       return {
         paymentId: payment.id,
         clientSecret: paymentIntent.client_secret,
-        amount: invoice.total,
+        amount: invoice.amount,
         currency: invoice.currency,
         invoice: {
           id: invoice.id,
           invoiceNumber: invoice.invoiceNumber,
-          total: invoice.total,
+          total: Number(invoice.amount),
         },
       };
     } catch (error) {
@@ -1168,11 +1181,10 @@ class BillingService {
             select: {
               id: true,
               email: true,
-              stripeCustomerId: true,
             },
           },
         },
-      }) as any;
+      }) as (InvoiceRecord & { user: { id: string; email: string } }) | null;
 
       if (!invoice) {
         throw new Error('Invoice not found');
@@ -1182,8 +1194,8 @@ class BillingService {
         throw new Error('Invoice is already paid');
       }
 
-      let customerId = invoice.user.stripeCustomerId;
-      if (!customerId) {
+      let customerId: string | undefined;
+      if (invoice.user?.email) {
         const customer = await stripe.customers.create({
           email: invoice.user.email,
           metadata: {
@@ -1191,18 +1203,13 @@ class BillingService {
           },
         });
         customerId = customer.id;
-
-        await prisma.user.update({
-          where: { id: invoice.user.id },
-          data: { stripeCustomerId: customerId },
-        });
       }
 
       const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(Number(invoice.total) * 100),
+        amount: Math.round(Number(invoice.amount) * 100),
         currency: invoice.currency.toLowerCase(),
-        customer: customerId,
-        payment_method: paymentMethodId,
+        ...(customerId ? { customer: customerId } : {}),
+        ...(paymentMethodId ? { payment_method: paymentMethodId } : {}),
         confirm: true,
         metadata: {
           invoiceId: invoice.id,
@@ -1212,7 +1219,7 @@ class BillingService {
         description: `Payment for invoice ${invoice.invoiceNumber}`,
       });
 
-      if (savePaymentMethod) {
+      if (savePaymentMethod && paymentMethodId && customerId) {
         await stripe.paymentMethods.attach(paymentMethodId, {
           customer: customerId,
         });
@@ -1221,16 +1228,17 @@ class BillingService {
       const payment = await prisma.payment.create({
         data: {
           invoiceId: invoice.id,
-          userId: invoice.user.id,
-          amount: invoice.total,
+          amount: roundTo(invoice.amount),
           currency: invoice.currency,
-          paymentMethod: 'STRIPE',
+          method: 'STRIPE',
           status: paymentIntent.status === 'succeeded' ? 'COMPLETED' : 'PENDING',
-          stripePaymentIntentId: paymentIntent.id,
-          stripePaymentMethodId: paymentMethodId,
-          metadata: {
+          gatewayId: paymentIntent.id,
+          processedAt: paymentIntent.status === 'succeeded' ? new Date() : null,
+          gatewayResponse: JSON.stringify({
             paymentIntentStatus: paymentIntent.status,
-          },
+            paymentMethodId: paymentMethodId || null,
+            customerId: customerId || null,
+          }),
         },
       }) as PaymentRecord;
 
@@ -1249,12 +1257,12 @@ class BillingService {
             action: 'PAYMENT_COMPLETED',
             resource: 'payment',
             resourceId: payment.id,
-            newValues: {
+            newValues: JSON.stringify({
               invoiceId: invoice.id,
               invoiceNumber: invoice.invoiceNumber,
-              amount: invoice.total,
+              amount: invoice.amount,
               paymentIntentId: paymentIntent.id,
-            },
+            }),
           },
         });
       }
@@ -1306,7 +1314,14 @@ class BillingService {
       }
 
       const payment = await prisma.payment.findFirst({
-        where: { stripePaymentIntentId: paymentIntent.id },
+        where: { gatewayId: paymentIntent.id },
+        include: {
+          invoice: {
+            select: {
+              userId: true,
+            },
+          },
+        },
       }) as PaymentRecord | null;
 
       if (!payment) {
@@ -1317,12 +1332,11 @@ class BillingService {
         where: { id: payment.id },
         data: {
           status: 'COMPLETED',
-          completedAt: new Date(),
-          metadata: {
-            ...payment.metadata,
+          processedAt: new Date(),
+          gatewayResponse: JSON.stringify({
             paymentIntentStatus: paymentIntent.status,
-            webhookProcessedAt: new Date(),
-          },
+            webhookProcessedAt: new Date().toISOString(),
+          }),
         },
       });
 
@@ -1336,15 +1350,15 @@ class BillingService {
 
       await prisma.auditLog.create({
         data: {
-          userId: payment.userId,
+          userId: payment.invoice?.userId,
           action: 'PAYMENT_WEBHOOK_SUCCESS',
           resource: 'payment',
           resourceId: payment.id,
-          newValues: {
+          newValues: JSON.stringify({
             invoiceId,
             paymentIntentId: paymentIntent.id,
             amount: paymentIntent.amount / 100,
-          },
+          }),
         },
       });
 
@@ -1369,7 +1383,14 @@ class BillingService {
       }
 
       const payment = await prisma.payment.findFirst({
-        where: { stripePaymentIntentId: paymentIntent.id },
+        where: { gatewayId: paymentIntent.id },
+        include: {
+          invoice: {
+            select: {
+              userId: true,
+            },
+          },
+        },
       }) as PaymentRecord | null;
 
       if (!payment) {
@@ -1380,26 +1401,25 @@ class BillingService {
         where: { id: payment.id },
         data: {
           status: 'FAILED',
-          metadata: {
-            ...payment.metadata,
+          gatewayResponse: JSON.stringify({
             paymentIntentStatus: paymentIntent.status,
             failureReason: paymentIntent.last_payment_error?.message,
-            webhookProcessedAt: new Date(),
-          },
+            webhookProcessedAt: new Date().toISOString(),
+          }),
         },
       });
 
       await prisma.auditLog.create({
         data: {
-          userId: payment.userId,
+          userId: payment.invoice?.userId,
           action: 'PAYMENT_WEBHOOK_FAILED',
           resource: 'payment',
           resourceId: payment.id,
-          newValues: {
+          newValues: JSON.stringify({
             invoiceId,
             paymentIntentId: paymentIntent.id,
             failureReason: paymentIntent.last_payment_error?.message,
-          },
+          }),
         },
       });
 
@@ -1420,7 +1440,14 @@ class BillingService {
       const paymentIntentId = charge.payment_intent;
 
       const payment = await prisma.payment.findFirst({
-        where: { stripePaymentIntentId: paymentIntentId },
+        where: { gatewayId: paymentIntentId },
+        include: {
+          invoice: {
+            select: {
+              userId: true,
+            },
+          },
+        },
       }) as PaymentRecord | null;
 
       if (!payment) {
@@ -1431,12 +1458,10 @@ class BillingService {
         where: { id: payment.id },
         data: {
           status: 'REFUNDED',
-          refundedAt: new Date(),
-          metadata: {
-            ...payment.metadata,
+          gatewayResponse: JSON.stringify({
             refundAmount: charge.amount_refunded / 100,
-            webhookProcessedAt: new Date(),
-          },
+            webhookProcessedAt: new Date().toISOString(),
+          }),
         },
       });
 
@@ -1449,14 +1474,14 @@ class BillingService {
 
       await prisma.auditLog.create({
         data: {
-          userId: payment.userId,
+          userId: payment.invoice?.userId,
           action: 'PAYMENT_REFUNDED',
           resource: 'payment',
           resourceId: payment.id,
-          newValues: {
+          newValues: JSON.stringify({
             invoiceId: payment.invoiceId,
             refundAmount: charge.amount_refunded / 100,
-          },
+          }),
         },
       });
 
@@ -1489,29 +1514,36 @@ class BillingService {
 
   static async getPaymentById(paymentId: string, userId: string | null = null): Promise<Record<string, unknown> | null> {
     try {
-      const where: Record<string, unknown> = { id: paymentId };
-      if (userId) {
-        where.userId = userId;
-      }
-
-      const payment = await prisma.payment.findUnique({
-        where,
-        include: {
-          invoice: {
-            include: {
-              items: true,
-            },
-          },
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
+      const include = {
+        invoice: {
+          include: {
+            items: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
             },
           },
         },
-      });
+      };
+
+      const payment = userId
+        ? await prisma.payment.findFirst({
+          where: {
+            id: paymentId,
+            invoice: {
+              userId,
+            },
+          },
+          include,
+        })
+        : await prisma.payment.findUnique({
+          where: { id: paymentId },
+          include,
+        });
 
       return payment as Record<string, unknown> | null;
     } catch (error) {
@@ -1532,7 +1564,11 @@ class BillingService {
         sortOrder = 'desc',
       } = options;
 
-      const where: Record<string, unknown> = { userId };
+      const where: Record<string, unknown> = {
+        invoice: {
+          userId,
+        },
+      };
 
       if (status) {
         where.status = status;
@@ -1556,7 +1592,7 @@ class BillingService {
               select: {
                 id: true,
                 invoiceNumber: true,
-                total: true,
+                amount: true,
                 status: true,
               },
             },
@@ -1597,13 +1633,13 @@ class BillingService {
         throw new Error('Can only refund completed payments');
       }
 
-      if (!payment.stripePaymentIntentId) {
+      if (!payment.gatewayId) {
         throw new Error('Stripe payment intent ID not found');
       }
 
       const refundAmount = amount ? Math.round(parseFloat(String(amount)) * 100) : undefined;
       const refund = await stripe.refunds.create({
-        payment_intent: payment.stripePaymentIntentId,
+        payment_intent: payment.gatewayId,
         amount: refundAmount,
         reason: reason || 'requested_by_customer',
         metadata: {
@@ -1616,13 +1652,12 @@ class BillingService {
         where: { id: paymentId },
         data: {
           status: 'REFUNDED',
-          refundedAt: new Date(),
-          metadata: {
-            ...payment.metadata,
+          gatewayResponse: JSON.stringify({
             refundId: refund.id,
             refundAmount: refund.amount / 100,
             refundReason: reason,
-          },
+            refundedAt: new Date().toISOString(),
+          }),
         },
       });
 
@@ -1635,15 +1670,15 @@ class BillingService {
 
       await prisma.auditLog.create({
         data: {
-          userId: payment.userId,
+          userId: payment.invoice.userId,
           action: 'PAYMENT_REFUND_INITIATED',
           resource: 'payment',
           resourceId: paymentId,
-          newValues: {
+          newValues: JSON.stringify({
             refundId: refund.id,
             refundAmount: refund.amount / 100,
             reason,
-          },
+          }),
         },
       });
 
@@ -1661,7 +1696,13 @@ class BillingService {
 
   static async getPaymentStatistics(userId: string | null = null): Promise<Record<string, unknown>> {
     try {
-      const where = userId ? { userId } : {};
+      const where: Record<string, unknown> = userId
+        ? {
+          invoice: {
+            userId,
+          },
+        }
+        : {};
 
       const [total, completed, pending, failed, refunded] = await Promise.all([
         prisma.payment.count({ where }),

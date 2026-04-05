@@ -209,11 +209,26 @@ class BillingController {
     try {
       const { cpu, ram, storage, bandwidth, duration } = (req.body ?? {}) as PricingEstimateBody;
 
+      if (
+        typeof cpu !== 'number'
+        || typeof ram !== 'number'
+        || typeof storage !== 'number'
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid resources',
+          message: 'cpu, ram, and storage are required numeric values',
+        });
+        return;
+      }
+
+      const normalizedBandwidth = typeof bandwidth === 'number' ? bandwidth : 1000;
+
       const resourceValidation = ValidationHelpers.validateVMResources({
         cpu,
         ram,
         storage,
-        bandwidth: bandwidth || 1000,
+        bandwidth: normalizedBandwidth,
       });
 
       if (!resourceValidation.isValid) {
@@ -229,7 +244,7 @@ class BillingController {
         cpu,
         ram,
         storage,
-        bandwidth: bandwidth || 1000,
+        bandwidth: normalizedBandwidth,
       });
 
       const estimates: Record<string, number> = {
@@ -248,7 +263,7 @@ class BillingController {
         success: true,
         message: 'Pricing estimate calculated successfully',
         data: {
-          resources: { cpu, ram, storage, bandwidth: bandwidth || 1000 },
+          resources: { cpu, ram, storage, bandwidth: normalizedBandwidth },
           estimates,
           currency: 'USD',
           warnings: resourceValidation.warnings || [],

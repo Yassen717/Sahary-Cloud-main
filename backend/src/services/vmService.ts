@@ -200,7 +200,7 @@ class VMService {
         ];
       }
 
-      const result = await getPaginatedResults(prisma.virtualMachine, {
+      const result = await getPaginatedResults<VmRecord>(prisma.virtualMachine, {
         page: parseInt(String(page), 10),
         limit: parseInt(String(limit), 10),
         where,
@@ -644,7 +644,7 @@ class VMService {
           cost: true,
           timestamp: true,
         },
-      }) as Array<{ cpuUsage: number; ramUsage: number; storageUsage: number; bandwidthUsage: number; cost: string | number; timestamp: Date }>;
+      });
 
       return {
         totalRecords: usageRecords.length,
@@ -675,7 +675,7 @@ class VMService {
           action,
           resource: 'vm',
           resourceId: vmId,
-          newValues: metadata,
+          newValues: Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null,
         },
       });
     } catch (error) {
@@ -713,7 +713,7 @@ class VMService {
         ];
       }
 
-      const result = await getPaginatedResults(prisma.virtualMachine, {
+      const result = await getPaginatedResults<VmRecord>(prisma.virtualMachine, {
         page: parseInt(String(page), 10),
         limit: parseInt(String(limit), 10),
         where,
@@ -812,16 +812,25 @@ class VMService {
         };
       }
 
-      const container = dockerService.getContainer(vm.dockerContainerId);
-      const info = await container.inspect();
+      const info = await dockerService.getContainerStatus(vm.dockerContainerId);
+
+      if (!info) {
+        return {
+          vmId,
+          vmName: vm.name,
+          status: 'not-found',
+          dockerContainerId: vm.dockerContainerId,
+          message: 'Container not found in Docker',
+        };
+      }
 
       return {
         vmId,
         vmName: vm.name,
-        status: info.State.Status,
+        status: info.status,
         dockerContainerId: vm.dockerContainerId,
-        startedAt: info.State.StartedAt,
-        finishedAt: info.State.FinishedAt,
+        startedAt: info.startedAt,
+        finishedAt: info.finishedAt,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';

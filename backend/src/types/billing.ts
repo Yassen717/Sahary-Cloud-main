@@ -1,6 +1,7 @@
 export type InvoiceStatus = 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELLED' | 'REFUNDED';
 export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
 export type BillingGroupBy = 'hour' | 'day' | 'week' | 'month';
+export type NumericLike = number | string | { toString(): string };
 
 export interface UsageRecordInput {
   cpuUsage: number | string;
@@ -48,14 +49,18 @@ export interface UsageAggregationResult {
 }
 
 export interface UsageSummaryResult {
-  summary: {
+  summary?: {
     totalCost: number;
     totalDuration: number;
     totalBandwidth: number;
     vmCount: number;
   };
-  breakdown: Array<Record<string, unknown>>;
+  breakdown?: Array<Record<string, unknown>>;
   vms: Array<Record<string, unknown>>;
+  totalCost?: number;
+  totalDuration?: number;
+  totalBandwidth?: number;
+  vmCount?: number;
 }
 
 export interface InvoiceQueryOptions {
