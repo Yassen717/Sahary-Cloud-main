@@ -88,7 +88,8 @@ export default function UsersManagementPage() {
         {
           id: '1',
           email: 'john@example.com',
-          name: 'John Doe',
+          firstName: 'John',
+          lastName: 'Doe',
           role: 'user',
           status: 'active',
           createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
@@ -98,7 +99,8 @@ export default function UsersManagementPage() {
         {
           id: '2',
           email: 'admin@example.com',
-          name: 'Admin User',
+          firstName: 'Admin',
+          lastName: 'User',
           role: 'admin',
           status: 'active',
           createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
@@ -108,7 +110,8 @@ export default function UsersManagementPage() {
         {
           id: '3',
           email: 'jane@example.com',
-          name: 'Jane Smith',
+          firstName: 'Jane',
+          lastName: 'Smith',
           role: 'user',
           status: 'active',
           createdAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
@@ -118,7 +121,8 @@ export default function UsersManagementPage() {
         {
           id: '4',
           email: 'suspended@example.com',
-          name: 'Suspended User',
+          firstName: 'Suspended',
+          lastName: 'User',
           role: 'user',
           status: 'suspended',
           createdAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
