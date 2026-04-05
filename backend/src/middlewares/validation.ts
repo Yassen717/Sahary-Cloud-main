@@ -20,7 +20,7 @@ type ValidationMiddleware = (req: ValidationRequest, res: ValidationResponse, ne
 type ValidationOptions = {
   allowUnknown?: boolean;
   stripUnknown?: boolean;
-  customErrorHandler?: (error: unknown, req: ValidationRequest, res: ValidationResponse, next: NextFunction) => unknown;
+  customErrorHandler?: (error: unknown, req: ValidationRequest, res: ValidationResponse, next: NextFunction) => void;
 };
 
 type ValidationErrorResult = {
@@ -75,12 +75,15 @@ const validate = (schema: z.ZodTypeAny): ValidationMiddleware => {
       next();
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const formattedErrors = error.errors.map((issue) => ({
-          field: issue.path.join('.'),
-          message: issue.message,
-          code: issue.code,
-          received: issue.received,
-        }));
+        const formattedErrors = error.errors.map((issue) => {
+          const received = 'received' in issue ? issue.received : undefined;
+          return {
+            field: issue.path.join('.'),
+            message: issue.message,
+            code: issue.code,
+            ...(received !== undefined ? { received } : {}),
+          };
+        });
 
         res.status(400).json({
           success: false,
@@ -169,6 +172,7 @@ const customValidators = {
       score,
       strength,
       feedback,
+      errors: [],
       isValid: score >= 4,
     };
   },
@@ -277,26 +281,16 @@ const customValidators = {
 };
 
 const createValidator = (schema: z.ZodTypeAny, options: ValidationOptions = {}): ValidationMiddleware => {
-  const {
-    allowUnknown = false,
-    stripUnknown = true,
-    customErrorHandler = null,
-  } = options;
+  const { customErrorHandler } = options;
 
   return async (req, res, next) => {
     try {
-      const validationOptions = {
-        stripUnknown,
-        allowUnknown,
-      };
-
       const validatedData = await schema.parseAsync(
         {
           body: req.body,
           query: req.query,
           params: req.params,
         },
-        validationOptions,
       );
 
       req.body = validatedData.body || req.body;
@@ -308,27 +302,32 @@ const createValidator = (schema: z.ZodTypeAny, options: ValidationOptions = {}):
       next();
     } catch (error) {
       if (customErrorHandler) {
-        return customErrorHandler(error, req, res, next);
+        customErrorHandler(error, req, res, next);
+        return;
       }
 
       if (error instanceof z.ZodError) {
-        const formattedErrors = error.errors.map((issue) => ({
-          field: issue.path.join('.'),
-          message: issue.message,
-          code: issue.code,
-          received: issue.received,
-        }));
+        const formattedErrors = error.errors.map((issue) => {
+          const received = 'received' in issue ? issue.received : undefined;
+          return {
+            field: issue.path.join('.'),
+            message: issue.message,
+            code: issue.code,
+            ...(received !== undefined ? { received } : {}),
+          };
+        });
 
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           error: 'Validation failed',
           details: formattedErrors,
           timestamp: new Date().toISOString(),
         });
+        return;
       }
 
       const message = error instanceof Error ? error.message : 'Validation error';
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'Validation error',
         message,

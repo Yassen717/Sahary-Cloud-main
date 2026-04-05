@@ -83,7 +83,7 @@ const logger = winston.createLogger({
 	format,
 	transports,
 	exitOnError: false,
-}) as SaharyLogger;
+}) as unknown as SaharyLogger;
 
 logger.stream = {
 	write: (message: string) => {

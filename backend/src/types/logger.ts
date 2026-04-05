@@ -1,5 +1,7 @@
 import type { Logger as WinstonLogger } from 'winston';
 
+type BaseLogger = Omit<WinstonLogger, 'stream'>;
+
 export interface LogContext {
   [key: string]: unknown;
 }
@@ -18,7 +20,7 @@ export interface ResponseLike {
   statusCode: number;
 }
 
-export type SaharyLogger = WinstonLogger & {
+export type SaharyLogger = BaseLogger & {
   stream: {
     write: (message: string) => void;
   };
