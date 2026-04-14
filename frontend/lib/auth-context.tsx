@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiClient } from './api';
+import { apiClient, type ApiRegisterRequest } from './api';
 import { getUserFromToken, isTokenExpired } from './jwt';
 import { getStorageItem } from './storage';
 
@@ -18,7 +18,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string, redirectTo?: string) => Promise<void>;
-  register: (userData: any) => Promise<void>;
+  register: (userData: ApiRegisterRequest) => Promise<void>;
   logout: () => Promise<void>;
   isAuthenticated: boolean;
 }
@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const register = async (userData: any) => {
+  const register = async (userData: ApiRegisterRequest) => {
     const response = await apiClient.register(userData);
     if (response.data?.tokens?.accessToken) {
       setUser(response.data.user ?? null);

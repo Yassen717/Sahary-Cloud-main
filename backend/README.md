@@ -155,12 +155,18 @@ npm run test:coverage
 
 - `npm start` - Start production server
 - `npm run dev` - Start development server with nodemon
+- `npm run typecheck` - Run TypeScript type checking (staged migration)
+- `npm run typecheck:watch` - Run TypeScript type checking in watch mode
+- `npm run build:ts` - Build TypeScript/JavaScript source to `dist/`
+- `npm run dev:ts` - Start TypeScript entrypoint in watch mode (future stage)
+- `npm run start:ts` - Start compiled TypeScript build from `dist/` (future stage)
 - `npm test` - Run tests
 - `npm run lint` - Run ESLint
 - `npm run lint:fix` - Fix ESLint issues
 - `npm run prisma:generate` - Generate Prisma client
 - `npm run prisma:migrate` - Run database migrations
 - `npm run prisma:studio` - Open Prisma Studio
+- `npm run openapi:export` - Export OpenAPI JSON to `backend/openapi/openapi.json`
 
 ### Environment Variables
 

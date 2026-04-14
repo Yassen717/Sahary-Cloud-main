@@ -17,6 +17,26 @@ The platform is pivoting to focus on **shared web hosting** as the MVP product. 
 
 ## 🎯 Priority 0: Shared Hosting Core (MVP — BUILD THESE FIRST)
 
+### 0.0 Backend TypeScript Staged Migration
+**Status:** ⚠️ In Progress — Phase 2 Started (2026-03-15)
+**Priority:** HIGH (Engineering Enablement)
+
+**Phase 1 Completed:**
+- ✅ Added backend TypeScript toolchain and `tsconfig.json`
+- ✅ Added scripts: `typecheck`, `typecheck:watch`, `build:ts`, `dev:ts`, `start:ts`
+- ✅ Kept runtime unchanged (`node src/index.js`) to avoid delivery risk
+- ✅ Added migration roadmap in `backend/TYPESCRIPT_MIGRATION_PLAN.md`
+- ✅ Added docs-level migration plan in [`docs/BACKEND_TYPESCRIPT_MIGRATION_PLAN.md`](./BACKEND_TYPESCRIPT_MIGRATION_PLAN.md)
+
+**Phase 2 Progress:**
+- ✅ Added backend OpenAPI export script (`backend`: `npm run openapi:export`)
+- ✅ Added frontend generated type pipeline (`frontend`: `npm run api:types:generate`)
+- ✅ Added contract drift gate command (`frontend`: `npm run api:types:check`)
+- ✅ Anchored frontend request DTOs to generated OpenAPI schema types
+- [ ] Wire `npm run api:types:check` into CI workflow file
+
+**Commit:** `chore(backend): add TypeScript staged migration scaffolding`
+
 ### 0.1 Hosting Account Model & Provisioning
 **Status:** ✅ Completed — 2026-03-11
 **Priority:** CRITICAL

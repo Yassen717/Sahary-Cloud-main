@@ -6,7 +6,10 @@
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "lint": "next lint"
+    "lint": "next lint",
+    "api:spec:export": "npm --prefix ../backend run openapi:export",
+    "api:types:generate": "npm run api:spec:export && openapi-typescript ../backend/openapi/openapi.json -o lib/api-types.generated.ts",
+    "api:types:check": "node scripts/check-api-types.mjs"
   },
   "dependencies": {
     "@emailjs/browser": "^3.11.0",
@@ -73,5 +76,8 @@
     "vaul": "^0.9.9",
     "web-vitals": "^5.1.0",
     "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.6.1"
   }
 }
