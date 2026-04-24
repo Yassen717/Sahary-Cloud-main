@@ -1,10 +1,14 @@
-'use client';
+"use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
-import { apiClient, type ApiRegisterRequest } from './api';
-import { getUserFromToken, isTokenExpired } from './jwt';
-import { getStorageItem } from './storage';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
+import { useRouter } from "next/navigation";
+import { apiClient, type ApiRegisterRequest } from "./api";
 
 interface User {
   id: string;
@@ -17,7 +21,11 @@ interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string, redirectTo?: string) => Promise<void>;
+  login: (
+    email: string,
+    password: string,
+    redirectTo?: string,
+  ) => Promise<void>;
   register: (userData: ApiRegisterRequest) => Promise<void>;
   logout: () => Promise<void>;
   isAuthenticated: boolean;
@@ -31,80 +39,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
-    // Check if user is already logged in and validate token
-    const token = getStorageItem('token');
-    if (token) {
-      validateToken(token);
-    } else {
-      setLoading(false);
-    }
-
-    // Set up interval to check token expiration every minute
-    const interval = setInterval(() => {
-      const currentToken = getStorageItem('token');
-      if (currentToken && isTokenExpired(currentToken)) {
-        handleAutoLogout();
-      }
-    }, 60000); // Check every minute
-
-    return () => clearInterval(interval);
+    checkSession();
   }, []);
 
-  const validateToken = async (token: string) => {
+  const checkSession = async () => {
     try {
-      // Check if token is expired
-      if (isTokenExpired(token)) {
-        handleAutoLogout();
-        return;
-      }
-
-      // Get user info from token
-      const userInfo = getUserFromToken(token);
-      if (userInfo) {
-        setUser(userInfo);
+      const response = await apiClient.checkAuth();
+      if (response?.data?.user) {
+        setUser(response.data.user);
       } else {
-        apiClient.clearToken();
+        setUser(null);
       }
-      
-      setLoading(false);
-    } catch (error) {
-      // Token is invalid, clear it
-      apiClient.clearToken();
+    } catch {
+      // 401 or network error — user is not logged in
       setUser(null);
+    } finally {
       setLoading(false);
     }
   };
 
-  const handleAutoLogout = () => {
-    apiClient.clearToken();
-    setUser(null);
-    router.push('/login?expired=true');
-  };
-
-  const login = async (email: string, password: string, redirectTo?: string) => {
-    const response = await apiClient.login(email, password);
-    setUser(response.data?.user ?? null);
-    
-    // Redirect to the original page or dashboard
+  const login = async (
+    email: string,
+    password: string,
+    redirectTo?: string,
+  ) => {
+    await apiClient.login(email, password);
+    await checkSession();
     if (redirectTo) {
       router.push(redirectTo);
     } else {
-      router.push('/dashboard');
+      router.push("/dashboard");
     }
   };
 
   const register = async (userData: ApiRegisterRequest) => {
-    const response = await apiClient.register(userData);
-    if (response.data?.tokens?.accessToken) {
-      setUser(response.data.user ?? null);
-      router.push('/dashboard');
-    }
+    await apiClient.register(userData);
+    await checkSession();
+    router.push("/dashboard");
   };
 
   const logout = async () => {
     await apiClient.logout();
     setUser(null);
-    router.push('/login');
+    router.push("/login");
   };
 
   return (
@@ -126,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 }
