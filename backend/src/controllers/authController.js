@@ -1,5 +1,5 @@
 const AuthService = require('../services/authService');
-const { createClient } = require('redis');
+const redisService = require('../services/redisService');
 
 /**
  * Authentication Controller
@@ -21,6 +21,21 @@ class AuthController {
         firstName,
         lastName,
         phone,
+      });
+
+      // Set access token as HttpOnly cookie
+      res.cookie('token', result.tokens.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 15 * 60 * 1000,
+      });
+      // Set refresh token as HttpOnly cookie
+      res.cookie('refreshToken', result.tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       });
 
       res.status(201).json({
@@ -65,6 +80,14 @@ class AuthController {
           maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         });
       }
+
+      // Set access token as HttpOnly cookie — frontend never needs to read/store it
+      res.cookie('token', result.tokens.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 15 * 60 * 1000, // 15 minutes — matches the token's actual TTL
+      });
 
       res.status(200).json({
         success: true,
@@ -116,6 +139,14 @@ class AuthController {
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       });
 
+      // Update access token cookie
+      res.cookie('token', tokens.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 15 * 60 * 1000,
+      });
+
       res.status(200).json({
         success: true,
         message: 'Token refreshed successfully',
@@ -128,7 +159,7 @@ class AuthController {
     } catch (error) {
       // Clear invalid refresh token cookie
       res.clearCookie('refreshToken');
-      
+
       res.status(401).json({
         success: false,
         error: 'Token refresh failed',
@@ -145,25 +176,14 @@ class AuthController {
   static async logout(req, res) {
     try {
       const accessToken = req.headers.authorization?.replace('Bearer ', '');
-      
-      // Get Redis client if available
-      let redisClient = null;
-      try {
-        redisClient = createClient({ url: process.env.REDIS_URL });
-        await redisClient.connect();
-      } catch (redisError) {
-        console.warn('Redis not available for token blacklisting:', redisError.message);
-      }
 
+      // Use the shared Redis singleton — no new connections per request
+      const redisClient = redisService.isReady() ? redisService.getClient() : null;
       await AuthService.logout(accessToken, redisClient);
 
-      // Clear refresh token cookie
+      // Clear auth cookies
+      res.clearCookie('token');
       res.clearCookie('refreshToken');
-
-      // Disconnect Redis
-      if (redisClient) {
-        await redisClient.quit();
-      }
 
       res.status(200).json({
         success: true,
@@ -222,7 +242,7 @@ class AuthController {
           data: {
             resetToken: result.resetToken,
             expiresAt: result.expiresAt,
-          }
+          },
         }),
       });
     } catch (error) {
@@ -304,7 +324,7 @@ class AuthController {
           data: {
             verificationToken: result.verificationToken,
             expiresAt: result.expiresAt,
-          }
+          },
         }),
       });
     } catch (error) {
@@ -459,7 +479,7 @@ class AuthController {
 
       // This would typically revoke all sessions for the user
       // Implementation depends on your session storage strategy
-      
+
       res.status(200).json({
         success: true,
         message: 'All sessions revoked successfully',
@@ -485,7 +505,7 @@ class AuthController {
 
       // Implementation would revoke specific session
       // For now, return success
-      
+
       res.status(200).json({
         success: true,
         message: 'Session revoked successfully',
@@ -757,11 +777,11 @@ class AuthController {
 
       // Build where clause
       const where = { userId };
-      
+
       if (action) {
         where.action = { contains: action, mode: 'insensitive' };
       }
-      
+
       if (startDate || endDate) {
         where.timestamp = {};
         if (startDate) where.timestamp.gte = new Date(startDate);
@@ -822,12 +842,12 @@ class AuthController {
       // Verify password
       const user = await prisma.user.findUnique({
         where: { id: userId },
-        select: { password: true }
+        select: { password: true },
       });
 
       const ValidationHelpers = require('../utils/validation.helpers');
       const isPasswordValid = await ValidationHelpers.comparePassword(password, user.password);
-      
+
       if (!isPasswordValid) {
         return res.status(401).json({
           success: false,
@@ -839,22 +859,18 @@ class AuthController {
       // Deactivate account
       await prisma.user.update({
         where: { id: userId },
-        data: { 
+        data: {
           isActive: false,
           // Store deactivation info
           deactivatedAt: new Date(),
           deactivationReason: reason || 'User requested deactivation',
-        }
+        },
       });
 
       // Log deactivation
-      await AuthService.logAuditEvent(
-        userId,
-        'ACCOUNT_DEACTIVATED',
-        'user',
-        userId,
-        { reason: reason || 'User requested deactivation' }
-      );
+      await AuthService.logAuditEvent(userId, 'ACCOUNT_DEACTIVATED', 'user', userId, {
+        reason: reason || 'User requested deactivation',
+      });
 
       res.status(200).json({
         success: true,
@@ -895,7 +911,7 @@ class AuthController {
           isActive: true,
           passwordResetToken: true,
           passwordResetExpires: true,
-        }
+        },
       });
 
       if (!user) {
@@ -915,9 +931,11 @@ class AuthController {
       }
 
       // Verify reactivation token (reuse password reset token mechanism)
-      if (user.passwordResetToken !== token || 
-          !user.passwordResetExpires || 
-          user.passwordResetExpires < new Date()) {
+      if (
+        user.passwordResetToken !== token ||
+        !user.passwordResetExpires ||
+        user.passwordResetExpires < new Date()
+      ) {
         return res.status(401).json({
           success: false,
           error: 'Invalid or expired token',
@@ -933,16 +951,11 @@ class AuthController {
           passwordResetToken: null,
           passwordResetExpires: null,
           reactivatedAt: new Date(),
-        }
+        },
       });
 
       // Log reactivation
-      await AuthService.logAuditEvent(
-        user.id,
-        'ACCOUNT_REACTIVATED',
-        'user',
-        user.id
-      );
+      await AuthService.logAuditEvent(user.id, 'ACCOUNT_REACTIVATED', 'user', user.id);
 
       res.status(200).json({
         success: true,

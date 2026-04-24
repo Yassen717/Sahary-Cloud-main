@@ -89,10 +89,7 @@ class JWTUtils {
    * @returns {Promise<Object>} Decoded token
    */
   static async verifyAccessToken(token, options = {}) {
-    const {
-      issuer = 'sahary-cloud',
-      audience = 'sahary-cloud-users',
-    } = options;
+    const { issuer = 'sahary-cloud', audience = 'sahary-cloud-users' } = options;
 
     try {
       const decoded = await promisify(jwt.verify)(token, config.jwt.secret, {
@@ -119,10 +116,7 @@ class JWTUtils {
    * @returns {Promise<Object>} Decoded token
    */
   static async verifyRefreshToken(token, options = {}) {
-    const {
-      issuer = 'sahary-cloud',
-      audience = 'sahary-cloud-users',
-    } = options;
+    const { issuer = 'sahary-cloud', audience = 'sahary-cloud-users' } = options;
 
     try {
       const decoded = await promisify(jwt.verify)(token, config.jwt.refreshSecret, {
@@ -314,7 +308,7 @@ class JWTUtils {
    * @returns {Promise<void>}
    */
   static async blacklistToken(token, redis) {
-    if (!redis || typeof redis.setex !== 'function') {
+    if (!redis || typeof redis.setEx !== 'function') {
       console.log('Redis not available for token blacklisting:');
       return;
     }
@@ -325,7 +319,7 @@ class JWTUtils {
 
       const ttl = decoded.exp - Math.floor(Date.now() / 1000);
       if (ttl > 0) {
-        await redis.setex(`blacklist:${token}`, ttl, '1');
+        await redis.setEx(`blacklist:${token}`, ttl, '1');
       }
     } catch (error) {
       console.error('Failed to blacklist token:', error);

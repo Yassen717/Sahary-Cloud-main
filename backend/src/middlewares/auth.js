@@ -1,6 +1,7 @@
 const JWTUtils = require('../utils/jwt');
 const AuthService = require('../services/authService');
-const { createClient } = require('redis');
+const redisService = require('../services/redisService');
+const { prisma } = require('../config/database');
 
 /**
  * Authentication and Authorization Middleware
@@ -14,38 +15,35 @@ class AuthMiddleware {
    */
   static async authenticate(req, res, next) {
     try {
-      // Get token from header
+      // Accept token from Authorization header OR HttpOnly cookie (set by the server on login)
       const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      const cookieToken = req.cookies?.token;
+      const token =
+        authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : cookieToken;
+
+      if (!token) {
         return res.status(401).json({
           success: false,
           error: 'Authentication required',
-          message: 'No valid authorization header provided',
+          message: 'No valid authorization header or session cookie provided',
         });
       }
 
-      const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-
-      // Check if token is blacklisted (if Redis is available)
-      let redisClient = null;
-      try {
-        redisClient = createClient({ url: process.env.REDIS_URL });
-        await redisClient.connect();
-        
-        const isBlacklisted = await JWTUtils.isTokenBlacklisted(token, redisClient);
-        if (isBlacklisted) {
-          await redisClient.quit();
-          return res.status(401).json({
-            success: false,
-            error: 'Token invalid',
-            message: 'Token has been revoked',
-          });
+      // Use the shared Redis singleton — no new connections per request
+      if (redisService.isReady()) {
+        try {
+          const isBlacklisted = await JWTUtils.isTokenBlacklisted(token, redisService.getClient());
+          if (isBlacklisted) {
+            return res.status(401).json({
+              success: false,
+              error: 'Token invalid',
+              message: 'Token has been revoked',
+            });
+          }
+        } catch (redisError) {
+          // Redis error during blacklist check — log and continue (don't fail auth)
+          console.warn('Redis blacklist check failed:', redisError.message);
         }
-        
-        await redisClient.quit();
-      } catch (redisError) {
-        // Redis not available, continue without blacklist check
-        console.warn('Redis not available for token blacklist check:', redisError.message);
       }
 
       // Verify token
@@ -106,7 +104,7 @@ class AuthMiddleware {
       }
 
       // Use the authenticate method but don't fail if it doesn't work
-      await AuthMiddleware.authenticate(req, res, (error) => {
+      await AuthMiddleware.authenticate(req, res, error => {
         if (error) {
           req.user = null;
         }
@@ -235,7 +233,7 @@ class AuthMiddleware {
    */
   static createRateLimit(options = {}) {
     const rateLimit = require('express-rate-limit');
-    
+
     const {
       windowMs = 15 * 60 * 1000, // 15 minutes
       max = 100, // requests per window
@@ -268,7 +266,7 @@ class AuthMiddleware {
   static async authenticateApiKey(req, res, next) {
     try {
       const apiKey = req.headers['x-api-key'] || req.query.apiKey;
-      
+
       if (!apiKey) {
         return res.status(401).json({
           success: false,
@@ -280,7 +278,7 @@ class AuthMiddleware {
       // In a real implementation, you'd validate the API key against a database
       // For now, we'll use a simple environment variable check
       const validApiKeys = (process.env.VALID_API_KEYS || '').split(',');
-      
+
       if (!validApiKeys.includes(apiKey)) {
         return res.status(401).json({
           success: false,
@@ -357,7 +355,9 @@ class AuthMiddleware {
    */
   static logAuthEvent(req, res, next) {
     if (req.user) {
-      console.log(`Auth Event: ${req.method} ${req.path} - User: ${req.user.email} (${req.user.role})`);
+      console.log(
+        `Auth Event: ${req.method} ${req.path} - User: ${req.user.email} (${req.user.role})`
+      );
     }
     next();
   }
@@ -380,12 +380,12 @@ class AuthMiddleware {
           userId: req.user.userId,
           data: {
             path: ['accessToken'],
-            equals: req.token
+            equals: req.token,
           },
           expiresAt: {
-            gt: new Date()
-          }
-        }
+            gt: new Date(),
+          },
+        },
       });
 
       if (!session) {
@@ -411,7 +411,7 @@ class AuthMiddleware {
   static requireFeature(feature) {
     return (req, res, next) => {
       const { isFeatureEnabled } = require('../config/auth');
-      
+
       if (!isFeatureEnabled(feature)) {
         return res.status(403).json({
           success: false,
@@ -433,9 +433,9 @@ class AuthMiddleware {
     return (req, res, next) => {
       let index = 0;
 
-      const runNext = (error) => {
+      const runNext = error => {
         if (error) return next(error);
-        
+
         if (index >= middlewares.length) {
           return next();
         }
