@@ -2,10 +2,10 @@
   "name": "sahary-cloud-backend",
   "version": "1.0.0",
   "description": "Sahary Cloud - Solar-powered VPS and hosting platform backend",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "start": "npm run start:ts",
+    "dev": "npm run dev:ts",
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch",
     "build:ts": "tsc -p tsconfig.json",
