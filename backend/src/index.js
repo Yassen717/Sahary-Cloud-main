@@ -1,6 +1,7 @@
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
@@ -10,7 +11,12 @@ const { connectDatabase, checkDatabaseHealth } = require('./config/database');
 const redisService = require('./services/redisService');
 const dockerService = require('./services/dockerService');
 const logger = require('./utils/logger');
-const { errorHandler, notFoundHandler, handleUnhandledRejection, handleUncaughtException } = require('./middlewares/errorHandler');
+const {
+  errorHandler,
+  notFoundHandler,
+  handleUnhandledRejection,
+  handleUncaughtException,
+} = require('./middlewares/errorHandler');
 const { requestLogger } = require('./middlewares/requestLogger');
 const { correlationId } = require('./middlewares/correlationId');
 const swaggerUi = require('swagger-ui-express');
@@ -33,26 +39,28 @@ let redisClient;
 app.use(correlationId);
 
 // Security middleware
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+      },
     },
-  },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true,
-  },
-  frameguard: {
-    action: 'deny',
-  },
-  noSniff: true,
-  xssFilter: true,
-}));
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
+    },
+    frameguard: {
+      action: 'deny',
+    },
+    noSniff: true,
+    xssFilter: true,
+  })
+);
 
 // Input sanitization
 const { sanitizeAll, checkXSS, preventNoSQLInjection } = require('./middlewares/sanitization');
@@ -62,18 +70,23 @@ app.use(preventNoSQLInjection);
 
 // DDoS protection
 if (process.env.NODE_ENV === 'production') {
-  const { ddosProtectionMiddleware, connectionLimitMiddleware } = require('./middlewares/ddosProtection');
+  const {
+    ddosProtectionMiddleware,
+    connectionLimitMiddleware,
+  } = require('./middlewares/ddosProtection');
   app.use(ddosProtectionMiddleware);
   app.use(connectionLimitMiddleware);
 }
 
 // CORS configuration
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}));
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  })
+);
 
 // Compression middleware
 app.use(compression());
@@ -84,13 +97,16 @@ const limiter = rateLimit({
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
   message: {
     error: 'Too many requests from this IP, please try again later.',
-    retryAfter: Math.ceil((parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000) / 1000)
+    retryAfter: Math.ceil((parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000) / 1000),
   },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
 app.use('/api/', limiter);
+
+// Cookie parsing middleware — must come before any middleware that reads req.cookies
+app.use(cookieParser());
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -106,29 +122,35 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 // Session configuration (will be set up after Redis connection)
-const setupSession = (client) => {
-  app.use(session({
-    store: new RedisStore({ client }),
-    secret: process.env.SESSION_SECRET || 'sahary-cloud-session-secret',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-      maxAge: parseInt(process.env.SESSION_MAX_AGE) || 24 * 60 * 60 * 1000 // 24 hours
-    }
-  }));
+const setupSession = client => {
+  app.use(
+    session({
+      store: new RedisStore({ client }),
+      secret: process.env.SESSION_SECRET,
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        maxAge: parseInt(process.env.SESSION_MAX_AGE) || 24 * 60 * 60 * 1000, // 24 hours
+      },
+    })
+  );
 };
 
 // API Documentation — available in non-production environments
 if (process.env.NODE_ENV !== 'production') {
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-    customSiteTitle: 'Sahary Cloud API Docs',
-    swaggerOptions: {
-      persistAuthorization: true,
-      docExpansion: 'list',
-    },
-  }));
+  app.use(
+    '/api-docs',
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerSpec, {
+      customSiteTitle: 'Sahary Cloud API Docs',
+      swaggerOptions: {
+        persistAuthorization: true,
+        docExpansion: 'list',
+      },
+    })
+  );
   app.get('/api-docs.json', (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.send(swaggerSpec);
@@ -158,7 +180,7 @@ app.get('/api', (req, res) => {
     message: 'Welcome to Sahary Cloud API',
     version: '1.0.0',
     documentation: '/api/docs',
-    status: 'active'
+    status: 'active',
   });
 });
 

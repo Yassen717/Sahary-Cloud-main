@@ -4,8 +4,8 @@
 const authConfig = {
   // JWT settings
   jwt: {
-    secret: process.env.JWT_SECRET || 'sahary-cloud-jwt-secret',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'sahary-cloud-refresh-secret',
+    secret: process.env.JWT_SECRET,
+    refreshSecret: process.env.JWT_REFRESH_SECRET,
     expiresIn: process.env.JWT_EXPIRE || '30d',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRE || '7d',
     issuer: 'sahary-cloud',
@@ -15,7 +15,7 @@ const authConfig = {
 
   // Session settings
   session: {
-    secret: process.env.SESSION_SECRET || 'sahary-cloud-session-secret',
+    secret: process.env.SESSION_SECRET,
     maxAge: parseInt(process.env.SESSION_MAX_AGE) || 24 * 60 * 60 * 1000, // 24 hours
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
@@ -101,7 +101,7 @@ const authConfig = {
           defaultSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           scriptSrc: ["'self'"],
-          imgSrc: ["'self'", "data:", "https:"],
+          imgSrc: ["'self'", 'data:', 'https:'],
         },
       },
     },
@@ -202,7 +202,7 @@ const authConfig = {
 const getAuthConfig = () => {
   const env = process.env.NODE_ENV || 'development';
   const envConfig = authConfig[env] || {};
-  
+
   // Deep merge environment-specific config
   const mergeDeep = (target, source) => {
     for (const key in source) {
@@ -224,15 +224,16 @@ const getAuthConfig = () => {
  * @returns {Array} Missing environment variables
  */
 const validateAuthConfig = () => {
-  const required = [
-    'JWT_SECRET',
-    'JWT_REFRESH_SECRET',
-  ];
-
+  const required = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'SESSION_SECRET'];
   const missing = required.filter(key => !process.env[key]);
-  
-  if (missing.length > 0 && process.env.NODE_ENV !== 'test') {
-    console.warn('Missing required auth environment variables:', missing);
+
+  if (missing.length > 0) {
+    const msg = `FATAL: Missing required secret environment variables: ${missing.join(', ')}. Set these in your .env file before starting the server.`;
+    if (process.env.NODE_ENV === 'test') {
+      console.warn('[test] ' + msg);
+    } else {
+      throw new Error(msg);
+    }
   }
 
   return missing;
@@ -243,7 +244,7 @@ const validateAuthConfig = () => {
  * @param {string} feature - Feature name
  * @returns {boolean} Is feature enabled
  */
-const isFeatureEnabled = (feature) => {
+const isFeatureEnabled = feature => {
   const config = getAuthConfig();
   return config.features[feature] === true;
 };
