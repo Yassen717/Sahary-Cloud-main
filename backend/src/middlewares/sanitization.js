@@ -1,6 +1,17 @@
 const validator = require('validator');
 const { ValidationError } = require('../utils/errors');
 
+// Fields that must never be HTML-escaped — they are hashed server-side and
+// HTML-escaping them would corrupt the hash against a raw-password comparison.
+const SENSITIVE_FIELDS = new Set([
+  'password',
+  'currentPassword',
+  'newPassword',
+  'oldPassword',
+  'confirmPassword',
+  'newPasswordConfirm',
+]);
+
 /**
  * Input Sanitization Middleware
  * Sanitizes and validates user input to prevent injection attacks
@@ -11,13 +22,13 @@ const { ValidationError } = require('../utils/errors');
  * @param {string} input - Input string
  * @returns {string} Sanitized string
  */
-const sanitizeString = (input) => {
+const sanitizeString = input => {
   if (typeof input !== 'string') return input;
-  
+
   // Remove any HTML tags
   let sanitized = validator.stripLow(input);
   sanitized = validator.escape(sanitized);
-  
+
   return sanitized.trim();
 };
 
@@ -26,13 +37,13 @@ const sanitizeString = (input) => {
  * @param {Object} obj - Object to sanitize
  * @returns {Object} Sanitized object
  */
-const sanitizeObject = (obj) => {
+const sanitizeObject = obj => {
   if (obj === null || obj === undefined) return obj;
-  
+
   if (Array.isArray(obj)) {
     return obj.map(item => sanitizeObject(item));
   }
-  
+
   if (typeof obj === 'object') {
     const sanitized = {};
     for (const [key, value] of Object.entries(obj)) {
@@ -40,11 +51,11 @@ const sanitizeObject = (obj) => {
     }
     return sanitized;
   }
-  
+
   if (typeof obj === 'string') {
     return sanitizeString(obj);
   }
-  
+
   return obj;
 };
 
@@ -53,7 +64,12 @@ const sanitizeObject = (obj) => {
  */
 const sanitizeBody = (req, res, next) => {
   if (req.body && typeof req.body === 'object') {
-    req.body = sanitizeObject(req.body);
+    const sanitized = {};
+    for (const [key, value] of Object.entries(req.body)) {
+      // Never HTML-escape password fields — they are hashed, never rendered
+      sanitized[key] = SENSITIVE_FIELDS.has(key) ? value : sanitizeObject(value);
+    }
+    req.body = sanitized;
   }
   next();
 };
@@ -92,7 +108,7 @@ const sanitizeAll = (req, res, next) => {
 /**
  * Validate email
  */
-const validateEmail = (email) => {
+const validateEmail = email => {
   if (!validator.isEmail(email)) {
     throw new ValidationError('Invalid email format');
   }
@@ -102,7 +118,7 @@ const validateEmail = (email) => {
 /**
  * Validate URL
  */
-const validateURL = (url) => {
+const validateURL = url => {
   if (!validator.isURL(url, { require_protocol: true })) {
     throw new ValidationError('Invalid URL format');
   }
@@ -112,7 +128,7 @@ const validateURL = (url) => {
 /**
  * Validate UUID
  */
-const validateUUID = (uuid) => {
+const validateUUID = uuid => {
   if (!validator.isUUID(uuid)) {
     throw new ValidationError('Invalid UUID format');
   }
@@ -120,51 +136,14 @@ const validateUUID = (uuid) => {
 };
 
 /**
- * Check for SQL injection patterns
+ * SQL injection guard — DISABLED.
+ *
+ * The project uses Prisma with fully parameterised queries, so HTTP-level SQL
+ * keyword scanning is not needed and causes false positives on legitimate text
+ * (e.g. "create a backup", "select a plan"). This is a no-op kept for
+ * backwards-compatibility; do NOT re-enable the keyword patterns.
  */
-const checkSQLInjection = (req, res, next) => {
-  const sqlPatterns = [
-    /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE)\b)/gi,
-    /(UNION.*SELECT)/gi,
-    /(;|\-\-|\/\*|\*\/)/g,
-  ];
-
-  const checkValue = (value) => {
-    if (typeof value === 'string') {
-      for (const pattern of sqlPatterns) {
-        if (pattern.test(value)) {
-          throw new ValidationError('Potential SQL injection detected', {
-            field: 'input',
-            pattern: pattern.toString(),
-          });
-        }
-      }
-    }
-  };
-
-  const checkObject = (obj) => {
-    if (obj && typeof obj === 'object') {
-      for (const value of Object.values(obj)) {
-        if (Array.isArray(value)) {
-          value.forEach(checkValue);
-        } else if (typeof value === 'object') {
-          checkObject(value);
-        } else {
-          checkValue(value);
-        }
-      }
-    }
-  };
-
-  try {
-    checkObject(req.body);
-    checkObject(req.query);
-    checkObject(req.params);
-    next();
-  } catch (error) {
-    next(error);
-  }
-};
+const checkSQLInjection = (req, res, next) => next();
 
 /**
  * Check for XSS patterns
@@ -176,7 +155,7 @@ const checkXSS = (req, res, next) => {
     /on\w+\s*=/gi,
   ];
 
-  const checkValue = (value) => {
+  const checkValue = value => {
     if (typeof value === 'string') {
       for (const pattern of xssPatterns) {
         if (pattern.test(value)) {
@@ -189,11 +168,12 @@ const checkXSS = (req, res, next) => {
     }
   };
 
-  const checkObject = (obj) => {
+  const checkObject = (obj, excludeKeys = new Set()) => {
     if (obj && typeof obj === 'object') {
-      for (const value of Object.values(obj)) {
+      for (const [key, value] of Object.entries(obj)) {
+        if (excludeKeys.has(key)) continue;
         if (Array.isArray(value)) {
-          value.forEach(checkValue);
+          value.forEach(v => checkValue(v));
         } else if (typeof value === 'object') {
           checkObject(value);
         } else {
@@ -204,7 +184,7 @@ const checkXSS = (req, res, next) => {
   };
 
   try {
-    checkObject(req.body);
+    checkObject(req.body, SENSITIVE_FIELDS); // skip password fields in body
     checkObject(req.query);
     checkObject(req.params);
     next();
@@ -217,7 +197,7 @@ const checkXSS = (req, res, next) => {
  * Prevent NoSQL injection
  */
 const preventNoSQLInjection = (req, res, next) => {
-  const checkValue = (value) => {
+  const checkValue = value => {
     if (value && typeof value === 'object') {
       const keys = Object.keys(value);
       for (const key of keys) {
@@ -230,7 +210,7 @@ const preventNoSQLInjection = (req, res, next) => {
     }
   };
 
-  const checkObject = (obj) => {
+  const checkObject = obj => {
     if (obj && typeof obj === 'object') {
       checkValue(obj);
       for (const value of Object.values(obj)) {
