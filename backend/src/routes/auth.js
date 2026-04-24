@@ -2,7 +2,13 @@ const express = require('express');
 const AuthController = require('../controllers/authController');
 const { validate } = require('../middlewares/validation');
 const { authenticate, optionalAuth, requireEmailVerification } = require('../middlewares/auth');
-const { authRateLimit, apiRateLimit, bruteForceProtection, sanitizeInput, xssProtection } = require('../middlewares/security');
+const {
+  authRateLimit,
+  apiRateLimit,
+  bruteForceProtection,
+  sanitizeInput,
+  xssProtection,
+} = require('../middlewares/security');
 const {
   registerSchema,
   loginSchema,
@@ -51,11 +57,7 @@ router.use(xssProtection());
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/register',
-  authRateLimit(),
-  validate(registerSchema),
-  AuthController.register
-);
+router.post('/register', authRateLimit(), validate(registerSchema), AuthController.register);
 
 /**
  * @swagger
@@ -84,7 +86,8 @@ router.post('/register',
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/login',
+router.post(
+  '/login',
   authRateLimit(),
   bruteForceProtection(),
   validate(loginSchema),
@@ -118,10 +121,7 @@ router.post('/login',
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
  */
-router.post('/refresh',
-  apiRateLimit(),
-  AuthController.refreshToken
-);
+router.post('/refresh', apiRateLimit(), AuthController.refreshToken);
 
 /**
  * @swagger
@@ -135,22 +135,19 @@ router.post('/refresh',
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
  */
-router.post('/logout',
-  apiRateLimit(),
-  authenticate,
-  AuthController.logout
-);
+router.post('/logout', apiRateLimit(), authenticate, AuthController.logout);
 
 /**
  * @route   POST /api/v1/auth/change-password
  * @desc    Change user password
  * @access  Private
  */
-router.post('/change-password',
+router.post(
+  '/change-password',
   authRateLimit(),
-  validate(changePasswordSchema),
   authenticate,
   requireEmailVerification,
+  validate(changePasswordSchema),
   AuthController.changePassword
 );
 
@@ -159,7 +156,8 @@ router.post('/change-password',
  * @desc    Request password reset
  * @access  Public
  */
-router.post('/forgot-password',
+router.post(
+  '/forgot-password',
   authRateLimit(),
   validate(forgotPasswordSchema),
   AuthController.forgotPassword
@@ -170,7 +168,8 @@ router.post('/forgot-password',
  * @desc    Reset password using token
  * @access  Public
  */
-router.post('/reset-password',
+router.post(
+  '/reset-password',
   authRateLimit(),
   validate(resetPasswordSchema),
   AuthController.resetPassword
@@ -181,7 +180,8 @@ router.post('/reset-password',
  * @desc    Verify email address
  * @access  Public
  */
-router.post('/verify-email',
+router.post(
+  '/verify-email',
   apiRateLimit(),
   validate(verifyEmailSchema),
   AuthController.verifyEmail
@@ -192,7 +192,8 @@ router.post('/verify-email',
  * @desc    Resend email verification
  * @access  Public
  */
-router.post('/resend-verification',
+router.post(
+  '/resend-verification',
   authRateLimit(),
   validate(forgotPasswordSchema), // Reuse email validation
   AuthController.resendVerification
@@ -219,21 +220,18 @@ router.post('/resend-verification',
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
  */
-router.get('/profile',
-  apiRateLimit(),
-  authenticate,
-  AuthController.getProfile
-);
+router.get('/profile', apiRateLimit(), authenticate, AuthController.getProfile);
 
 /**
  * @route   PUT /api/v1/auth/profile
  * @desc    Update user profile
  * @access  Private
  */
-router.put('/profile',
+router.put(
+  '/profile',
   apiRateLimit(),
-  validate(updateProfileSchema),
   authenticate,
+  validate(updateProfileSchema),
   AuthController.updateProfile
 );
 
@@ -242,51 +240,36 @@ router.put('/profile',
  * @desc    Check authentication status
  * @access  Private
  */
-router.get('/check',
-  apiRateLimit(),
-  authenticate,
-  AuthController.checkAuth
-);
+router.get('/check', apiRateLimit(), authenticate, AuthController.checkAuth);
 
 /**
  * @route   GET /api/v1/auth/sessions
  * @desc    Get user sessions
  * @access  Private
  */
-router.get('/sessions',
-  apiRateLimit(),
-  authenticate,
-  AuthController.getSessions
-);
+router.get('/sessions', apiRateLimit(), authenticate, AuthController.getSessions);
 
 /**
  * @route   DELETE /api/v1/auth/sessions
  * @desc    Revoke all user sessions
  * @access  Private
  */
-router.delete('/sessions',
-  authRateLimit(),
-  authenticate,
-  AuthController.revokeAllSessions
-);
+router.delete('/sessions', authRateLimit(), authenticate, AuthController.revokeAllSessions);
 
 /**
  * @route   DELETE /api/v1/auth/sessions/:sessionId
  * @desc    Revoke specific session
  * @access  Private
  */
-router.delete('/sessions/:sessionId',
-  authRateLimit(),
-  authenticate,
-  AuthController.revokeSession
-);
+router.delete('/sessions/:sessionId', authRateLimit(), authenticate, AuthController.revokeSession);
 
 /**
  * @route   POST /api/v1/auth/validate-token
  * @desc    Validate token without authentication
  * @access  Public
  */
-router.post('/validate-token',
+router.post(
+  '/validate-token',
   apiRateLimit(),
   validate(validateTokenSchema),
   AuthController.validateToken
@@ -297,21 +280,18 @@ router.post('/validate-token',
  * @desc    Get user permissions
  * @access  Private
  */
-router.get('/permissions',
-  apiRateLimit(),
-  authenticate,
-  AuthController.getUserPermissions
-);
+router.get('/permissions', apiRateLimit(), authenticate, AuthController.getUserPermissions);
 
 /**
  * @route   POST /api/v1/auth/impersonate
  * @desc    Impersonate another user (Super Admin only)
  * @access  Private
  */
-router.post('/impersonate',
+router.post(
+  '/impersonate',
   authRateLimit(),
-  validate(impersonateUserSchema),
   authenticate,
+  validate(impersonateUserSchema),
   AuthController.impersonateUser
 );
 
@@ -320,21 +300,18 @@ router.post('/impersonate',
  * @desc    Stop impersonating user
  * @access  Private
  */
-router.post('/stop-impersonation',
-  apiRateLimit(),
-  authenticate,
-  AuthController.stopImpersonation
-);
+router.post('/stop-impersonation', apiRateLimit(), authenticate, AuthController.stopImpersonation);
 
 /**
  * @route   GET /api/v1/auth/activity
  * @desc    Get user activity log
  * @access  Private
  */
-router.get('/activity',
+router.get(
+  '/activity',
   apiRateLimit(),
-  validate(activityQuerySchema),
   authenticate,
+  validate(activityQuerySchema),
   AuthController.getUserActivity
 );
 
@@ -343,11 +320,12 @@ router.get('/activity',
  * @desc    Deactivate user account
  * @access  Private
  */
-router.post('/deactivate',
+router.post(
+  '/deactivate',
   authRateLimit(),
-  validate(deactivateAccountSchema),
   authenticate,
   requireEmailVerification,
+  validate(deactivateAccountSchema),
   AuthController.deactivateAccount
 );
 
@@ -356,7 +334,8 @@ router.post('/deactivate',
  * @desc    Reactivate user account
  * @access  Public
  */
-router.post('/reactivate',
+router.post(
+  '/reactivate',
   authRateLimit(),
   validate(reactivateAccountSchema),
   AuthController.reactivateAccount
