@@ -1,12 +1,12 @@
 // @ts-nocheck
-const { PrismaClient } = require('@prisma/client');
+const { prisma } = require('../config/database');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const dns = require('dns').promises;
+const fs = require('fs').promises;
 const path = require('path');
 const VhostService = require('./vhostService');
-
-const prisma = new PrismaClient();
+const logger = require('../utils/logger').default;
 
 // Base directory where all hosting document roots live.
 // In production this is a real path on the server that Nginx serves.
@@ -14,6 +14,30 @@ const WWW_BASE = process.env.HOSTING_WWW_BASE || '/var/www';
 
 // The platform's base domain for auto-assigned subdomains.
 const BASE_DOMAIN = process.env.HOSTING_BASE_DOMAIN || 'sahary.cloud';
+
+const DOMAIN_REGEX = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
+
+// First labels under BASE_DOMAIN reserved for the platform itself.
+const RESERVED_SUBDOMAINS = new Set(['www', 'api', 'mail', 'app', 'admin', 'status', 'ns', 'ftp', 'cpanel']);
+
+// Holding page written into freshly provisioned document roots.
+const DEFAULT_INDEX_HTML = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Hosting account provisioned</title></head>
+<body><h1>Your site is ready</h1><p>Replace this page with your own content.</p></body>
+</html>
+`;
+
+/**
+ * Error annotated with an HTTP status and a safe-to-expose flag so the
+ * controller layer can map it without substring matching or leaking internals.
+ */
+function httpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  error.expose = true;
+  return error;
+}
 
 /**
  * Generate a cryptographically random password.
@@ -62,11 +86,14 @@ function buildDocumentRoot(accountId) {
 }
 
 /**
- * Strip all hashed credential fields before returning an account to callers.
- * Plain-text credentials are ONLY returned once, at creation time.
+ * Strip all hashed credential fields and internal paths before returning an
+ * account to callers. Plain-text credentials are ONLY returned once, at
+ * creation time.
  */
 function sanitizeAccount(account) {
-  const { ftpPassword, dbPassword, ...safe } = account;
+  const {
+    ftpPassword, dbPassword, documentRoot, ...safe
+  } = account;
   return safe;
 }
 
@@ -94,37 +121,48 @@ class HostingService {
    *
    * @param {string} userId  - authenticated user id
    * @param {string} planId  - chosen HostingPlan id
-   * @param {string} [domain] - primary domain; omit to auto-assign <username>.sahary.cloud
-   * @returns {{ account: object, credentials: object }}
+   * @param {string} [domain] - external domain to attach; parked unverified until
+   *          DNS TXT verification succeeds. The primary domain is always an
+   *          auto-assigned <username>.sahary.cloud subdomain.
+   * @returns {{ account: object, credentials: object, pendingDomain?: object }}
    *          account — sanitized HostingAccount (no hashed passwords)
    *          credentials — plain-text ftp + db credentials (shown once only)
+   *          pendingDomain — unverified HostingDomain row carrying verifyToken
    */
   static async createAccount(userId, planId, domain) {
     // Validate plan
     const plan = await prisma.hostingPlan.findUnique({ where: { id: planId } });
     if (!plan || !plan.isActive) {
-      throw new Error('Hosting plan not found or inactive');
+      throw httpError(400, 'Hosting plan not found or inactive');
     }
 
-    // Enforce one account per user (MVP)
-    const existing = await prisma.hostingAccount.findFirst({ where: { userId } });
+    // Enforce one non-terminated account per user (MVP). TERMINATED accounts
+    // release their unique fields and never block re-provisioning.
+    const existing = await prisma.hostingAccount.findFirst({
+      where: { userId, status: { not: 'TERMINATED' } },
+    });
     if (existing) {
-      throw new Error('User already has a hosting account');
+      throw httpError(409, 'User already has a hosting account');
     }
 
-    // Auto-assign subdomain if no domain provided
-    if (!domain) {
-      const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
-      if (!user) throw new Error('User not found');
-      const emailPrefix = user.email.split('@')[0].replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 32) || 'user';
-      domain = await HostingService._uniqueSubdomain(emailPrefix);
+    // A user-supplied external domain is NOT trusted into server_name yet:
+    // it is parked as an unverified HostingDomain row and only emitted in the
+    // vhost after the standard DNS TXT verification succeeds. Until then the
+    // platform subdomain serves a default holding page.
+    let externalDomain = null;
+    if (domain) {
+      externalDomain = String(domain).toLowerCase().trim();
+      HostingService._assertClaimableDomain(externalDomain);
+      if (await HostingService._isDomainTaken(externalDomain)) {
+        throw httpError(409, 'Domain is already in use');
+      }
     }
 
-    // Domain uniqueness check (also enforced by DB unique index)
-    const domainTaken = await prisma.hostingAccount.findUnique({ where: { domain } });
-    if (domainTaken) {
-      throw new Error('Domain is already in use');
-    }
+    // The primary domain is always an auto-assigned platform subdomain.
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    if (!user) throw httpError(404, 'User not found');
+    const emailPrefix = user.email.split('@')[0].replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 32) || 'user';
+    domain = await HostingService._uniqueSubdomain(emailPrefix);
 
     // --- Generate credentials ---
     const ftpUser = ftpUsernameFromDomain(domain);
@@ -132,24 +170,26 @@ class HostingService {
     // FTP username must also be unique — surface a clear error
     const ftpTaken = await prisma.hostingAccount.findUnique({ where: { ftpUser } });
     if (ftpTaken) {
-      throw new Error('FTP username derived from this domain is already taken');
+      throw httpError(409, 'FTP username derived from this domain is already taken');
     }
 
     const ftpCred = await generateCredential();
 
-    const dbBase = dbIdentifierFromDomain(domain);
-    const dbName = dbBase;
-    const dbUser = dbBase.slice(0, 16); // MySQL user name hard limit
-    const dbCred = await generateCredential();
-
-    // --- Create the record ---
-    // We need the id to build the document root, so generate it upfront via cuid.
-    // Prisma uses cuid() by default; we pre-generate to set documentRoot atomically.
-    const { createId } = require('@paralleldrive/cuid2');
-    const accountId = createId();
+    // Pre-generate the id via crypto.randomUUID (no extra dependency) so the
+    // document root and db identifiers can embed it atomically.
+    const accountId = crypto.randomUUID().replace(/-/g, '');
     const documentRoot = buildDocumentRoot(accountId);
 
+    // MySQL identifiers incorporate the account id so look-alike domains
+    // (a-bc.com vs abc.com) can never collide.
+    const dbSuffix = accountId.slice(0, 8);
+    const dbBase = dbIdentifierFromDomain(domain);
+    const dbName = `${dbBase}_${dbSuffix}`.slice(0, 64);
+    const dbUser = `${dbBase.slice(0, 7)}_${dbSuffix}`.slice(0, 16); // MySQL user name hard limit
+    const dbCred = await generateCredential();
+
     let account;
+    let pendingDomain = null;
     try {
       account = await prisma.hostingAccount.create({
         data: {
@@ -170,14 +210,60 @@ class HostingService {
         include: { plan: true, domains: true },
       });
 
+      if (externalDomain) {
+        pendingDomain = await prisma.hostingDomain.create({
+          data: {
+            domain: externalDomain,
+            verifyToken: crypto.randomBytes(24).toString('hex'),
+            accountId: account.id,
+          },
+        });
+      }
+
+      // Provision the document root (best effort — the filesystem may not be
+      // local to this process, so failure must not abort account creation).
+      try {
+        await fs.mkdir(documentRoot, { recursive: true });
+        try {
+          await fs.writeFile(path.posix.join(documentRoot, 'index.html'), DEFAULT_INDEX_HTML, {
+            encoding: 'utf8',
+            mode: 0o644,
+            flag: 'wx',
+          });
+        } catch (writeError) {
+          if (writeError.code !== 'EEXIST') throw writeError;
+        }
+      } catch (fsError) {
+        logger.warn('Document root provisioning skipped (filesystem unavailable)', {
+          documentRoot,
+          message: fsError.message,
+        });
+      }
+
       await VhostService.syncAccountVhost({
         primaryDomain: account.domain,
         customDomains: [],
         documentRoot: account.documentRoot,
       });
     } catch (error) {
+      // Roll back: remove any vhost files (idempotent) and the DB row.
+      try {
+        await VhostService.removeAccountVhost(domain);
+      } catch (cleanupError) {
+        logger.warn('Vhost cleanup after failed provisioning failed', {
+          domain,
+          message: cleanupError.message,
+        });
+      }
       if (account?.id) {
-        await prisma.hostingAccount.delete({ where: { id: account.id } });
+        try {
+          await prisma.hostingAccount.delete({ where: { id: account.id } });
+        } catch (deleteError) {
+          logger.error('Account rollback failed', {
+            accountId: account.id,
+            message: deleteError.message,
+          });
+        }
       }
       throw error;
     }
@@ -200,7 +286,7 @@ class HostingService {
           port: 3306,
         },
       },
-      documentRoot,
+      ...(pendingDomain ? { pendingDomain } : {}),
     };
   }
 
@@ -213,7 +299,7 @@ class HostingService {
       include: { plan: true, domains: true },
     });
     if (!account) {
-      throw new Error('No hosting account found');
+      throw httpError(404, 'No hosting account found');
     }
     return sanitizeAccount(account);
   }
@@ -227,21 +313,54 @@ class HostingService {
       where: { id: accountId },
     });
     if (!account) {
-      throw new Error('Hosting account not found');
+      throw httpError(404, 'Hosting account not found');
     }
     if (account.userId !== userId) {
-      throw new Error('Forbidden');
+      throw httpError(403, 'Forbidden');
     }
     if (account.status === 'TERMINATED') {
-      throw new Error('Account is already terminated');
+      throw httpError(409, 'Account is already terminated');
     }
 
-    await VhostService.removeAccountVhost(account.domain);
+    // Mark TERMINATED first and release the unique fields (domain, ftpUser)
+    // so a failed cleanup can neither block re-provisioning nor squat names.
+    const [updated] = await prisma.$transaction([
+      prisma.hostingAccount.update({
+        where: { id: accountId },
+        data: {
+          status: 'TERMINATED',
+          terminatedAt: new Date(),
+          domain: `${account.domain}_terminated_${account.id}`,
+          ftpUser: account.ftpUser ? `${account.ftpUser}_terminated_${account.id}` : account.ftpUser,
+        },
+      }),
+      prisma.hostingDomain.deleteMany({ where: { accountId } }),
+    ]);
 
-    const updated = await prisma.hostingAccount.update({
-      where: { id: accountId },
-      data: { status: 'TERMINATED', terminatedAt: new Date() },
-    });
+    // Best-effort external cleanup — failures are logged, never fatal.
+    try {
+      await VhostService.removeAccountVhost(account.domain);
+    } catch (error) {
+      logger.error('Failed to remove vhost during account termination', {
+        accountId,
+        domain: account.domain,
+        message: error.message,
+      });
+    }
+
+    const accountDir = account.documentRoot ? path.posix.dirname(account.documentRoot) : null;
+    if (accountDir && accountDir.startsWith(`${WWW_BASE}/`)) {
+      try {
+        await fs.rm(accountDir, { recursive: true, force: true });
+      } catch (error) {
+        logger.warn('Failed to remove document root during termination', {
+          accountId,
+          documentRoot: account.documentRoot,
+          message: error.message,
+        });
+      }
+    }
+
     return sanitizeAccount(updated);
   }
 
@@ -267,28 +386,36 @@ class HostingService {
   static async addDomain(userId, domain) {
     const account = await HostingService._requireActiveAccount(userId);
 
-    // Check plan domain limit
-    const currentCount = await prisma.hostingDomain.count({
-      where: { accountId: account.id },
-    });
-    if (currentCount >= account.plan.maxDomains) {
-      throw new Error(`Domain limit reached for your plan (max ${account.plan.maxDomains})`);
-    }
-
-    // Uniqueness check
-    const taken = await prisma.hostingDomain.findUnique({ where: { domain } });
-    if (taken) {
-      throw new Error('Domain is already registered on this platform');
-    }
+    domain = String(domain).toLowerCase().trim();
+    HostingService._assertClaimableDomain(domain);
 
     const verifyToken = crypto.randomBytes(24).toString('hex');
 
-    const created = await prisma.hostingDomain.create({
-      data: {
-        domain,
-        verifyToken,
-        accountId: account.id,
-      },
+    // Limit check, cross-table uniqueness check and insert run atomically to
+    // avoid TOCTOU races (concurrent adds or an account-creation claim).
+    const created = await prisma.$transaction(async (tx) => {
+      const currentCount = await tx.hostingDomain.count({
+        where: { accountId: account.id },
+      });
+      if (currentCount >= account.plan.maxDomains) {
+        throw httpError(409, `Domain limit reached for your plan (max ${account.plan.maxDomains})`);
+      }
+
+      const [accountHit, domainHit] = await Promise.all([
+        tx.hostingAccount.findUnique({ where: { domain } }),
+        tx.hostingDomain.findUnique({ where: { domain } }),
+      ]);
+      if (accountHit || domainHit) {
+        throw httpError(409, 'Domain is already registered on this platform');
+      }
+
+      return tx.hostingDomain.create({
+        data: {
+          domain,
+          verifyToken,
+          accountId: account.id,
+        },
+      });
     });
 
     try {
@@ -314,10 +441,10 @@ class HostingService {
 
     const record = await prisma.hostingDomain.findUnique({ where: { id: domainId } });
     if (!record) {
-      throw new Error('Domain not found');
+      throw httpError(404, 'Domain not found');
     }
     if (record.accountId !== account.id) {
-      throw new Error('Forbidden');
+      throw httpError(403, 'Forbidden');
     }
 
     await prisma.hostingDomain.delete({ where: { id: domainId } });
@@ -340,6 +467,7 @@ class HostingService {
           sslIssuedAt: record.sslIssuedAt,
           sslExpiresAt: record.sslExpiresAt,
           accountId: record.accountId,
+          createdAt: record.createdAt,
         },
       });
       throw error;
@@ -354,21 +482,21 @@ class HostingService {
     const account = await HostingService._requireActiveAccount(userId);
 
     const record = await prisma.hostingDomain.findUnique({ where: { id: domainId } });
-    if (!record) throw new Error('Domain not found');
-    if (record.accountId !== account.id) throw new Error('Forbidden');
+    if (!record) throw httpError(404, 'Domain not found');
+    if (record.accountId !== account.id) throw httpError(403, 'Forbidden');
     if (record.isVerified) return record; // already verified
 
     let txtRecords;
     try {
       txtRecords = await dns.resolveTxt(record.domain);
     } catch {
-      throw new Error('DNS lookup failed — make sure the TXT record has propagated');
+      throw httpError(400, 'DNS lookup failed — make sure the TXT record has propagated');
     }
 
     const flat = txtRecords.flat();
     const expected = `sahary-verify=${record.verifyToken}`;
     if (!flat.includes(expected)) {
-      throw new Error('TXT record not found — add the verification record and try again');
+      throw httpError(400, 'TXT record not found — add the verification record and try again');
     }
 
     const updated = await prisma.hostingDomain.update({
@@ -376,12 +504,22 @@ class HostingService {
       data: { isVerified: true },
     });
 
-    const customDomains = await HostingService._getCustomDomains(account.id);
-    await VhostService.syncAccountVhost({
-      primaryDomain: account.domain,
-      customDomains,
-      documentRoot: account.documentRoot,
-    });
+    // Only emit the domain into server_name after verification — and revert
+    // the flag if the sync fails so it is never marked verified while absent.
+    try {
+      const customDomains = await HostingService._getCustomDomains(account.id);
+      await VhostService.syncAccountVhost({
+        primaryDomain: account.domain,
+        customDomains,
+        documentRoot: account.documentRoot,
+      });
+    } catch (error) {
+      await prisma.hostingDomain.update({
+        where: { id: domainId },
+        data: { isVerified: false },
+      });
+      throw error;
+    }
 
     return updated;
   }
@@ -391,16 +529,52 @@ class HostingService {
   // ---------------------------------------------------------------------------
 
   /**
+   * Reject domains a tenant may never claim: the platform's own base domain,
+   * any platform subdomain (including reserved labels), and malformed input.
+   * External domains are additionally gated by DNS TXT verification.
+   */
+  static _assertClaimableDomain(domain) {
+    const lower = String(domain || '').toLowerCase().trim();
+    if (lower.length > 253 || !DOMAIN_REGEX.test(lower)) {
+      throw httpError(400, 'Invalid domain format');
+    }
+    if (lower === BASE_DOMAIN) {
+      throw httpError(400, 'The platform base domain cannot be claimed');
+    }
+    if (lower.endsWith(`.${BASE_DOMAIN}`)) {
+      const firstLabel = lower.split('.')[0];
+      if (RESERVED_SUBDOMAINS.has(firstLabel)) {
+        throw httpError(400, `The '${firstLabel}.${BASE_DOMAIN}' subdomain is reserved`);
+      }
+      throw httpError(400, 'Platform-managed domains cannot be claimed');
+    }
+  }
+
+  /**
+   * Cross-table uniqueness: a domain claimed as an account primary OR as a
+   * custom domain on ANY account is unavailable — otherwise the same
+   * server_name in two accounts allows an nginx first-match hijack.
+   */
+  static async _isDomainTaken(domain) {
+    const [accountHit, domainHit] = await Promise.all([
+      prisma.hostingAccount.findUnique({ where: { domain } }),
+      prisma.hostingDomain.findUnique({ where: { domain } }),
+    ]);
+    return Boolean(accountHit || domainHit);
+  }
+
+  /**
    * Generate a unique `<prefix>.sahary.cloud` subdomain, appending a numeric
-   * suffix if the base is already taken.
+   * suffix if the base is already taken or reserved for the platform.
    */
   static async _uniqueSubdomain(prefix) {
     let candidate = `${prefix}.${BASE_DOMAIN}`;
-    let taken = await prisma.hostingAccount.findUnique({ where: { domain: candidate } });
     let i = 2;
-    while (taken) {
+    while (
+      RESERVED_SUBDOMAINS.has(candidate.split('.')[0])
+      || (await HostingService._isDomainTaken(candidate))
+    ) {
       candidate = `${prefix}${i}.${BASE_DOMAIN}`;
-      taken = await prisma.hostingAccount.findUnique({ where: { domain: candidate } });
       i++;
     }
     return candidate;
@@ -412,7 +586,7 @@ class HostingService {
       include: { plan: true },
     });
     if (!account) {
-      throw new Error('No active hosting account found');
+      throw httpError(404, 'No active hosting account found');
     }
     return account;
   }
