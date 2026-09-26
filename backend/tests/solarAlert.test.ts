@@ -40,6 +40,9 @@ const emailService = require('../src/services/emailService');
 describe('Solar Alert Service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // resetMocks wipes the factory-time mockResolvedValue — restore it so
+    // sendEmail() returns a promise the service can .catch() onto.
+    emailService.sendEmail.mockResolvedValue(true);
     solarAlertService.currentState = 'NORMAL';
     solarAlertService.activeAlerts.clear();
   });

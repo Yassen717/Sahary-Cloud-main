@@ -1,5 +1,5 @@
-const monitoringService = require('../src/services/monitoringService');
-const redisService = require('../src/services/redisService');
+import monitoringService from '../src/services/monitoringService';
+import redisService from '../src/services/redisService';
 
 describe('Monitoring Service', () => {
   beforeAll(async () => {
@@ -26,7 +26,7 @@ describe('Monitoring Service', () => {
 
       expect(dbHealth).toHaveProperty('healthy');
       expect(dbHealth).toHaveProperty('message');
-      
+
       if (dbHealth.healthy) {
         expect(dbHealth).toHaveProperty('responseTime');
       }

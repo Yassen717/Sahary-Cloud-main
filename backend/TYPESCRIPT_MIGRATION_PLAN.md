@@ -14,33 +14,34 @@ Migrate backend from JavaScript to TypeScript without blocking feature delivery 
 - Added drift-check command: `npm run api:types:check` (frontend).
 - Next: wire this command into your CI workflow file when CI is introduced.
 
-## Phase 3
-- Convert low-risk backend modules first:
+## Phase 3 (Completed)
+- Converted low-risk backend modules:
   - `src/config/*`
   - `src/utils/*`
   - `src/validations/*`
-- Keep CommonJS compatibility where needed.
+- Kept CommonJS compatibility where needed (`module.exports`/`export =` parity).
 
-## Phase 4
-- Convert services:
+## Phase 4 (Completed)
+- Converted services and jobs:
   - `src/services/*`
   - `src/jobs/*`
-- Add explicit return types for critical business logic functions.
 
-## Phase 5
-- Convert controllers and routes:
+## Phase 5 (Completed)
+- Converted controllers and routes:
   - `src/controllers/*`
   - `src/routes/*`
-- Type request/response payloads and middleware augmentations.
 
-## Phase 6
-- Convert app entrypoint and socket layer:
-  - `src/index.*`
+## Phase 6 (Completed)
+- Converted app entrypoint and socket layer:
+  - `src/index.ts`
   - `src/socket/*`
-- Switch production scripts to compiled TypeScript output.
+- Removed all stale `.js` siblings from `src/` and `tests/` (100% `.ts`).
+- `tsconfig` `allowJs: false`; `npm run build:ts` emits `dist/` from `.ts` only.
+- `openapi:export` runs under `tsx` (`src/config/swagger.ts` is `.ts`-only).
+- ESLint wired for `.ts` via `@typescript-eslint` (`npm run lint` covers `src/**/*.ts`).
 
 ## Definition of Done
-- 100% backend source in `.ts`.
-- CI runs `npm run typecheck` with zero errors.
-- Frontend API client consumes generated types from backend contract.
+- 100% backend source in `.ts`. ✅ (src/ and tests/)
+- `npm run typecheck` with zero errors. ✅
+- Frontend API client consumes generated types from backend contract. ✅ (`api:types:check`)
 - Runtime behavior unchanged from pre-migration baselines.

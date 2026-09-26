@@ -2,17 +2,30 @@
 const cron = require('node-cron');
 const cacheMonitorService = require('../services/cacheMonitorService');
 
+type ScheduledTask = {
+  stop: () => void;
+  nextDate: () => unknown;
+};
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return 'Unknown error';
+};
+
 /**
  * Cache Cleanup Job
  * Periodically cleans up expired cache entries and optimizes cache
  */
 class CacheCleanupJob {
-  constructor() {
-    this.task = null;
-    this.isRunning = false;
-    // Run every hour
-    this.schedule = process.env.CACHE_CLEANUP_SCHEDULE || '0 * * * *';
-  }
+  task: ScheduledTask | null = null;
+
+  isRunning = false;
+
+  // Run every hour
+  schedule: string = process.env.CACHE_CLEANUP_SCHEDULE || '0 * * * *';
 
   /**
    * Start the cache cleanup job
@@ -39,7 +52,7 @@ class CacheCleanupJob {
           console.warn('⚠️  Cache issues detected:', health.issues);
         }
       } catch (error) {
-        console.error('❌ Error in cache cleanup:', error.message);
+        console.error('❌ Error in cache cleanup:', getErrorMessage(error));
       }
     });
 
@@ -68,7 +81,7 @@ class CacheCleanupJob {
       console.log(`✅ Cache cleanup completed: removed ${result.keysRemoved} expired keys`);
       return result;
     } catch (error) {
-      console.error('❌ Error in manual cleanup:', error.message);
+      console.error('❌ Error in manual cleanup:', getErrorMessage(error));
       throw error;
     }
   }
@@ -85,4 +98,6 @@ class CacheCleanupJob {
   }
 }
 
-module.exports = new CacheCleanupJob();
+const cacheCleanup = new CacheCleanupJob();
+
+export = cacheCleanup;

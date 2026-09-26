@@ -2,10 +2,9 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src', '<rootDir>/tests'],
   testMatch: [
-    '**/__tests__/**/*.[jt]s',
-    '**/?(*.)+(spec|test).[jt]s'
+    '**/__tests__/**/*.ts',
+    '**/?(*.)+(spec|test).ts'
   ],
-  // Resolve .ts before the stale .js siblings so tests exercise live code.
   moduleFileExtensions: ['ts', 'js', 'json', 'node'],
   transform: {
     '^.+\\.tsx?$': [
@@ -15,14 +14,11 @@ module.exports = {
         // Repo has heavy @ts-nocheck/type noise; transpile only.
         diagnostics: false
       }
-    ],
-    // .js test files must be transformed so babel-plugin-jest-hoist lifts
-    // jest.mock() calls above their top-level require()s.
-    '^.+\\.jsx?$': 'babel-jest'
+    ]
   },
   collectCoverageFrom: [
-    'src/**/*.{js,ts}',
-    '!src/index.{js,ts}',
+    'src/**/*.ts',
+    '!src/index.ts',
     '!**/node_modules/**',
     '!**/coverage/**'
   ],
@@ -32,7 +28,7 @@ module.exports = {
     'lcov',
     'html'
   ],
-  setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
+  setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
   testTimeout: 10000,
   verbose: true,
   forceExit: true,

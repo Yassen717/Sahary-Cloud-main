@@ -1,5 +1,5 @@
-const sessionService = require('../src/services/sessionService');
-const redisService = require('../src/services/redisService');
+import sessionService from '../src/services/sessionService';
+import redisService from '../src/services/redisService';
 
 describe('Session Service', () => {
   beforeAll(async () => {
@@ -67,7 +67,7 @@ describe('Session Service', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       const retrieved = await sessionService.getSession(created.id, true);
-      
+
       expect(retrieved.metadata.lastAccessedAt).not.toBe(originalTime);
     });
   });
@@ -75,7 +75,7 @@ describe('Session Service', () => {
   describe('Update Session', () => {
     it('should update session data', async () => {
       const session = await sessionService.createSession('user202', { count: 0 });
-      
+
       const updated = await sessionService.updateSession(session.id, { count: 1 });
 
       expect(updated.data.count).toBe(1);
@@ -91,7 +91,7 @@ describe('Session Service', () => {
   describe('Delete Session', () => {
     it('should delete session', async () => {
       const session = await sessionService.createSession('user303', {});
-      
+
       const deleted = await sessionService.deleteSession(session.id);
       const retrieved = await sessionService.getSession(session.id);
 
@@ -101,7 +101,7 @@ describe('Session Service', () => {
 
     it('should remove session from user sessions list', async () => {
       const session = await sessionService.createSession('user404', {});
-      
+
       await sessionService.deleteSession(session.id);
       const userSessions = await sessionService.getUserSessions('user404');
 
@@ -112,7 +112,7 @@ describe('Session Service', () => {
   describe('Extend Session', () => {
     it('should extend session expiration', async () => {
       const session = await sessionService.createSession('user505', {});
-      
+
       const extended = await sessionService.extendSession(session.id, 7200);
 
       expect(extended).toBe(true);
@@ -155,7 +155,7 @@ describe('Session Service', () => {
   describe('Validate Session', () => {
     it('should validate existing session', async () => {
       const session = await sessionService.createSession('user909', {});
-      
+
       const isValid = await sessionService.validateSession(session.id);
 
       expect(isValid).toBe(true);

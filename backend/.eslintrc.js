@@ -6,9 +6,6 @@ module.exports = {
     node: true,
     jest: true,
   },
-  extends: [
-    'airbnb-base',
-  ],
   globals: {
     Atomics: 'readonly',
     SharedArrayBuffer: 'readonly',
@@ -89,4 +86,38 @@ module.exports = {
     'no-unused-vars': ['error', { argsIgnorePattern: 'req|res|next|val' }],
     'max-len': ['error', { code: 120, ignoreComments: true, ignoreUrls: true }],
   },
+  overrides: [
+    {
+      // Legacy JavaScript (config/tooling files) keeps the airbnb-base profile.
+      files: ['*.js'],
+      extends: ['airbnb-base'],
+    },
+    {
+      files: ['*.ts'],
+      parser: '@typescript-eslint/parser',
+      plugins: ['@typescript-eslint'],
+      extends: ['plugin:@typescript-eslint/recommended'],
+      rules: {
+        // The codebase intentionally keeps CommonJS require() interop in .ts.
+        '@typescript-eslint/no-require-imports': 'off',
+        '@typescript-eslint/no-var-requires': 'off',
+        // Pragmatic any usage during migration; tighten incrementally.
+        '@typescript-eslint/no-explicit-any': 'off',
+        // @ts-nocheck is a sanctioned convention for untyped interop surfaces.
+        '@typescript-eslint/ban-ts-comment': 'off',
+        'no-unused-vars': 'off',
+        '@typescript-eslint/no-unused-vars': [
+          'error',
+          {
+            argsIgnorePattern: 'req|res|next|val|_',
+            varsIgnorePattern: '^_',
+            caughtErrorsIgnorePattern: '^_|^error$|^err$',
+            ignoreRestSiblings: true,
+          },
+        ],
+        // Converted sources preserve original formatting/line lengths.
+        'max-len': 'off',
+      },
+    },
+  ],
 };

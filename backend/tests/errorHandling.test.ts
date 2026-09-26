@@ -1,4 +1,4 @@
-const {
+import {
   AppError,
   ValidationError,
   AuthenticationError,
@@ -6,7 +6,7 @@ const {
   NotFoundError,
   ConflictError,
   ErrorFactory,
-} = require('../src/utils/errors');
+} from '../src/utils/errors';
 
 describe('Error Handling', () => {
   describe('Custom Error Classes', () => {

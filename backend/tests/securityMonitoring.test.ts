@@ -1,4 +1,4 @@
-const securityMonitorService = require('../src/services/securityMonitorService');
+import securityMonitorService from '../src/services/securityMonitorService';
 
 describe('Security Monitoring Service', () => {
   beforeEach(() => {

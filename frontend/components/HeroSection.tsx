@@ -92,7 +92,7 @@ export default function HeroSection() {
   };
 
   return (
-    <section ref={containerRef} className="relative min-h-screen flex items-center justify-center overflow-hidden">
+    <section ref={containerRef} className="relative -mt-20 min-h-screen flex items-center justify-center overflow-hidden">
       <canvas id="particles-canvas" className="absolute inset-0 z-0" />
       
       <div className="absolute inset-0 bg-gradient-to-b from-primary/10 to-primary/20 dark:from-primary/20 dark:to-primary/30 z-10" />
@@ -136,7 +136,7 @@ export default function HeroSection() {
           transition={{ duration: 0.8, delay: 0.4 }}
           className="text-xl md:text-2xl mb-8 text-gray-700 dark:text-gray-300 max-w-3xl mx-auto"
         >
-          Experience the future of sustainable cloud computing with Libya's first
+          Experience the future of sustainable cloud computing with Libya&apos;s first
           solar-powered cloud infrastructure.
         </motion.p>
         

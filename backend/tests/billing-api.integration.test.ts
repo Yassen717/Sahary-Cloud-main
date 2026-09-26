@@ -12,26 +12,17 @@ const JWTUtils = require('../src/utils/jwt').default;
  */
 
 describe('Billing API Integration Tests', () => {
-    let testUser;
-    let testAdmin;
-    let userToken;
-    let adminToken;
-    let testVM;
-    let testInvoice;
+    let testUser: any;
+    let testAdmin: any;
+    let userToken: any;
+    let adminToken: any;
+    let testVM: any;
+    let testInvoice: any;
 
     beforeAll(async () => {
-        // Clean up existing test data
-        await prisma.payment.deleteMany({});
-        await prisma.invoice.deleteMany({});
-        await prisma.usageRecord.deleteMany({});
-        await prisma.virtualMachine.deleteMany({});
-        await prisma.user.deleteMany({
-            where: {
-                email: {
-                    in: ['billing-api@test.com', 'billing-admin@test.com'],
-                },
-            },
-        });
+        // Clean up leftover data owned by this suite's users only — other
+        // test files run in parallel against the same database.
+        await (global as any).cleanupTestUsers(prisma, ['billing-api@test.com', 'billing-admin@test.com']);
 
         // Create test user
         const userResult = await AuthService.register({
@@ -102,18 +93,8 @@ describe('Billing API Integration Tests', () => {
     });
 
     afterAll(async () => {
-        // Clean up test data
-        await prisma.payment.deleteMany({});
-        await prisma.invoice.deleteMany({});
-        await prisma.usageRecord.deleteMany({});
-        await prisma.virtualMachine.deleteMany({});
-        await prisma.user.deleteMany({
-            where: {
-                email: {
-                    in: ['billing-api@test.com', 'billing-admin@test.com'],
-                },
-            },
-        });
+        // Clean up test data — scoped to this suite's users only.
+        await (global as any).cleanupTestUsers(prisma, ['billing-api@test.com', 'billing-admin@test.com']);
         await prisma.$disconnect();
     });
 
@@ -138,7 +119,7 @@ describe('Billing API Integration Tests', () => {
 
                 expect(response.status).toBe(200);
                 expect(response.body.success).toBe(true);
-                response.body.data.forEach((invoice) => {
+                response.body.data.forEach((invoice: any) => {
                     expect(invoice.status).toBe('PENDING');
                 });
             });
@@ -188,17 +169,21 @@ describe('Billing API Integration Tests', () => {
 
         describe('POST /api/v1/billing/invoices/:id/discount (Admin)', () => {
             it('should apply discount to invoice', async () => {
+                // The invoice subtotal is small (test usage), so scale the
+                // fixed discount to stay below it.
+                const discountAmount = Number(testInvoice.subtotal) * 0.5;
+
                 const response = await request(app)
                     .post(`/api/v1/billing/invoices/${testInvoice.id}/discount`)
                     .set('Authorization', `Bearer ${adminToken}`)
                     .send({
-                        discountAmount: 5.0,
+                        discountAmount,
                         reason: 'Test discount',
                     });
 
                 expect(response.status).toBe(200);
                 expect(response.body.success).toBe(true);
-                expect(response.body.data.invoice.discountAmount).toBe(5.0);
+                expect(Number(response.body.data.invoice.discount)).toBeCloseTo(discountAmount, 2);
             });
 
             it('should reject non-admin access', async () => {

@@ -1524,8 +1524,7 @@ class BillingService {
 
       const reusable = await this.findReusablePayment(invoice.id);
       if (reusable) {
-        payment = reusable.payment;
-        paymentIntent = reusable.paymentIntent;
+        ({ payment, paymentIntent } = reusable);
       }
 
       if (!payment || !paymentIntent) {

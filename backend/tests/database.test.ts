@@ -1,5 +1,5 @@
-const { prisma, checkHealth, getDatabaseStats } = require('../src/utils/prisma');
-const { connectDatabase, disconnectDatabase } = require('../src/config/database');
+import { prisma, checkHealth, getDatabaseStats } from '../src/utils/prisma';
+import { connectDatabase, disconnectDatabase } from '../src/config/database';
 
 describe('Database Connection', () => {
   beforeAll(async () => {
@@ -36,7 +36,7 @@ describe('Database Connection', () => {
     });
 
     expect(foundUser).toBeDefined();
-    expect(foundUser.id).toBe(testUser.id);
+    expect(foundUser!.id).toBe(testUser.id);
 
     // Test updating the user
     const updatedUser = await prisma.user.update({
@@ -60,7 +60,7 @@ describe('Database Connection', () => {
 
   test('should get database statistics', async () => {
     const stats = await getDatabaseStats();
-    
+
     expect(stats).toBeDefined();
     expect(typeof stats.users).toBe('number');
     expect(typeof stats.virtualMachines).toBe('number');
@@ -71,7 +71,7 @@ describe('Database Connection', () => {
   test('should handle database constraints', async () => {
     // Test unique constraint
     const email = `unique-test-${Date.now()}@example.com`;
-    
+
     await prisma.user.create({
       data: {
         email,
@@ -127,8 +127,8 @@ describe('Database Connection', () => {
       include: { virtualMachines: true }
     });
 
-    expect(userWithVMs.virtualMachines).toHaveLength(1);
-    expect(userWithVMs.virtualMachines[0].name).toBe('test-vm');
+    expect(userWithVMs!.virtualMachines).toHaveLength(1);
+    expect(userWithVMs!.virtualMachines[0].name).toBe('test-vm');
 
     // Cleanup
     await prisma.virtualMachine.delete({ where: { id: vm.id } });
