@@ -1,7 +1,6 @@
 // @ts-nocheck
 const os = require('os');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const { prisma } = require('../config/database');
 const redisService = require('./redisService');
 const logger = require('../utils/logger').default;
 
@@ -36,11 +35,11 @@ class MonitoringService {
       this.checkRedis(),
       this.checkMemory(),
       this.checkCPU(),
-      this.checkDisk(),
+      this.checkLoad(),
     ]);
 
     const results = checks.map((check, index) => {
-      const names = ['database', 'redis', 'memory', 'cpu', 'disk'];
+      const names = ['database', 'redis', 'memory', 'cpu', 'load'];
       return {
         name: names[index],
         status: check.status === 'fulfilled' && check.value.healthy ? 'healthy' : 'unhealthy',
@@ -48,7 +47,7 @@ class MonitoringService {
       };
     });
 
-    const overallHealthy = results.every(r => r.status === 'healthy');
+    const overallHealthy = results.every((r) => r.status === 'healthy');
 
     return {
       status: overallHealthy ? 'healthy' : 'unhealthy',
@@ -139,51 +138,64 @@ class MonitoringService {
   }
 
   /**
-   * Check CPU usage
-   * @returns {Object} CPU health
+   * Snapshot CPU tick counters (idle + total across all cores)
+   * @returns {Object} { idle, total } tick sums
    */
-  checkCPU() {
-    const cpus = os.cpus();
-    const cpuCount = cpus.length;
+  cpuTimesSnapshot() {
+    let idle = 0;
+    let total = 0;
 
-    // Calculate average CPU usage
-    let totalIdle = 0;
-    let totalTick = 0;
-
-    cpus.forEach(cpu => {
+    os.cpus().forEach((cpu) => {
       for (const type in cpu.times) {
-        totalTick += cpu.times[type];
+        total += cpu.times[type];
       }
-      totalIdle += cpu.times.idle;
+      idle += cpu.times.idle;
     });
 
-    const idle = totalIdle / cpuCount;
-    const total = totalTick / cpuCount;
-    const usagePercentage = 100 - ~~(100 * idle / total);
+    return { idle, total };
+  }
+
+  /**
+   * Check CPU usage by sampling tick deltas over ~500ms. Averaging raw
+   * os.cpus() times only yields the since-boot average, which hides
+   * live load spikes.
+   * @returns {Promise<Object>} CPU health
+   */
+  async checkCPU() {
+    const cpus = os.cpus();
+    const start = this.cpuTimesSnapshot();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const end = this.cpuTimesSnapshot();
+
+    const idleDiff = end.idle - start.idle;
+    const totalDiff = end.total - start.total;
+    const usagePercentage = totalDiff > 0 ? 100 - (100 * idleDiff / totalDiff) : 0;
 
     const healthy = usagePercentage < 80;
 
     return {
       healthy,
-      cores: cpuCount,
+      cores: cpus.length,
       model: cpus[0].model,
       usagePercentage: parseFloat(usagePercentage.toFixed(2)),
+      sampleWindowMs: 500,
       message: healthy ? 'CPU usage is normal' : 'High CPU usage detected',
     };
   }
 
   /**
-   * Check disk usage
-   * @returns {Object} Disk health
+   * Check system load average. Node has no portable disk-usage API without
+   * extra dependencies, so this honestly reports OS load instead of a
+   * mislabeled "disk" check. Note: os.loadavg() is [0,0,0] on Windows.
+   * @returns {Object} Load health
    */
-  checkDisk() {
-    // Note: This is a simplified check. For production, use a library like 'diskusage'
+  checkLoad() {
     const loadAverage = os.loadavg();
     const healthy = loadAverage[0] < os.cpus().length * 0.7;
 
     return {
       healthy,
-      loadAverage: loadAverage.map(l => parseFloat(l.toFixed(2))),
+      loadAverage: loadAverage.map((l) => parseFloat(l.toFixed(2))),
       message: healthy ? 'System load is normal' : 'High system load detected',
     };
   }
@@ -226,7 +238,7 @@ class MonitoringService {
    */
   recordRequest(responseTime, success) {
     this.metrics.requests.total++;
-    
+
     if (success) {
       this.metrics.requests.success++;
     } else {
@@ -235,15 +247,12 @@ class MonitoringService {
 
     // Update performance metrics
     const currentAvg = this.metrics.performance.avgResponseTime;
-    const total = this.metrics.requests.total;
-    this.metrics.performance.avgResponseTime = 
-      (currentAvg * (total - 1) + responseTime) / total;
+    const { total } = this.metrics.requests;
+    this.metrics.performance.avgResponseTime = (currentAvg * (total - 1) + responseTime) / total;
 
-    this.metrics.performance.maxResponseTime = 
-      Math.max(this.metrics.performance.maxResponseTime, responseTime);
-    
-    this.metrics.performance.minResponseTime = 
-      Math.min(this.metrics.performance.minResponseTime, responseTime);
+    this.metrics.performance.maxResponseTime = Math.max(this.metrics.performance.maxResponseTime, responseTime);
+
+    this.metrics.performance.minResponseTime = Math.min(this.metrics.performance.minResponseTime, responseTime);
   }
 
   /**
@@ -263,8 +272,8 @@ class MonitoringService {
       performance: {
         avgResponseTime: parseFloat(this.metrics.performance.avgResponseTime.toFixed(2)),
         maxResponseTime: this.metrics.performance.maxResponseTime,
-        minResponseTime: this.metrics.performance.minResponseTime === Infinity 
-          ? 0 
+        minResponseTime: this.metrics.performance.minResponseTime === Infinity
+          ? 0
           : this.metrics.performance.minResponseTime,
       },
       uptime: this.getUptime(),
@@ -300,7 +309,7 @@ class MonitoringService {
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
     if (bytes === 0) return '0 Bytes';
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return `${parseFloat((bytes / Math.pow(1024, i)).toFixed(2))} ${sizes[i]}`;
+    return `${parseFloat((bytes / 1024 ** i).toFixed(2))} ${sizes[i]}`;
   }
 
   /**

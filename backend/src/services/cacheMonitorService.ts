@@ -12,9 +12,34 @@ class CacheMonitorService {
       misses: 0,
       sets: 0,
       deletes: 0,
-      errors: 0
+      errors: 0,
     };
     this.startTime = Date.now();
+  }
+
+  /**
+   * Iterate keys matching a pattern via SCAN instead of KEYS, which blocks
+   * Redis on large keyspaces. Falls back to KEYS when the client does not
+   * expose a scan iterator.
+   * @param {string} pattern - Key pattern (e.g. 'cache:*')
+   * @returns {Promise<Array>} Matching keys
+   */
+  async scanKeys(pattern) {
+    const client = redisService.getClient();
+
+    if (typeof client.scanIterator === 'function') {
+      const keys = [];
+      for await (const batch of client.scanIterator({ MATCH: pattern, COUNT: 100 })) {
+        if (Array.isArray(batch)) {
+          keys.push(...batch);
+        } else {
+          keys.push(batch);
+        }
+      }
+      return keys;
+    }
+
+    return redisService.keys(pattern);
   }
 
   /**
@@ -39,7 +64,7 @@ class CacheMonitorService {
    * Record cache set
    * @param {string} key - Cache key
    */
-  recordSet(key) {
+  recordSet(_key) {
     this.stats.sets++;
   }
 
@@ -47,7 +72,7 @@ class CacheMonitorService {
    * Record cache delete
    * @param {string} key - Cache key
    */
-  recordDelete(key) {
+  recordDelete(_key) {
     this.stats.deletes++;
   }
 
@@ -79,7 +104,7 @@ class CacheMonitorService {
       total,
       hitRate: parseFloat(hitRate.toFixed(2)),
       uptime: Math.floor(uptime / 1000), // seconds
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
   }
 
@@ -92,7 +117,7 @@ class CacheMonitorService {
       misses: 0,
       sets: 0,
       deletes: 0,
-      errors: 0
+      errors: 0,
     };
     this.startTime = Date.now();
     console.log('📊 Cache statistics reset');
@@ -105,7 +130,7 @@ class CacheMonitorService {
    */
   async getCacheSize(pattern = '*') {
     try {
-      const keys = await redisService.keys(pattern);
+      const keys = await this.scanKeys(pattern);
       let totalSize = 0;
 
       for (const key of keys) {
@@ -119,14 +144,14 @@ class CacheMonitorService {
         keys: keys.length,
         sizeBytes: totalSize,
         sizeKB: parseFloat((totalSize / 1024).toFixed(2)),
-        sizeMB: parseFloat((totalSize / (1024 * 1024)).toFixed(2))
+        sizeMB: parseFloat((totalSize / (1024 * 1024)).toFixed(2)),
       };
     } catch (error) {
       console.error('Error getting cache size:', error);
       return {
         keys: 0,
         sizeBytes: 0,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -138,7 +163,7 @@ class CacheMonitorService {
    */
   async getTopKeys(limit = 10) {
     try {
-      const keys = await redisService.keys('cache:*');
+      const keys = await this.scanKeys('cache:*');
       const keyInfo = [];
 
       for (const key of keys.slice(0, limit)) {
@@ -146,7 +171,7 @@ class CacheMonitorService {
         keyInfo.push({
           key,
           ttl,
-          expiresIn: ttl > 0 ? `${ttl}s` : 'expired'
+          expiresIn: ttl > 0 ? `${ttl}s` : 'expired',
         });
       }
 
@@ -163,7 +188,7 @@ class CacheMonitorService {
    */
   async analyzeCachePatterns() {
     try {
-      const keys = await redisService.keys('cache:*');
+      const keys = await this.scanKeys('cache:*');
       const patterns = {};
 
       for (const key of keys) {
@@ -173,7 +198,7 @@ class CacheMonitorService {
         if (!patterns[pattern]) {
           patterns[pattern] = {
             count: 0,
-            keys: []
+            keys: [],
           };
         }
 
@@ -190,16 +215,16 @@ class CacheMonitorService {
             pattern,
             count: data.count,
             percentage: parseFloat(((data.count / keys.length) * 100).toFixed(2)),
-            examples: data.keys
+            examples: data.keys,
           }))
-          .sort((a, b) => b.count - a.count)
+          .sort((a, b) => b.count - a.count),
       };
     } catch (error) {
       console.error('Error analyzing cache patterns:', error);
       return {
         totalKeys: 0,
         patterns: [],
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -243,15 +268,15 @@ class CacheMonitorService {
         cacheSize,
         redis: {
           connected: redisStats.connected,
-          dbSize: redisStats.dbSize
+          dbSize: redisStats.dbSize,
         },
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
       return {
         status: 'error',
         issues: [error.message],
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     }
   }
@@ -262,7 +287,7 @@ class CacheMonitorService {
    */
   async optimizeCache() {
     try {
-      const keys = await redisService.keys('cache:*');
+      const keys = await this.scanKeys('cache:*');
       let removed = 0;
 
       for (const key of keys) {
@@ -279,13 +304,13 @@ class CacheMonitorService {
       return {
         success: true,
         keysRemoved: removed,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
       console.error('Error optimizing cache:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -314,13 +339,13 @@ class CacheMonitorService {
         success: true,
         warmedUp,
         total: warmupFunctions.length,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
       console.error('Error warming up cache:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }

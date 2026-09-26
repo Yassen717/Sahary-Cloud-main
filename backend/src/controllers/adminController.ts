@@ -7,6 +7,7 @@ type AdminUserRequest = Request & {
   user: {
     userId: string;
     email: string;
+    role: string;
   };
 };
 
@@ -27,6 +28,49 @@ type AdminQuery = {
   resource?: string;
 };
 
+// Map known errors to proper status codes; never echo raw error internals.
+const sendError = (res: Response, error: unknown, fallback: string): void => {
+  const err = error as { code?: string; statusCode?: number; message?: string } | null;
+
+  if (err?.code === 'P2025') {
+    res.status(404).json({
+      success: false,
+      error: 'Resource not found',
+    });
+    return;
+  }
+
+  // Operational errors (e.g. ValidationError) carry their own status code.
+  if (typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 500) {
+    res.status(err.statusCode).json({
+      success: false,
+      error: err.message || fallback,
+    });
+    return;
+  }
+
+  res.status(500).json({
+    success: false,
+    error: fallback,
+  });
+};
+
+const USER_SORTABLE_FIELDS = new Set(['email', 'firstName', 'lastName', 'role', 'isActive', 'isVerified', 'createdAt', 'updatedAt']);
+const VALID_ROLES = new Set(['USER', 'ADMIN', 'SUPER_ADMIN']);
+const MAX_PAGE_LIMIT = 200;
+
+// Returns true/false for the literal strings 'true'/'false', undefined when
+// the parameter was not provided, and null for anything else (invalid).
+const parseBooleanQuery = (value: string | boolean | undefined): boolean | null | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized = String(value);
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return null;
+};
+
 class AdminController {
   static async getDashboardStats(_req: Request, res: Response): Promise<void> {
     try {
@@ -38,12 +82,7 @@ class AdminController {
         data: stats,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to get dashboard statistics';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get dashboard statistics',
-        message,
-      });
+      sendError(res, error, 'Failed to get dashboard statistics');
     }
   }
 
@@ -57,12 +96,7 @@ class AdminController {
         data: health,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to get system health';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get system health',
-        message,
-      });
+      sendError(res, error, 'Failed to get system health');
     }
   }
 
@@ -76,12 +110,7 @@ class AdminController {
         data: usage,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to get system resource usage';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get system resource usage',
-        message,
-      });
+      sendError(res, error, 'Failed to get system resource usage');
     }
   }
 
@@ -98,11 +127,22 @@ class AdminController {
         sortOrder = 'desc',
       } = req.query as AdminQuery;
 
+      const activeFilter = parseBooleanQuery(isActive);
+      const verifiedFilter = parseBooleanQuery(isVerified);
+
+      if (activeFilter === null || verifiedFilter === null) {
+        res.status(400).json({
+          success: false,
+          error: "Invalid filter: isActive and isVerified only accept 'true' or 'false'",
+        });
+        return;
+      }
+
       const where: Record<string, unknown> = {};
 
       if (role) where.role = role;
-      if (isActive !== undefined) where.isActive = String(isActive) === 'true';
-      if (isVerified !== undefined) where.isVerified = String(isVerified) === 'true';
+      if (activeFilter !== undefined) where.isActive = activeFilter;
+      if (verifiedFilter !== undefined) where.isVerified = verifiedFilter;
       if (search) {
         where.OR = [
           { email: { contains: search, mode: 'insensitive' } },
@@ -111,14 +151,18 @@ class AdminController {
         ];
       }
 
-      const pageNumber = Number.parseInt(String(page), 10);
-      const limitNumber = Number.parseInt(String(limit), 10);
+      // Clamp pagination and whitelist sort fields/direction — the column
+      // name and order come straight from the client otherwise.
+      const pageNumber = Math.max(1, Number.parseInt(String(page), 10) || 1);
+      const limitNumber = Math.min(MAX_PAGE_LIMIT, Math.max(1, Number.parseInt(String(limit), 10) || 20));
+      const sortField = USER_SORTABLE_FIELDS.has(String(sortBy)) ? String(sortBy) : 'createdAt';
+      const sortDirection = String(sortOrder).toLowerCase() === 'asc' ? 'asc' : 'desc';
       const skip = (pageNumber - 1) * limitNumber;
 
       const [users, total] = await Promise.all([
         prisma.user.findMany({
           where,
-          orderBy: { [sortBy]: sortOrder },
+          orderBy: { [sortField]: sortDirection },
           skip,
           take: limitNumber,
           select: {
@@ -154,12 +198,7 @@ class AdminController {
         },
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to get users';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get users',
-        message,
-      });
+      sendError(res, error, 'Failed to get users');
     }
   }
 
@@ -167,10 +206,26 @@ class AdminController {
     try {
       const { id } = req.params;
 
+      // Explicit select whitelist — do NOT return password, passwordResetToken/
+      // Expires, emailVerificationToken/Expires or lastLoginAt: those are live
+      // bearer credentials / sensitive metadata.
       const user = await prisma.user.findUnique({
         where: { id },
-        include: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          avatar: true,
+          role: true,
+          isActive: true,
+          isVerified: true,
+          createdAt: true,
+          updatedAt: true,
           virtualMachines: {
+            take: 25,
+            orderBy: { createdAt: 'desc' },
             select: {
               id: true,
               name: true,
@@ -203,27 +258,61 @@ class AdminController {
         return;
       }
 
-      delete user.password;
-
       res.status(200).json({
         success: true,
         message: 'User retrieved successfully',
         data: { user },
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to get user';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get user',
-        message,
-      });
+      sendError(res, error, 'Failed to get user');
     }
   }
 
   static async updateUserStatus(req: AdminUserRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { isActive, reason } = req.body as { isActive: boolean; reason?: string };
+      const { isActive, reason } = req.body as { isActive?: unknown; reason?: string };
+
+      // isActive must be an explicit boolean — an absent/garbage value used to
+      // silently no-op while still writing a 'deactivated' audit entry.
+      if (typeof isActive !== 'boolean') {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid status: isActive must be a boolean',
+        });
+        return;
+      }
+
+      const target = await prisma.user.findUnique({
+        where: { id },
+        select: { id: true, role: true, isActive: true },
+      });
+
+      if (!target) {
+        res.status(404).json({
+          success: false,
+          error: 'User not found',
+        });
+        return;
+      }
+
+      // Only SUPER_ADMIN may deactivate/activate other admins.
+      if (['ADMIN', 'SUPER_ADMIN'].includes(target.role) && req.user.role !== 'SUPER_ADMIN') {
+        res.status(403).json({
+          success: false,
+          error: 'Insufficient permissions to modify an administrator account',
+        });
+        return;
+      }
+
+      // Admins must not be able to deactivate themselves.
+      if (isActive === false && target.id === req.user.userId) {
+        res.status(403).json({
+          success: false,
+          error: 'You cannot deactivate your own account',
+        });
+        return;
+      }
 
       const user = await prisma.user.update({
         where: { id },
@@ -243,6 +332,9 @@ class AdminController {
           action: isActive ? 'USER_ACTIVATED' : 'USER_DEACTIVATED',
           resource: 'user',
           resourceId: id,
+          oldValues: JSON.stringify({
+            isActive: target.isActive,
+          }),
           newValues: JSON.stringify({
             isActive,
             reason,
@@ -257,19 +349,46 @@ class AdminController {
         data: { user },
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to update user status';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to update user status',
-        message,
-      });
+      sendError(res, error, 'Failed to update user status');
     }
   }
 
   static async updateUserRole(req: AdminUserRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { role } = req.body as { role: string };
+      const { role } = req.body as { role?: unknown };
+
+      // Whitelist roles — arbitrary strings used to be written straight to
+      // the role column, silently stripping the user's access.
+      if (typeof role !== 'string' || !VALID_ROLES.has(role)) {
+        res.status(400).json({
+          success: false,
+          error: `Invalid role: must be one of ${Array.from(VALID_ROLES).join(', ')}`,
+        });
+        return;
+      }
+
+      const target = await prisma.user.findUnique({
+        where: { id },
+        select: { id: true, role: true },
+      });
+
+      if (!target) {
+        res.status(404).json({
+          success: false,
+          error: 'User not found',
+        });
+        return;
+      }
+
+      // Only SUPER_ADMIN may grant or revoke the SUPER_ADMIN role.
+      if ((role === 'SUPER_ADMIN' || target.role === 'SUPER_ADMIN') && req.user.role !== 'SUPER_ADMIN') {
+        res.status(403).json({
+          success: false,
+          error: 'Only a super admin can grant or revoke the SUPER_ADMIN role',
+        });
+        return;
+      }
 
       const user = await prisma.user.update({
         where: { id },
@@ -289,6 +408,9 @@ class AdminController {
           action: 'USER_ROLE_UPDATED',
           resource: 'user',
           resourceId: id,
+          oldValues: JSON.stringify({
+            role: target.role,
+          }),
           newValues: JSON.stringify({
             role,
             updatedBy: req.user.email,
@@ -302,12 +424,7 @@ class AdminController {
         data: { user },
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to update user role';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to update user role',
-        message,
-      });
+      sendError(res, error, 'Failed to update user role');
     }
   }
 
@@ -327,12 +444,7 @@ class AdminController {
         data: analytics,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to get revenue analytics';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get revenue analytics',
-        message,
-      });
+      sendError(res, error, 'Failed to get revenue analytics');
     }
   }
 
@@ -352,18 +464,15 @@ class AdminController {
         data: analytics,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to get user growth analytics';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get user growth analytics',
-        message,
-      });
+      sendError(res, error, 'Failed to get user growth analytics');
     }
   }
 
   static async getAuditLogs(req: Request, res: Response): Promise<void> {
     try {
-      const { page, limit, userId, action, resource, startDate, endDate, sortBy, sortOrder } = req.query as AdminQuery;
+      const {
+        page, limit, userId, action, resource, startDate, endDate, sortBy, sortOrder,
+      } = req.query as AdminQuery;
 
       const result = await AdminService.getAuditLogs({
         page,
@@ -384,12 +493,7 @@ class AdminController {
         pagination: result.pagination,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to get audit logs';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get audit logs',
-        message,
-      });
+      sendError(res, error, 'Failed to get audit logs');
     }
   }
 }

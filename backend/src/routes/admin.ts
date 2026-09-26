@@ -66,7 +66,7 @@ router.put('/users/:id/status', apiRateLimit(), AdminController.updateUserStatus
  * @desc    Update user role
  * @access  Private (Super Admin)
  */
-router.put('/users/:id/role', requirePermission('admin:super'), AdminController.updateUserRole);
+router.put('/users/:id/role', apiRateLimit(), requirePermission('admin:super'), AdminController.updateUserRole);
 
 // ==================== Analytics ====================
 
@@ -95,11 +95,11 @@ router.get('/audit-logs', apiRateLimit(), AdminController.getAuditLogs);
 
 // Health check
 router.get('/health', (req, res) => {
-    res.status(200).json({
-        success: true,
-        message: 'Admin routes are healthy',
-        timestamp: new Date().toISOString(),
-    });
+  res.status(200).json({
+    success: true,
+    message: 'Admin routes are healthy',
+    timestamp: new Date().toISOString(),
+  });
 });
 
 module.exports = router;

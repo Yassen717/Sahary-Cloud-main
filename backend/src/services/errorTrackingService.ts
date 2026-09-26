@@ -1,6 +1,4 @@
 // @ts-nocheck
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
 const logger = require('../utils/logger').default;
 
 /**
@@ -9,9 +7,12 @@ const logger = require('../utils/logger').default;
  */
 class ErrorTrackingService {
   constructor() {
-    this.errorCounts = new Map();
+    this.errorCounts = new Map(); // errorName -> [timestamps]
+    this.lastNotifiedAt = new Map(); // errorName -> timestamp of last alert
     this.errorThreshold = parseInt(process.env.ERROR_THRESHOLD) || 10;
     this.timeWindow = parseInt(process.env.ERROR_TIME_WINDOW) || 60000; // 1 minute
+    this.maxErrorNames = 500; // bound distinct error names held in memory
+    this.maxTimestampsPerName = 1000; // bound per-name timestamp history
   }
 
   /**
@@ -38,10 +39,19 @@ class ErrorTrackingService {
       // Track in memory for rate limiting
       this.incrementErrorCount(error.name);
 
-      // Check if error rate is too high
+      // Check if error rate is too high — notify at most once per name per
+      // window instead of on every error once the threshold is crossed.
       if (this.isErrorRateTooHigh(error.name)) {
-        logger.warn(`High error rate detected for ${error.name}`);
-        await this.notifyHighErrorRate(error.name);
+        const lastNotified = this.lastNotifiedAt.get(error.name) || 0;
+        if (Date.now() - lastNotified >= this.timeWindow) {
+          this.lastNotifiedAt.set(error.name, Date.now());
+          if (this.lastNotifiedAt.size > this.maxErrorNames) {
+            const oldest = this.lastNotifiedAt.keys().next().value;
+            this.lastNotifiedAt.delete(oldest);
+          }
+          logger.warn(`High error rate detected for ${error.name}`);
+          await this.notifyHighErrorRate(error.name);
+        }
       }
 
       logger.error('Error tracked', errorData);
@@ -59,17 +69,25 @@ class ErrorTrackingService {
    */
   incrementErrorCount(errorName) {
     const now = Date.now();
-    
-    if (!this.errorCounts.has(errorName)) {
-      this.errorCounts.set(errorName, []);
-    }
 
-    const counts = this.errorCounts.get(errorName);
+    // Refresh recency: re-insert so eviction drops the least-recent name.
+    const counts = this.errorCounts.get(errorName) || [];
+    this.errorCounts.delete(errorName);
+
     counts.push(now);
 
-    // Remove old entries outside time window
-    const filtered = counts.filter(timestamp => now - timestamp < this.timeWindow);
+    // Remove old entries outside time window, cap history length.
+    let filtered = counts.filter((timestamp) => now - timestamp < this.timeWindow);
+    if (filtered.length > this.maxTimestampsPerName) {
+      filtered = filtered.slice(filtered.length - this.maxTimestampsPerName);
+    }
     this.errorCounts.set(errorName, filtered);
+
+    // Bound the number of distinct error names held in memory.
+    while (this.errorCounts.size > this.maxErrorNames) {
+      const oldest = this.errorCounts.keys().next().value;
+      this.errorCounts.delete(oldest);
+    }
   }
 
   /**
@@ -90,7 +108,7 @@ class ErrorTrackingService {
     try {
       // Send notification to admins
       logger.warn(`High error rate notification: ${errorName}`);
-      
+
       // You can integrate with email service or other notification systems here
       // await emailService.sendAlert(...)
     } catch (error) {
@@ -104,7 +122,9 @@ class ErrorTrackingService {
    * @returns {Promise<Object>} Error statistics
    */
   async getErrorStats(options = {}) {
-    const { startDate, endDate, errorName, limit = 100 } = options;
+    const {
+      startDate: _startDate, endDate: _endDate, errorName: _errorName, limit: _limit = 100,
+    } = options;
 
     try {
       // This would query from database if ErrorLog model exists
@@ -161,7 +181,7 @@ class ErrorTrackingService {
 
       if (trends.data.length > 0) {
         trends.summary.average = trends.summary.total / trends.data.length;
-        trends.summary.peak = Math.max(...trends.data.map(d => d.count));
+        trends.summary.peak = Math.max(...trends.data.map((d) => d.count));
       }
 
       return trends;
@@ -180,6 +200,7 @@ class ErrorTrackingService {
    */
   clearErrorCounts() {
     this.errorCounts.clear();
+    this.lastNotifiedAt.clear();
     logger.info('Error counts cleared');
   }
 

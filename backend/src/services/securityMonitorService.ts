@@ -1,8 +1,22 @@
 // @ts-nocheck
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const { prisma } = require('../config/database');
 const logger = require('../utils/logger').default;
 const emailService = require('./emailService');
+
+const VALID_EVENT_TYPES = new Set([
+  'FAILED_LOGIN',
+  'SUCCESSFUL_LOGIN',
+  'UNAUTHORIZED_ACCESS',
+  'SUSPICIOUS_ACTIVITY',
+  'DATA_BREACH_ATTEMPT',
+  'PRIVILEGE_ESCALATION',
+  'RATE_LIMIT_EXCEEDED',
+  'IP_BLOCKED',
+  'TOKEN_MISUSE',
+  'CUSTOM',
+]);
+
+const VALID_SEVERITIES = new Set(['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
 
 /**
  * Security Monitoring Service
@@ -12,7 +26,12 @@ class SecurityMonitorService {
   constructor() {
     this.securityEvents = [];
     this.suspiciousActivities = new Map();
+    this.lastAlertedAt = new Map(); // key -> timestamp of last alert sent
     this.maxEventsInMemory = 1000;
+    this.maxActivityKeys = 1000; // bound suspiciousActivities map size
+    this.maxActivitiesPerKey = 100; // keep only recent events per key
+    this.alertThreshold = 5; // events per key before alerting
+    this.alertWindowMs = 60 * 60 * 1000; // re-alert at most once per hour per key
   }
 
   /**
@@ -21,9 +40,16 @@ class SecurityMonitorService {
    * @returns {Promise<Object>} Logged event
    */
   async logSecurityEvent(event) {
+    // Whitelist type/severity — the log-event endpoint accepts client input,
+    // so arbitrary values must not land in stats/alerts unfiltered.
+    const type = VALID_EVENT_TYPES.has(event.type) ? event.type : 'CUSTOM';
+    const severity = VALID_SEVERITIES.has(String(event.severity || '').toUpperCase())
+      ? String(event.severity).toUpperCase()
+      : 'INFO';
+
     const securityEvent = {
-      type: event.type,
-      severity: event.severity || 'INFO',
+      type,
+      severity,
       description: event.description,
       ip: event.ip,
       userId: event.userId,
@@ -39,7 +65,7 @@ class SecurityMonitorService {
     }
 
     // Log to file
-    logger.logSecurity(event.type, securityEvent);
+    logger.logSecurity(securityEvent.type, securityEvent);
 
     // Store in database (if SecurityEvent model exists)
     // await prisma.securityEvent.create({ data: securityEvent });
@@ -61,15 +87,34 @@ class SecurityMonitorService {
       if (key) {
         const activities = this.suspiciousActivities.get(key) || [];
         activities.push(event);
+        // Bound per-key history to the most recent events.
+        if (activities.length > this.maxActivitiesPerKey) {
+          activities.splice(0, activities.length - this.maxActivitiesPerKey);
+        }
+        // Refresh recency and bound the map: evict the oldest key when full.
+        this.suspiciousActivities.delete(key);
         this.suspiciousActivities.set(key, activities);
+        if (this.suspiciousActivities.size > this.maxActivityKeys) {
+          const oldest = this.suspiciousActivities.keys().next().value;
+          this.suspiciousActivities.delete(oldest);
+        }
 
-        // Alert if too many suspicious activities
-        if (activities.length >= 5) {
-          await this.alertAdmins('Multiple suspicious activities detected', {
-            key,
-            count: activities.length,
-            events: activities.slice(-5),
-          });
+        // Alert once per key per window — previously every event past the
+        // threshold re-sent the full admin email fan-out.
+        if (activities.length >= this.alertThreshold) {
+          const lastAlerted = this.lastAlertedAt.get(key) || 0;
+          if (Date.now() - lastAlerted >= this.alertWindowMs) {
+            this.lastAlertedAt.set(key, Date.now());
+            if (this.lastAlertedAt.size > this.maxActivityKeys) {
+              const oldestAlert = this.lastAlertedAt.keys().next().value;
+              this.lastAlertedAt.delete(oldestAlert);
+            }
+            await this.alertAdmins('Multiple suspicious activities detected', {
+              key,
+              count: activities.length,
+              events: activities.slice(-5),
+            });
+          }
         }
       }
     }
@@ -187,26 +232,30 @@ class SecurityMonitorService {
    * @returns {Array} Security events
    */
   getSecurityEvents(options = {}) {
-    const { type, severity, limit = 100, startDate, endDate } = options;
+    const {
+      type, severity, startDate, endDate,
+    } = options;
+    // Coerce + clamp limit — a raw string/NaN/huge value would corrupt slice().
+    const limit = Math.min(1000, Math.max(1, parseInt(options.limit, 10) || 100));
 
     let events = [...this.securityEvents];
 
     // Filter by type
     if (type) {
-      events = events.filter(e => e.type === type);
+      events = events.filter((e) => e.type === type);
     }
 
     // Filter by severity
     if (severity) {
-      events = events.filter(e => e.severity === severity);
+      events = events.filter((e) => e.severity === severity);
     }
 
     // Filter by date range
     if (startDate) {
-      events = events.filter(e => e.timestamp >= new Date(startDate));
+      events = events.filter((e) => e.timestamp >= new Date(startDate));
     }
     if (endDate) {
-      events = events.filter(e => e.timestamp <= new Date(endDate));
+      events = events.filter((e) => e.timestamp <= new Date(endDate));
     }
 
     // Sort by timestamp (newest first)
@@ -229,7 +278,7 @@ class SecurityMonitorService {
     };
 
     // Count by severity
-    this.securityEvents.forEach(event => {
+    this.securityEvents.forEach((event) => {
       stats.bySeverity[event.severity] = (stats.bySeverity[event.severity] || 0) + 1;
       stats.byType[event.type] = (stats.byType[event.type] || 0) + 1;
     });
@@ -262,11 +311,11 @@ class SecurityMonitorService {
    */
   getSecurityHealth() {
     const recentEvents = this.securityEvents.filter(
-      e => Date.now() - e.timestamp.getTime() < 3600000 // Last hour
+      (e) => Date.now() - e.timestamp.getTime() < 3600000, // Last hour
     );
 
-    const criticalCount = recentEvents.filter(e => e.severity === 'CRITICAL').length;
-    const highCount = recentEvents.filter(e => e.severity === 'HIGH').length;
+    const criticalCount = recentEvents.filter((e) => e.severity === 'CRITICAL').length;
+    const highCount = recentEvents.filter((e) => e.severity === 'HIGH').length;
 
     let status = 'healthy';
     const issues = [];
@@ -320,7 +369,7 @@ class SecurityMonitorService {
               <p>يرجى مراجعة لوحة التحكم للحصول على مزيد من التفاصيل.</p>
             </div>
           `,
-        }).catch(err => logger.error(`Failed to send alert to ${admin.email}:`, err));
+        }).catch((err) => logger.error(`Failed to send alert to ${admin.email}:`, err));
       }
 
       logger.info(`Security alert sent to ${admins.length} admins`);
@@ -337,7 +386,7 @@ class SecurityMonitorService {
     // 24 hours
     const cutoff = Date.now() - olderThan;
     this.securityEvents = this.securityEvents.filter(
-      e => e.timestamp.getTime() > cutoff
+      (e) => e.timestamp.getTime() > cutoff,
     );
 
     logger.info(`Cleared old security events (older than ${olderThan}ms)`);
@@ -360,7 +409,7 @@ class SecurityMonitorService {
 
     const cutoff = Date.now() - (periodMs[period] || periodMs.day);
     const events = this.securityEvents.filter(
-      e => e.timestamp.getTime() > cutoff
+      (e) => e.timestamp.getTime() > cutoff,
     );
 
     const report = {
@@ -373,7 +422,7 @@ class SecurityMonitorService {
     };
 
     // Analyze events
-    events.forEach(event => {
+    events.forEach((event) => {
       // Count by severity
       report.bySeverity[event.severity] = (report.bySeverity[event.severity] || 0) + 1;
 

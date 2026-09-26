@@ -1,7 +1,11 @@
 import type { NextFunction, Request, Response } from 'express';
 
 const securityMonitorService = require('../services/securityMonitorService');
-const { ddosProtection } = require('../services/ddosProtection');
+// The middleware singleton owns the real block store (Redis ddos:blocked:* keys)
+// consulted by the request path — NOT the dead in-memory services/ddosProtection map.
+const { ddosProtection } = require('../middlewares/ddosProtection');
+
+const MAX_BLOCK_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 type SecurityRequest = Request & {
   query: Record<string, unknown>;
@@ -80,7 +84,7 @@ const generateReport = async (req: Request, res: Response, next: NextFunction): 
 
 const getBlockedIPs = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const blockedIPs = ddosProtection.getBlockedIPs();
+    const blockedIPs = await ddosProtection.getBlockedIPs();
 
     res.status(200).json({
       success: true,
@@ -127,7 +131,23 @@ const blockIP = async (req: SecurityRequest, res: Response, next: NextFunction):
       return;
     }
 
-    await ddosProtection.blockIP(ip, duration);
+    // Duration is milliseconds. Coerce to a finite positive number — a raw
+    // string would concatenate into the expiry timestamp and corrupt it.
+    let durationMs: number | undefined;
+    if (duration !== undefined && duration !== null && duration !== '') {
+      durationMs = Number(duration);
+      if (!Number.isFinite(durationMs) || durationMs <= 0) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid duration',
+          message: 'Duration must be a positive number of milliseconds',
+        });
+        return;
+      }
+      durationMs = Math.min(durationMs, MAX_BLOCK_DURATION_MS);
+    }
+
+    await ddosProtection.blockIP(ip, durationMs);
 
     res.status(200).json({
       success: true,
