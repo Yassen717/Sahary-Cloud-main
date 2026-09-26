@@ -1,6 +1,5 @@
 // @ts-nocheck
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const { prisma } = require('../config/database');
 const emailService = require('./emailService');
 
 /**
@@ -23,11 +22,50 @@ class SolarAlertService {
       NORMAL: 'NORMAL',
       WARNING: 'WARNING',
       CRITICAL: 'CRITICAL',
-      EMERGENCY: 'EMERGENCY'
+      EMERGENCY: 'EMERGENCY',
     };
 
     this.currentState = this.emergencyStates.NORMAL;
     this.activeAlerts = new Map();
+
+    // Repopulate the in-memory dedupe map from persisted unresolved alerts so
+    // a restart doesn't pile up duplicate rows per breach
+    this.loadUnresolvedAlerts();
+  }
+
+  /**
+   * Whether solar production is expected right now. Mirrors the day/night
+   * window in solarService.getSimulatedProduction (sun up 06:00-18:00).
+   * @returns {boolean} True when production should be monitored
+   */
+  isSunExpected() {
+    const hour = new Date().getHours();
+    return hour >= 6 && hour <= 18;
+  }
+
+  /**
+   * Load unresolved alerts from the database into the in-memory map
+   */
+  async loadUnresolvedAlerts() {
+    try {
+      const unresolved = await prisma.solarAlert.findMany({
+        where: { resolved: false },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      for (const alert of unresolved) {
+        // Keep the most recent alert per type
+        if (!this.activeAlerts.has(alert.type)) {
+          this.activeAlerts.set(alert.type, alert);
+        }
+      }
+
+      if (unresolved.length > 0) {
+        console.log(`Loaded ${unresolved.length} unresolved solar alert(s) into memory`);
+      }
+    } catch (error) {
+      console.error('Failed to load unresolved alerts:', error);
+    }
   }
 
   /**
@@ -36,27 +74,45 @@ class SolarAlertService {
    * @returns {Promise<Object>} Monitoring result with alerts
    */
   async monitorEnergyLevels(energyData) {
-    const { production, consumption, batteryLevel, capacity } = energyData;
-    
-    const alerts = [];
-    const productionPercentage = capacity ? (production / capacity) * 100 : 0;
-    const consumptionPercentage = capacity ? (consumption / capacity) * 100 : 0;
+    const {
+      production, consumption, batteryLevel, capacity,
+    } = energyData;
 
-    // Check production levels
-    if (productionPercentage < this.thresholds.criticalProduction) {
-      alerts.push(await this.createAlert({
-        type: 'CRITICAL_LOW_PRODUCTION',
-        severity: 'CRITICAL',
-        message: `إنتاج الطاقة الشمسية منخفض جداً: ${productionPercentage.toFixed(1)}%`,
-        data: { production, productionPercentage }
-      }));
-    } else if (productionPercentage < this.thresholds.lowProduction) {
-      alerts.push(await this.createAlert({
-        type: 'LOW_PRODUCTION',
-        severity: 'WARNING',
-        message: `إنتاج الطاقة الشمسية منخفض: ${productionPercentage.toFixed(1)}%`,
-        data: { production, productionPercentage }
-      }));
+    const alerts = [];
+    // capacity is the rated per-interval yield in kWh (the expected production
+    // of a sunny interval), NOT total storage capacity — the percentage is the
+    // share of expected yield actually produced this tick.
+    const productionPercentage = capacity ? (production / capacity) * 100 : null;
+    const consumptionPercentage = capacity ? (consumption / capacity) * 100 : null;
+
+    // Check production levels — only while the sun is expected (06:00-18:00,
+    // mirroring getSimulatedProduction) and a rated yield is configured.
+    // Zero production at night is by design and must not alert; any stale
+    // production alerts are resolved when the check doesn't apply or passes.
+    if (capacity && this.isSunExpected()) {
+      if (productionPercentage < this.thresholds.criticalProduction) {
+        alerts.push(await this.createAlert({
+          type: 'CRITICAL_LOW_PRODUCTION',
+          severity: 'CRITICAL',
+          message: `إنتاج الطاقة الشمسية منخفض جداً: ${productionPercentage.toFixed(1)}%`,
+          data: { production, productionPercentage },
+        }));
+        await this.resolveAlertByType('LOW_PRODUCTION');
+      } else if (productionPercentage < this.thresholds.lowProduction) {
+        alerts.push(await this.createAlert({
+          type: 'LOW_PRODUCTION',
+          severity: 'WARNING',
+          message: `إنتاج الطاقة الشمسية منخفض: ${productionPercentage.toFixed(1)}%`,
+          data: { production, productionPercentage },
+        }));
+        await this.resolveAlertByType('CRITICAL_LOW_PRODUCTION');
+      } else {
+        await this.resolveAlertByType('CRITICAL_LOW_PRODUCTION');
+        await this.resolveAlertByType('LOW_PRODUCTION');
+      }
+    } else {
+      await this.resolveAlertByType('CRITICAL_LOW_PRODUCTION');
+      await this.resolveAlertByType('LOW_PRODUCTION');
     }
 
     // Check battery levels
@@ -65,25 +121,32 @@ class SolarAlertService {
         type: 'CRITICAL_LOW_BATTERY',
         severity: 'CRITICAL',
         message: `مستوى البطارية منخفض جداً: ${batteryLevel}%`,
-        data: { batteryLevel }
+        data: { batteryLevel },
       }));
+      await this.resolveAlertByType('LOW_BATTERY');
     } else if (batteryLevel < this.thresholds.lowBattery) {
       alerts.push(await this.createAlert({
         type: 'LOW_BATTERY',
         severity: 'WARNING',
         message: `مستوى البطارية منخفض: ${batteryLevel}%`,
-        data: { batteryLevel }
+        data: { batteryLevel },
       }));
+      await this.resolveAlertByType('CRITICAL_LOW_BATTERY');
+    } else {
+      await this.resolveAlertByType('CRITICAL_LOW_BATTERY');
+      await this.resolveAlertByType('LOW_BATTERY');
     }
 
-    // Check consumption levels
-    if (consumptionPercentage > this.thresholds.highConsumption) {
+    // Check consumption levels (skipped when no rated yield is configured)
+    if (consumptionPercentage !== null && consumptionPercentage > this.thresholds.highConsumption) {
       alerts.push(await this.createAlert({
         type: 'HIGH_CONSUMPTION',
         severity: 'WARNING',
         message: `استهلاك الطاقة مرتفع: ${consumptionPercentage.toFixed(1)}%`,
-        data: { consumption, consumptionPercentage }
+        data: { consumption, consumptionPercentage },
       }));
+    } else {
+      await this.resolveAlertByType('HIGH_CONSUMPTION');
     }
 
     // Update system state based on alerts
@@ -92,7 +155,7 @@ class SolarAlertService {
     return {
       state: this.currentState,
       alerts,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
   }
 
@@ -102,7 +165,9 @@ class SolarAlertService {
    * @returns {Promise<Object>} Created alert
    */
   async createAlert(alertData) {
-    const { type, severity, message, data } = alertData;
+    const {
+      type, severity, message, data,
+    } = alertData;
 
     // Check if similar alert already exists and is active
     const existingAlert = this.activeAlerts.get(type);
@@ -110,41 +175,93 @@ class SolarAlertService {
       return existingAlert;
     }
 
+    // Fallback dedupe against the DB in case the in-memory map missed an
+    // unresolved row (e.g. the startup load failed or it was created elsewhere)
     try {
-      const alert = await prisma.solarAlert.create({
+      const persisted = await prisma.solarAlert.findFirst({
+        where: { type, resolved: false },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (persisted) {
+        this.activeAlerts.set(type, persisted);
+        return persisted;
+      }
+    } catch (error) {
+      console.error('Error checking for existing alert:', error);
+    }
+
+    let alert;
+    try {
+      alert = await prisma.solarAlert.create({
         data: {
           type,
           severity,
           message,
           data: JSON.stringify(data),
           resolved: false,
-          createdAt: new Date()
-        }
+          createdAt: new Date(),
+        },
       });
 
       this.activeAlerts.set(type, alert);
-
-      // Send notifications for critical alerts
-      if (severity === 'CRITICAL') {
-        await this.sendCriticalAlertNotifications(alert);
-      }
-
       console.log(`⚠️  Solar Alert Created: ${type} - ${message}`);
-      return alert;
     } catch (error) {
       console.error('Error creating alert:', error);
       // Return in-memory alert if database fails
-      const alert = {
+      alert = {
         id: `temp-${Date.now()}`,
         type,
         severity,
         message,
         data,
         resolved: false,
-        createdAt: new Date()
+        createdAt: new Date(),
       };
       this.activeAlerts.set(type, alert);
+    }
+
+    // Notify for critical alerts regardless of persistence outcome — a DB
+    // outage must not silently swallow a CRITICAL alert
+    if (severity === 'CRITICAL') {
+      await this.sendCriticalAlertNotifications(alert);
+    }
+
+    return alert;
+  }
+
+  /**
+   * Resolve an active alert by type when its condition has cleared
+   * @param {string} type - Alert type to resolve
+   * @returns {Promise<Object|null>} Resolved alert or null if none was active
+   */
+  async resolveAlertByType(type) {
+    const activeAlert = this.activeAlerts.get(type);
+    if (!activeAlert || activeAlert.resolved) {
+      return null;
+    }
+
+    // Remove from the map first so a later tick doesn't double-resolve
+    this.activeAlerts.delete(type);
+
+    // In-memory-only alerts (DB was down) have no row to update
+    if (typeof activeAlert.id === 'string' && activeAlert.id.startsWith('temp-')) {
+      console.log(`✅ Solar Alert Resolved (in-memory): ${type}`);
+      return activeAlert;
+    }
+
+    try {
+      const alert = await prisma.solarAlert.update({
+        where: { id: activeAlert.id },
+        data: {
+          resolved: true,
+          resolvedAt: new Date(),
+        },
+      });
+      console.log(`✅ Solar Alert Resolved: ${type}`);
       return alert;
+    } catch (error) {
+      console.error(`Error auto-resolving alert ${type}:`, error);
+      return null;
     }
   }
 
@@ -159,8 +276,8 @@ class SolarAlertService {
         where: { id: alertId },
         data: {
           resolved: true,
-          resolvedAt: new Date()
-        }
+          resolvedAt: new Date(),
+        },
       });
 
       // Remove from active alerts
@@ -175,6 +292,12 @@ class SolarAlertService {
       return alert;
     } catch (error) {
       console.error('Error resolving alert:', error);
+      // Prisma "record not found" — surface a 404 to the API layer
+      if (error.code === 'P2025') {
+        const notFound = new Error('Alert not found');
+        notFound.statusCode = 404;
+        throw notFound;
+      }
       throw new Error('Failed to resolve alert');
     }
   }
@@ -187,7 +310,7 @@ class SolarAlertService {
     try {
       const alerts = await prisma.solarAlert.findMany({
         where: { resolved: false },
-        orderBy: { createdAt: 'desc' }
+        orderBy: { createdAt: 'desc' },
       });
 
       return alerts;
@@ -202,23 +325,27 @@ class SolarAlertService {
    * @param {Array} alerts - Current alerts
    */
   async updateSystemState(alerts) {
-    const criticalAlerts = alerts.filter(a => a.severity === 'CRITICAL');
-    const warningAlerts = alerts.filter(a => a.severity === 'WARNING');
+    const criticalAlerts = alerts.filter((a) => a.severity === 'CRITICAL');
+    const warningAlerts = alerts.filter((a) => a.severity === 'WARNING');
 
     let newState = this.emergencyStates.NORMAL;
 
     if (criticalAlerts.length > 0) {
       newState = this.emergencyStates.CRITICAL;
-      await this.activateEmergencyPlan('CRITICAL');
     } else if (warningAlerts.length > 0) {
       newState = this.emergencyStates.WARNING;
-      await this.activateEmergencyPlan('WARNING');
     }
 
+    // Only run the emergency plan on an actual state transition — unresolved
+    // alerts persist across ticks and must not re-trigger it every cycle
     if (this.currentState !== newState) {
       console.log(`🔄 System state changed: ${this.currentState} → ${newState}`);
       this.currentState = newState;
       await this.notifyStateChange(newState);
+
+      if (newState === this.emergencyStates.CRITICAL || newState === this.emergencyStates.WARNING) {
+        await this.activateEmergencyPlan(newState);
+      }
     }
   }
 
@@ -246,10 +373,9 @@ class SolarAlertService {
         data: {
           severity,
           action: `Emergency plan activated: ${severity}`,
-          timestamp: new Date()
-        }
-      }).catch(err => console.error('Failed to log emergency:', err));
-
+          timestamp: new Date(),
+        },
+      }).catch((err) => console.error('Failed to log emergency:', err));
     } catch (error) {
       console.error('Error activating emergency plan:', error);
     }
@@ -265,19 +391,19 @@ class SolarAlertService {
     try {
       // In production, this would trigger actual power switching
       // For now, we'll log the action and update system status
-      
+
       await prisma.systemStatus.create({
         data: {
           status: 'BACKUP_POWER',
           message: 'Switched to backup power due to low solar production',
-          timestamp: new Date()
-        }
-      }).catch(err => console.error('Failed to log status:', err));
+          timestamp: new Date(),
+        },
+      }).catch((err) => console.error('Failed to log status:', err));
 
       return {
         success: true,
         message: 'Successfully switched to backup power',
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     } catch (error) {
       console.error('Error switching to backup power:', error);
@@ -297,14 +423,14 @@ class SolarAlertService {
         data: {
           status: 'BACKUP_READY',
           message: 'Backup power system prepared and on standby',
-          timestamp: new Date()
-        }
-      }).catch(err => console.error('Failed to log status:', err));
+          timestamp: new Date(),
+        },
+      }).catch((err) => console.error('Failed to log status:', err));
 
       return {
         success: true,
         message: 'Backup power system ready',
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     } catch (error) {
       console.error('Error preparing backup power:', error);
@@ -323,12 +449,12 @@ class SolarAlertService {
       // Get all VMs and identify non-essential ones
       const vms = await prisma.virtualMachine.findMany({
         where: { status: 'RUNNING' },
-        include: { user: true }
+        include: { user: true },
       });
 
-      // In a real system, you'd have priority levels
-      // For now, we'll just log the action
-      const nonEssentialVMs = vms.filter(vm => !vm.priority || vm.priority === 'LOW');
+      // The schema has no VM priority field, so all running VMs are treated
+      // as load-reduction candidates — this only logs, it doesn't suspend
+      const nonEssentialVMs = vms;
 
       console.log(`Found ${nonEssentialVMs.length} non-essential VMs to potentially suspend`);
 
@@ -337,15 +463,15 @@ class SolarAlertService {
         data: {
           severity: 'CRITICAL',
           action: `Identified ${nonEssentialVMs.length} non-essential VMs for load reduction`,
-          data: JSON.stringify({ vmIds: nonEssentialVMs.map(vm => vm.id) }),
-          timestamp: new Date()
-        }
-      }).catch(err => console.error('Failed to log emergency:', err));
+          data: JSON.stringify({ vmIds: nonEssentialVMs.map((vm) => vm.id) }),
+          timestamp: new Date(),
+        },
+      }).catch((err) => console.error('Failed to log emergency:', err));
 
       return {
         success: true,
         message: `Identified ${nonEssentialVMs.length} VMs for load reduction`,
-        vmCount: nonEssentialVMs.length
+        vmCount: nonEssentialVMs.length,
       };
     } catch (error) {
       console.error('Error reducing load:', error);
@@ -363,26 +489,30 @@ class SolarAlertService {
       const admins = await prisma.user.findMany({
         where: {
           role: { in: ['ADMIN', 'SUPER_ADMIN'] },
-          isActive: true
-        }
+          isActive: true,
+        },
       });
 
-      // Send email to each admin
-      for (const admin of admins) {
-        await emailService.sendEmail({
-          to: admin.email,
-          subject: `🚨 تنبيه حرج: ${alert.type}`,
-          html: `
-            <div dir="rtl">
-              <h2>تنبيه طاقة شمسية حرج</h2>
-              <p><strong>النوع:</strong> ${alert.type}</p>
-              <p><strong>الرسالة:</strong> ${alert.message}</p>
-              <p><strong>الوقت:</strong> ${alert.createdAt}</p>
-              <p>يرجى اتخاذ الإجراءات اللازمة فوراً.</p>
-            </div>
-          `
-        }).catch(err => console.error(`Failed to send email to ${admin.email}:`, err));
-      }
+      // Send email to each admin in parallel; log per-recipient failures
+      const results = await Promise.allSettled(admins.map((admin) => emailService.sendEmail({
+        to: admin.email,
+        subject: `🚨 تنبيه حرج: ${alert.type}`,
+        html: `
+          <div dir="rtl">
+            <h2>تنبيه طاقة شمسية حرج</h2>
+            <p><strong>النوع:</strong> ${alert.type}</p>
+            <p><strong>الرسالة:</strong> ${alert.message}</p>
+            <p><strong>الوقت:</strong> ${alert.createdAt}</p>
+            <p>يرجى اتخاذ الإجراءات اللازمة فوراً.</p>
+          </div>
+        `,
+      })));
+
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`Failed to send email to ${admins[index].email}:`, result.reason);
+        }
+      });
 
       console.log(`📧 Critical alert notifications sent to ${admins.length} admins`);
     } catch (error) {
@@ -399,31 +529,35 @@ class SolarAlertService {
       const admins = await prisma.user.findMany({
         where: {
           role: { in: ['ADMIN', 'SUPER_ADMIN'] },
-          isActive: true
-        }
+          isActive: true,
+        },
       });
 
       const stateMessages = {
         NORMAL: 'النظام يعمل بشكل طبيعي',
         WARNING: 'النظام في حالة تحذير',
         CRITICAL: 'النظام في حالة حرجة',
-        EMERGENCY: 'النظام في حالة طوارئ'
+        EMERGENCY: 'النظام في حالة طوارئ',
       };
 
-      for (const admin of admins) {
-        await emailService.sendEmail({
-          to: admin.email,
-          subject: `تغيير حالة النظام: ${newState}`,
-          html: `
-            <div dir="rtl">
-              <h2>تغيير حالة نظام الطاقة الشمسية</h2>
-              <p><strong>الحالة الجديدة:</strong> ${newState}</p>
-              <p><strong>الوصف:</strong> ${stateMessages[newState]}</p>
-              <p><strong>الوقت:</strong> ${new Date().toLocaleString('ar-EG')}</p>
-            </div>
-          `
-        }).catch(err => console.error(`Failed to send email to ${admin.email}:`, err));
-      }
+      const results = await Promise.allSettled(admins.map((admin) => emailService.sendEmail({
+        to: admin.email,
+        subject: `تغيير حالة النظام: ${newState}`,
+        html: `
+          <div dir="rtl">
+            <h2>تغيير حالة نظام الطاقة الشمسية</h2>
+            <p><strong>الحالة الجديدة:</strong> ${newState}</p>
+            <p><strong>الوصف:</strong> ${stateMessages[newState]}</p>
+            <p><strong>الوقت:</strong> ${new Date().toLocaleString('ar-EG')}</p>
+          </div>
+        `,
+      })));
+
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`Failed to send email to ${admins[index].email}:`, result.reason);
+        }
+      });
     } catch (error) {
       console.error('Error notifying state change:', error);
     }
@@ -438,30 +572,34 @@ class SolarAlertService {
       const admins = await prisma.user.findMany({
         where: {
           role: { in: ['ADMIN', 'SUPER_ADMIN'] },
-          isActive: true
-        }
+          isActive: true,
+        },
       });
 
       const severityMessages = {
         WARNING: 'تحذير: مستويات الطاقة منخفضة',
-        CRITICAL: 'حرج: مستويات الطاقة حرجة - تم تفعيل خطة الطوارئ'
+        CRITICAL: 'حرج: مستويات الطاقة حرجة - تم تفعيل خطة الطوارئ',
       };
 
-      for (const admin of admins) {
-        await emailService.sendEmail({
-          to: admin.email,
-          subject: `🚨 ${severityMessages[severity]}`,
-          html: `
-            <div dir="rtl">
-              <h2>إشعار طوارئ - نظام الطاقة الشمسية</h2>
-              <p><strong>المستوى:</strong> ${severity}</p>
-              <p><strong>الرسالة:</strong> ${severityMessages[severity]}</p>
-              <p><strong>الوقت:</strong> ${new Date().toLocaleString('ar-EG')}</p>
-              <p>يرجى مراجعة لوحة التحكم للحصول على مزيد من التفاصيل.</p>
-            </div>
-          `
-        }).catch(err => console.error(`Failed to send email to ${admin.email}:`, err));
-      }
+      const results = await Promise.allSettled(admins.map((admin) => emailService.sendEmail({
+        to: admin.email,
+        subject: `🚨 ${severityMessages[severity]}`,
+        html: `
+          <div dir="rtl">
+            <h2>إشعار طوارئ - نظام الطاقة الشمسية</h2>
+            <p><strong>المستوى:</strong> ${severity}</p>
+            <p><strong>الرسالة:</strong> ${severityMessages[severity]}</p>
+            <p><strong>الوقت:</strong> ${new Date().toLocaleString('ar-EG')}</p>
+            <p>يرجى مراجعة لوحة التحكم للحصول على مزيد من التفاصيل.</p>
+          </div>
+        `,
+      })));
+
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`Failed to send email to ${admins[index].email}:`, result.reason);
+        }
+      });
 
       console.log(`📧 Emergency notifications sent to ${admins.length} admins`);
     } catch (error) {
@@ -481,7 +619,7 @@ class SolarAlertService {
       const logs = await prisma.emergencyLog.findMany({
         where: severity ? { severity } : {},
         orderBy: { timestamp: 'desc' },
-        take: limit
+        take: limit,
       });
 
       return logs;
@@ -515,22 +653,22 @@ class SolarAlertService {
         where: { resolved: false },
         data: {
           resolved: true,
-          resolvedAt: new Date()
-        }
+          resolvedAt: new Date(),
+        },
       });
 
       await prisma.systemStatus.create({
         data: {
           status: 'NORMAL',
           message: 'System manually reset to normal state',
-          timestamp: new Date()
-        }
-      }).catch(err => console.error('Failed to log status:', err));
+          timestamp: new Date(),
+        },
+      }).catch((err) => console.error('Failed to log status:', err));
 
       return {
         success: true,
         message: 'System reset to normal state',
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     } catch (error) {
       console.error('Error resetting system state:', error);

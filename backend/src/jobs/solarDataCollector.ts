@@ -3,7 +3,9 @@ const cron = require('node-cron');
 const solarService = require('../services/solarService');
 const solarAlertService = require('../services/solarAlertService');
 
-// Set up the connection between services
+// Set up the connection between services. solarService already wires this in
+// its constructor (the dependency is one-directional, no cycle); this explicit
+// call is kept as a defensive no-op in case the instance is ever overridden.
 solarService.setAlertService(solarAlertService);
 
 /**
@@ -14,8 +16,13 @@ class SolarDataCollector {
   constructor() {
     this.task = null;
     this.isRunning = false;
-    // Collect data every 15 minutes
+    // Collect data every 15 minutes; fall back to the default if the
+    // configured expression isn't a valid cron schedule
     this.schedule = process.env.SOLAR_COLLECTION_SCHEDULE || '*/15 * * * *';
+    if (!cron.validate(this.schedule)) {
+      console.warn(`⚠️  Invalid SOLAR_COLLECTION_SCHEDULE "${this.schedule}", falling back to */15 * * * *`);
+      this.schedule = '*/15 * * * *';
+    }
   }
 
   /**
@@ -35,7 +42,7 @@ class SolarDataCollector {
           production: data.production,
           consumption: data.consumption,
           efficiency: data.efficiency,
-          timestamp: data.timestamp
+          timestamp: data.timestamp,
         });
       } catch (error) {
         console.error('❌ Error collecting solar data:', error.message);
@@ -44,9 +51,10 @@ class SolarDataCollector {
 
     this.isRunning = true;
     console.log(`🌞 Solar data collector started (Schedule: ${this.schedule})`);
-    
-    // Collect initial data immediately
-    this.collectNow();
+
+    // Collect initial data immediately — swallow rejection so a failed first
+    // run can't crash startup with an unhandled promise rejection
+    this.collectNow().catch((err) => console.error('❌ Initial solar data collection failed:', err.message));
   }
 
   /**
@@ -82,7 +90,6 @@ class SolarDataCollector {
     return {
       isRunning: this.isRunning,
       schedule: this.schedule,
-      nextRun: this.task ? this.task.nextDate() : null
     };
   }
 }
