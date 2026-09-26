@@ -2,7 +2,9 @@
 const express = require('express');
 const AuthController = require('../controllers/authController');
 const { validate } = require('../middlewares/validation');
-const { authenticate, optionalAuth, requireEmailVerification } = require('../middlewares/auth');
+const {
+  authenticate, requireEmailVerification, requireSuperAdmin,
+} = require('../middlewares/auth');
 const {
   authRateLimit,
   apiRateLimit,
@@ -92,7 +94,7 @@ router.post(
   authRateLimit(),
   bruteForceProtection(),
   validate(loginSchema),
-  AuthController.login
+  AuthController.login,
 );
 
 /**
@@ -149,7 +151,7 @@ router.post(
   authenticate,
   requireEmailVerification,
   validate(changePasswordSchema),
-  AuthController.changePassword
+  AuthController.changePassword,
 );
 
 /**
@@ -161,7 +163,7 @@ router.post(
   '/forgot-password',
   authRateLimit(),
   validate(forgotPasswordSchema),
-  AuthController.forgotPassword
+  AuthController.forgotPassword,
 );
 
 /**
@@ -173,7 +175,7 @@ router.post(
   '/reset-password',
   authRateLimit(),
   validate(resetPasswordSchema),
-  AuthController.resetPassword
+  AuthController.resetPassword,
 );
 
 /**
@@ -185,7 +187,7 @@ router.post(
   '/verify-email',
   apiRateLimit(),
   validate(verifyEmailSchema),
-  AuthController.verifyEmail
+  AuthController.verifyEmail,
 );
 
 /**
@@ -197,7 +199,7 @@ router.post(
   '/resend-verification',
   authRateLimit(),
   validate(forgotPasswordSchema), // Reuse email validation
-  AuthController.resendVerification
+  AuthController.resendVerification,
 );
 
 /**
@@ -233,7 +235,7 @@ router.put(
   apiRateLimit(),
   authenticate,
   validate(updateProfileSchema),
-  AuthController.updateProfile
+  AuthController.updateProfile,
 );
 
 /**
@@ -273,7 +275,7 @@ router.post(
   '/validate-token',
   apiRateLimit(),
   validate(validateTokenSchema),
-  AuthController.validateToken
+  AuthController.validateToken,
 );
 
 /**
@@ -292,8 +294,9 @@ router.post(
   '/impersonate',
   authRateLimit(),
   authenticate,
+  requireSuperAdmin,
   validate(impersonateUserSchema),
-  AuthController.impersonateUser
+  AuthController.impersonateUser,
 );
 
 /**
@@ -313,7 +316,7 @@ router.get(
   apiRateLimit(),
   authenticate,
   validate(activityQuerySchema),
-  AuthController.getUserActivity
+  AuthController.getUserActivity,
 );
 
 /**
@@ -327,7 +330,7 @@ router.post(
   authenticate,
   requireEmailVerification,
   validate(deactivateAccountSchema),
-  AuthController.deactivateAccount
+  AuthController.deactivateAccount,
 );
 
 /**
@@ -339,7 +342,7 @@ router.post(
   '/reactivate',
   authRateLimit(),
   validate(reactivateAccountSchema),
-  AuthController.reactivateAccount
+  AuthController.reactivateAccount,
 );
 
 // Health check for auth routes

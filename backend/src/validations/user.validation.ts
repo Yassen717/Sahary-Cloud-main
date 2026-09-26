@@ -12,7 +12,7 @@ const registerSchema = z.object({
       .min(5, 'Email must be at least 5 characters')
       .max(100, 'Email must not exceed 100 characters')
       .toLowerCase(),
-    
+
     password: z
       .string({
         required_error: 'Password is required',
@@ -21,9 +21,9 @@ const registerSchema = z.object({
       .max(128, 'Password must not exceed 128 characters')
       .regex(
         /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^\-_.,~()[\]{}|+=:;'"\\/<>`!])\S+$/,
-        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
+        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
       ),
-    
+
     firstName: z
       .string({
         required_error: 'First name is required',
@@ -31,7 +31,7 @@ const registerSchema = z.object({
       .min(2, 'First name must be at least 2 characters')
       .max(50, 'First name must not exceed 50 characters')
       .regex(/^[\p{L}][\p{L}\s'’-]*$/u, 'First name can only contain letters, spaces, hyphens, and apostrophes'),
-    
+
     lastName: z
       .string({
         required_error: 'Last name is required',
@@ -39,7 +39,7 @@ const registerSchema = z.object({
       .min(2, 'Last name must be at least 2 characters')
       .max(50, 'Last name must not exceed 50 characters')
       .regex(/^[\p{L}][\p{L}\s'’-]*$/u, 'Last name can only contain letters, spaces, hyphens, and apostrophes'),
-    
+
     phone: z
       .string()
       .regex(/^\+?[0-9\s\-()]{7,20}$/, 'Invalid phone number format')
@@ -56,7 +56,7 @@ const loginSchema = z.object({
       })
       .email('Invalid email format')
       .toLowerCase(),
-    
+
     password: z
       .string({
         required_error: 'Password is required',
@@ -74,23 +74,25 @@ const updateProfileSchema = z.object({
       .max(50, 'First name must not exceed 50 characters')
       .regex(/^[\p{L}][\p{L}\s'’-]*$/u, 'First name can only contain letters, spaces, hyphens, and apostrophes')
       .optional(),
-    
+
     lastName: z
       .string()
       .min(2, 'Last name must be at least 2 characters')
       .max(50, 'Last name must not exceed 50 characters')
       .regex(/^[\p{L}][\p{L}\s'’-]*$/u, 'Last name can only contain letters, spaces, hyphens, and apostrophes')
       .optional(),
-    
+
     phone: z
       .string()
       .regex(/^\+?[0-9\s\-()]{7,20}$/, 'Invalid phone number format')
       .optional()
       .or(z.literal('')),
-    
+
     avatar: z
       .string()
       .url('Invalid avatar URL')
+      .or(z.literal('')) // empty string clears the avatar
+      .nullable()
       .optional(),
   }),
 });
@@ -102,7 +104,7 @@ const changePasswordSchema = z.object({
       .string({
         required_error: 'Current password is required',
       }),
-    
+
     newPassword: z
       .string({
         required_error: 'New password is required',
@@ -111,9 +113,9 @@ const changePasswordSchema = z.object({
       .max(128, 'Password must not exceed 128 characters')
       .regex(
         /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^\-_.,~()[\]{}|+=:;'"\\/<>`!])\S+$/,
-        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
+        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
       ),
-    
+
     confirmPassword: z
       .string({
         required_error: 'Password confirmation is required',
@@ -143,7 +145,7 @@ const resetPasswordSchema = z.object({
       .string({
         required_error: 'Reset token is required',
       }),
-    
+
     password: z
       .string({
         required_error: 'Password is required',
@@ -152,9 +154,9 @@ const resetPasswordSchema = z.object({
       .max(128, 'Password must not exceed 128 characters')
       .regex(
         /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^\-_.,~()[\]{}|+=:;'"\\/<>`!])\S+$/,
-        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
+        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
       ),
-    
+
     confirmPassword: z
       .string({
         required_error: 'Password confirmation is required',
@@ -194,7 +196,7 @@ const impersonateUserSchema = z.object({
         required_error: 'Target user ID is required',
       })
       .cuid('Invalid user ID format'),
-    
+
     reason: z
       .string()
       .min(10, 'Reason must be at least 10 characters')
@@ -211,7 +213,7 @@ const deactivateAccountSchema = z.object({
         required_error: 'Password is required',
       })
       .min(1, 'Password cannot be empty'),
-    
+
     reason: z
       .string()
       .min(10, 'Reason must be at least 10 characters')
@@ -229,7 +231,7 @@ const reactivateAccountSchema = z.object({
       })
       .email('Invalid email format')
       .toLowerCase(),
-    
+
     token: z
       .string({
         required_error: 'Reactivation token is required',
@@ -245,39 +247,39 @@ const activityQuerySchema = z.object({
       .string()
       .regex(/^\d+$/, 'Page must be a positive integer')
       .transform(Number)
-      .refine(val => val > 0, 'Page must be greater than 0')
+      .refine((val) => val > 0, 'Page must be greater than 0')
       .optional()
       .default('1'),
-    
+
     limit: z
       .string()
       .regex(/^\d+$/, 'Limit must be a positive integer')
       .transform(Number)
-      .refine(val => val > 0 && val <= 100, 'Limit must be between 1 and 100')
+      .refine((val) => val > 0 && val <= 100, 'Limit must be between 1 and 100')
       .optional()
       .default('20'),
-    
+
     action: z
       .string()
       .min(1, 'Action cannot be empty')
       .max(100, 'Action must not exceed 100 characters')
       .optional(),
-    
+
     startDate: z
       .string()
       .datetime('Invalid start date format')
       .optional(),
-    
+
     endDate: z
       .string()
       .datetime('Invalid end date format')
       .optional(),
-    
+
     sortBy: z
       .enum(['timestamp', 'action', 'resource'])
       .optional()
       .default('timestamp'),
-    
+
     sortOrder: z
       .enum(['asc', 'desc'])
       .optional()

@@ -4,8 +4,8 @@ import AuthService from '../services/authService';
 import { prisma } from '../config/database';
 import { isFeatureEnabled } from '../config/auth';
 
-const redisService = require('../services/redisService');
 const rateLimit = require('express-rate-limit');
+const redisService = require('../services/redisService');
 
 export interface AuthenticatedUser {
   id: string;
@@ -15,6 +15,10 @@ export interface AuthenticatedUser {
   isVerified: boolean;
   firstName?: string;
   lastName?: string;
+  /** Present only on impersonation tokens — ID of the admin who started the impersonation */
+  impersonatedBy?: string;
+  /** Present only on impersonation tokens */
+  isImpersonating?: boolean;
 }
 
 export interface AuthRequest extends Request {
@@ -127,6 +131,14 @@ class AuthMiddleware {
         isVerified: user.isVerified,
         firstName: user.firstName,
         lastName: user.lastName,
+        // Carry impersonation claims from the token so downstream handlers
+        // (e.g. stopImpersonation) can see them — they are not in the DB.
+        ...(decoded.isImpersonating === true
+          ? {
+            isImpersonating: true,
+            impersonatedBy: typeof decoded.impersonatedBy === 'string' ? decoded.impersonatedBy : undefined,
+          }
+          : {}),
       };
 
       req.token = token;
@@ -140,25 +152,61 @@ class AuthMiddleware {
     }
   }
 
-  static async optionalAuth(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // Non-blocking variant of authenticate: never writes a response. Any
+  // failure (missing/invalid/revoked token, DB error) just yields req.user = null.
+  static async optionalAuth(req: AuthRequest, _res: Response, next: NextFunction): Promise<void> {
     try {
       const authHeader = getHeaderValue(req.headers.authorization);
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      const cookieToken = req.cookies?.token;
+      const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : cookieToken;
+
+      if (!token) {
         req.user = null;
         next();
         return;
       }
 
-      await AuthMiddleware.authenticate(req, res, (error?: unknown) => {
-        if (error) {
-          req.user = null;
+      if (redisService.isReady()) {
+        try {
+          if (await JWTUtils.isTokenBlacklisted(token, redisService.getClient())) {
+            req.user = null;
+            next();
+            return;
+          }
+        } catch (redisError) {
+          console.warn('Redis blacklist check failed:', getErrorMessage(redisError));
         }
-        next();
-      });
+      }
+
+      const decoded = await JWTUtils.verifyAccessToken(token);
+      const user = decoded.userId ? await AuthService.getUserById(decoded.userId) : null;
+
+      if (user && user.isActive) {
+        req.user = {
+          id: user.id,
+          userId: user.id,
+          email: user.email,
+          role: user.role,
+          isVerified: user.isVerified,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          ...(decoded.isImpersonating === true
+            ? {
+              isImpersonating: true,
+              impersonatedBy:
+                  typeof decoded.impersonatedBy === 'string' ? decoded.impersonatedBy : undefined,
+            }
+            : {}),
+        };
+        req.token = token;
+      } else {
+        req.user = null;
+      }
     } catch {
       req.user = null;
-      next();
     }
+
+    next();
   }
 
   static requireRole(...roles: string[]): Middleware {
@@ -274,7 +322,9 @@ class AuthMiddleware {
 
   static async authenticateApiKey(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     try {
-      const apiKey = getHeaderValue(req.headers['x-api-key'] as string | string[] | undefined) || getHeaderValue(req.query.apiKey as string | string[] | undefined);
+      // Header only — API keys must never ride in the query string
+      // (they leak into logs, caches and browser history).
+      const apiKey = getHeaderValue(req.headers['x-api-key'] as string | string[] | undefined);
 
       if (!apiKey) {
         res.status(401).json({
@@ -285,7 +335,10 @@ class AuthMiddleware {
         return;
       }
 
-      const validApiKeys = (process.env.VALID_API_KEYS || '').split(',');
+      const validApiKeys = (process.env.VALID_API_KEYS || '')
+        .split(',')
+        .map((key: string) => key.trim())
+        .filter((key: string) => key.length > 0);
 
       if (!validApiKeys.includes(apiKey)) {
         res.status(401).json({
@@ -386,8 +439,13 @@ class AuthMiddleware {
 
       next();
     } catch (error) {
+      // Fail closed: a session-store error must not silently admit the request.
       console.error('Session validation error:', error);
-      next();
+      _res.status(503).json({
+        success: false,
+        error: 'Session validation unavailable',
+        message: 'Unable to validate session, please try again later',
+      });
     }
   }
 
@@ -437,21 +495,21 @@ export {
   AuthMiddleware as MiddlewareClass,
 };
 
-export const authenticate = AuthMiddleware.authenticate;
-export const optionalAuth = AuthMiddleware.optionalAuth;
-export const requireRole = AuthMiddleware.requireRole;
-export const requireAdmin = AuthMiddleware.requireAdmin;
-export const requireSuperAdmin = AuthMiddleware.requireSuperAdmin;
-export const requireEmailVerification = AuthMiddleware.requireEmailVerification;
-export const requireOwnershipOrAdmin = AuthMiddleware.requireOwnershipOrAdmin;
-export const requireSelfOrAdmin = AuthMiddleware.requireSelfOrAdmin;
-export const createRateLimit = AuthMiddleware.createRateLimit;
-export const authenticateApiKey = AuthMiddleware.authenticateApiKey;
-export const conditional = AuthMiddleware.conditional;
-export const logAuthEvent = AuthMiddleware.logAuthEvent;
-export const validateSession = AuthMiddleware.validateSession;
-export const requireFeature = AuthMiddleware.requireFeature;
-export const combine = AuthMiddleware.combine;
+export const { authenticate } = AuthMiddleware;
+export const { optionalAuth } = AuthMiddleware;
+export const { requireRole } = AuthMiddleware;
+export const { requireAdmin } = AuthMiddleware;
+export const { requireSuperAdmin } = AuthMiddleware;
+export const { requireEmailVerification } = AuthMiddleware;
+export const { requireOwnershipOrAdmin } = AuthMiddleware;
+export const { requireSelfOrAdmin } = AuthMiddleware;
+export const { createRateLimit } = AuthMiddleware;
+export const { authenticateApiKey } = AuthMiddleware;
+export const { conditional } = AuthMiddleware;
+export const { logAuthEvent } = AuthMiddleware;
+export const { validateSession } = AuthMiddleware;
+export const { requireFeature } = AuthMiddleware;
+export const { combine } = AuthMiddleware;
 
 export default {
   AuthMiddleware,

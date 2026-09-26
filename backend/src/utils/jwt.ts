@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import config from '../config';
 import type { AuthTokenPayload, AuthTokens } from '../types/auth';
@@ -7,6 +8,8 @@ type JwtPayloadRecord = Record<string, unknown> & {
   email?: string;
   role?: string;
   type?: string;
+  impersonatedBy?: string;
+  isImpersonating?: boolean;
   iat?: number;
   exp?: number;
   sub?: string;
@@ -21,6 +24,26 @@ type JwtTokenOptions = {
 type RedisLike = {
   setEx?: (key: string, ttl: number, value: string) => Promise<unknown>;
   get?: (key: string) => Promise<string | null>;
+};
+
+type JwtVerifyOptions = JwtTokenOptions & {
+  /** When provided, the token is checked against the Redis blacklist after verification */
+  redis?: RedisLike | null;
+};
+
+// Blacklist keys store a SHA-256 digest of the token, never the raw JWT.
+const getBlacklistKey = (token: string): string => `blacklist:${crypto.createHash('sha256').update(token).digest('hex')}`;
+
+// The blacklist silently fails open when Redis is unavailable — log a
+// security warning once per process so it is visible without log spam.
+let redisBlacklistWarningLogged = false;
+const warnRedisBlacklistUnavailable = (): void => {
+  if (!redisBlacklistWarningLogged) {
+    redisBlacklistWarningLogged = true;
+    console.warn(
+      'SECURITY WARNING: Redis is unavailable — token blacklist checks are disabled and revoked tokens may be accepted until expiry',
+    );
+  }
 };
 
 const getErrorMessage = (error: unknown): string => {
@@ -138,8 +161,8 @@ class JWTUtils {
     }
   }
 
-  static async verifyRefreshToken(token: string, options: JwtTokenOptions = {}): Promise<JwtPayloadRecord> {
-    const { issuer = 'sahary-cloud', audience = 'sahary-cloud-users' } = options;
+  static async verifyRefreshToken(token: string, options: JwtVerifyOptions = {}): Promise<JwtPayloadRecord> {
+    const { issuer = 'sahary-cloud', audience = 'sahary-cloud-users', redis = null } = options;
 
     try {
       const decoded = jwt.verify(token, getSecret(config.jwt.refreshSecret, 'JWT refresh secret'), {
@@ -156,6 +179,10 @@ class JWTUtils {
 
       if (typedDecoded.type !== 'refresh') {
         throw new Error('Invalid token type');
+      }
+
+      if (redis && (await this.isTokenBlacklisted(token, redis))) {
+        throw new Error('Token has been revoked');
       }
 
       return typedDecoded;
@@ -239,6 +266,7 @@ class JWTUtils {
       const decoded = jwt.verify(token, getSecret(config.jwt.secret, 'JWT secret'), {
         issuer: 'sahary-cloud',
         audience: 'sahary-cloud-users',
+        algorithms: ['HS256'],
       });
 
       if (!decoded || typeof decoded !== 'object') {
@@ -279,6 +307,7 @@ class JWTUtils {
       const decoded = jwt.verify(token, getSecret(config.jwt.secret, 'JWT secret'), {
         issuer: 'sahary-cloud',
         audience: 'sahary-cloud-users',
+        algorithms: ['HS256'],
       });
 
       if (!decoded || typeof decoded !== 'object') {
@@ -299,7 +328,7 @@ class JWTUtils {
 
   static async blacklistToken(token: string, redis: RedisLike | null): Promise<void> {
     if (!redis || typeof redis.setEx !== 'function') {
-      console.log('Redis not available for token blacklisting:');
+      warnRedisBlacklistUnavailable();
       return;
     }
 
@@ -311,7 +340,7 @@ class JWTUtils {
 
       const ttl = decoded.exp - Math.floor(Date.now() / 1000);
       if (ttl > 0) {
-        await redis.setEx(`blacklist:${token}`, ttl, '1');
+        await redis.setEx(getBlacklistKey(token), ttl, '1');
       }
     } catch (error) {
       console.error('Failed to blacklist token:', error);
@@ -320,12 +349,12 @@ class JWTUtils {
 
   static async isTokenBlacklisted(token: string, redis: RedisLike | null): Promise<boolean> {
     if (!redis || typeof redis.get !== 'function') {
-      console.log('Redis not available for token blacklist check:');
+      warnRedisBlacklistUnavailable();
       return false;
     }
 
     try {
-      const result = await redis.get(`blacklist:${token}`);
+      const result = await redis.get(getBlacklistKey(token));
       return result === '1';
     } catch (error) {
       console.error('Failed to check token blacklist:', error);
