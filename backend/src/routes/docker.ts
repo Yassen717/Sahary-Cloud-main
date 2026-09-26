@@ -17,7 +17,8 @@ router.use(xssProtection());
  * @desc    Create a new container
  * @access  Private (Admin only)
  */
-router.post('/containers',
+router.post(
+  '/containers',
   apiRateLimit(),
   authenticate,
   requirePermission('docker:manage'),
@@ -62,33 +63,37 @@ router.post('/containers',
       .isArray()
       .withMessage('Volumes must be an array'),
   ],
-  dockerController.createContainer
+  dockerController.createContainer,
 );
 
 /**
  * @route   POST /api/docker/containers/:containerId/start
  * @desc    Start a container
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
-router.post('/containers/:containerId/start',
+router.post(
+  '/containers/:containerId/start',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
       .withMessage('Invalid container ID'),
   ],
-  dockerController.startContainer
+  dockerController.startContainer,
 );
 
 /**
  * @route   POST /api/docker/containers/:containerId/stop
  * @desc    Stop a container
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
-router.post('/containers/:containerId/stop',
+router.post(
+  '/containers/:containerId/stop',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -98,17 +103,19 @@ router.post('/containers/:containerId/stop',
       .isInt({ min: 1, max: 300 })
       .withMessage('Timeout must be between 1 and 300 seconds'),
   ],
-  dockerController.stopContainer
+  dockerController.stopContainer,
 );
 
 /**
  * @route   POST /api/docker/containers/:containerId/restart
  * @desc    Restart a container
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
-router.post('/containers/:containerId/restart',
+router.post(
+  '/containers/:containerId/restart',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -118,7 +125,7 @@ router.post('/containers/:containerId/restart',
       .isInt({ min: 1, max: 300 })
       .withMessage('Timeout must be between 1 and 300 seconds'),
   ],
-  dockerController.restartContainer
+  dockerController.restartContainer,
 );
 
 /**
@@ -126,7 +133,8 @@ router.post('/containers/:containerId/restart',
  * @desc    Remove a container
  * @access  Private (Admin only)
  */
-router.delete('/containers/:containerId',
+router.delete(
+  '/containers/:containerId',
   apiRateLimit(),
   authenticate,
   requirePermission('docker:manage'),
@@ -139,49 +147,55 @@ router.delete('/containers/:containerId',
       .isBoolean()
       .withMessage('Force must be a boolean'),
   ],
-  dockerController.removeContainer
+  dockerController.removeContainer,
 );
 
 /**
  * @route   GET /api/docker/containers/:containerId/status
  * @desc    Get container status and stats
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
-router.get('/containers/:containerId/status',
+router.get(
+  '/containers/:containerId/status',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
       .withMessage('Invalid container ID'),
   ],
-  dockerController.getContainerStatus
+  dockerController.getContainerStatus,
 );
 
 /**
  * @route   GET /api/docker/containers/:containerId/stats
  * @desc    Get container resource usage stats
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
-router.get('/containers/:containerId/stats',
+router.get(
+  '/containers/:containerId/stats',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
       .withMessage('Invalid container ID'),
   ],
-  dockerController.getContainerStats
+  dockerController.getContainerStats,
 );
 
 /**
  * @route   GET /api/docker/containers
  * @desc    List all containers
- * @access  Private (Admin sees all, User sees own only)
+ * @access  Private (Admin only)
  */
-router.get('/containers',
+router.get(
+  '/containers',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     query('vmId')
       .optional()
@@ -192,7 +206,7 @@ router.get('/containers',
       .isIn(['created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead'])
       .withMessage('Invalid status value'),
   ],
-  dockerController.listContainers
+  dockerController.listContainers,
 );
 
 /**
@@ -200,7 +214,8 @@ router.get('/containers',
  * @desc    Pull Docker image
  * @access  Private (Admin only)
  */
-router.post('/images/pull',
+router.post(
+  '/images/pull',
   apiRateLimit(),
   authenticate,
   requirePermission('docker:manage'),
@@ -210,7 +225,7 @@ router.post('/images/pull',
       .isLength({ min: 1, max: 200 })
       .withMessage('Image name is required and must be between 1 and 200 characters'),
   ],
-  dockerController.pullImage
+  dockerController.pullImage,
 );
 
 /**
@@ -218,11 +233,12 @@ router.post('/images/pull',
  * @desc    Get Docker system information
  * @access  Private (Admin only)
  */
-router.get('/system/info',
+router.get(
+  '/system/info',
   apiRateLimit(),
   authenticate,
   requirePermission('docker:manage'),
-  dockerController.getSystemInfo
+  dockerController.getSystemInfo,
 );
 
 /**
@@ -230,7 +246,8 @@ router.get('/system/info',
  * @desc    Create Docker network
  * @access  Private (Admin only)
  */
-router.post('/networks',
+router.post(
+  '/networks',
   apiRateLimit(),
   authenticate,
   requirePermission('docker:manage'),
@@ -240,33 +257,37 @@ router.post('/networks',
       .isLength({ min: 1, max: 100 })
       .withMessage('Network name must be between 1 and 100 characters'),
   ],
-  dockerController.createNetwork
+  dockerController.createNetwork,
 );
 
 /**
  * @route   GET /api/docker/containers/:containerId/health
  * @desc    Check container health
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
-router.get('/containers/:containerId/health',
+router.get(
+  '/containers/:containerId/health',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
       .withMessage('Invalid container ID'),
   ],
-  dockerController.checkContainerHealth
+  dockerController.checkContainerHealth,
 );
 
 /**
  * @route   GET /api/docker/containers/:containerId/logs
  * @desc    Get container logs
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
-router.get('/containers/:containerId/logs',
+router.get(
+  '/containers/:containerId/logs',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -288,17 +309,19 @@ router.get('/containers/:containerId/logs',
       .isBoolean()
       .withMessage('Timestamps must be a boolean'),
   ],
-  dockerController.getContainerLogs
+  dockerController.getContainerLogs,
 );
 
 /**
  * @route   POST /api/docker/containers/:containerId/exec
  * @desc    Execute command in container
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
-router.post('/containers/:containerId/exec',
+router.post(
+  '/containers/:containerId/exec',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -311,17 +334,19 @@ router.post('/containers/:containerId/exec',
       .isLength({ min: 1, max: 1000 })
       .withMessage('Each command part must be a string between 1 and 1000 characters'),
   ],
-  dockerController.execInContainer
+  dockerController.execInContainer,
 );
 
 /**
  * @route   POST /api/docker/containers/:containerId/backup
  * @desc    Create container backup
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
-router.post('/containers/:containerId/backup',
+router.post(
+  '/containers/:containerId/backup',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -331,20 +356,22 @@ router.post('/containers/:containerId/backup',
       .isLength({ min: 1, max: 100 })
       .withMessage('Backup name is required and must be between 1 and 100 characters'),
   ],
-  dockerController.createContainerBackup
+  dockerController.createContainerBackup,
 );
 
 /**
  * @route   POST /api/docker/backups/:backupId/restore
  * @desc    Restore container from backup
- * @access  Private (Admin and User - own backups only)
+ * @access  Private (Admin only)
  */
-router.post('/backups/:backupId/restore',
+router.post(
+  '/backups/:backupId/restore',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('backupId')
-      .isLength({ min: 12, max: 64 })
+      .matches(/^(sha256:)?[a-f0-9]{12,64}$/i)
       .withMessage('Invalid backup ID'),
     body('vmId')
       .notEmpty()
@@ -362,7 +389,7 @@ router.post('/backups/:backupId/restore',
       .isInt({ min: 1, max: 1000 })
       .withMessage('Storage must be between 1GB and 1TB'),
   ],
-  dockerController.restoreFromBackup
+  dockerController.restoreFromBackup,
 );
 
 /**
@@ -370,11 +397,12 @@ router.post('/backups/:backupId/restore',
  * @desc    Clean up unused Docker resources
  * @access  Private (Admin only)
  */
-router.post('/cleanup',
+router.post(
+  '/cleanup',
   apiRateLimit(),
   authenticate,
   requirePermission('docker:manage'),
-  dockerController.cleanup
+  dockerController.cleanup,
 );
 
 /**
@@ -382,11 +410,12 @@ router.post('/cleanup',
  * @desc    Check Docker daemon connectivity
  * @access  Private (Admin only)
  */
-router.get('/connection',
+router.get(
+  '/connection',
   apiRateLimit(),
   authenticate,
   requirePermission('docker:manage'),
-  dockerController.checkConnection
+  dockerController.checkConnection,
 );
 
 module.exports = router;

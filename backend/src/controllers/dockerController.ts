@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+
 const { validationResult } = require('express-validator');
 
 const dockerService = require('../services/dockerService').default;
@@ -43,20 +44,25 @@ const requireDocker = (res: Response): boolean => {
   return false;
 };
 
+const handleValidationErrors = (req: Request, res: Response): boolean => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors.array(),
+    });
+    return true;
+  }
+
+  return false;
+};
+
 const dockerController = {
   async createContainer(req: DockerRequest, res: Response): Promise<void> {
     try {
       if (requireDocker(res)) return;
-
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors: errors.array(),
-        });
-        return;
-      }
+      if (handleValidationErrors(req, res)) return;
 
       const containerInfo = await dockerService.createContainer(req.body);
 
@@ -70,7 +76,6 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to create container',
-        error: error.message,
       });
     }
   },
@@ -78,6 +83,7 @@ const dockerController = {
   async startContainer(req: DockerRequest, res: Response): Promise<void> {
     try {
       if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
 
       const { containerId } = req.params;
       const containerStatus = await dockerService.startContainer(containerId);
@@ -92,7 +98,6 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to start container',
-        error: error.message,
       });
     }
   },
@@ -100,6 +105,7 @@ const dockerController = {
   async stopContainer(req: DockerRequest, res: Response): Promise<void> {
     try {
       if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
 
       const { containerId } = req.params;
       const { timeout = 10 } = req.body;
@@ -115,7 +121,6 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to stop container',
-        error: error.message,
       });
     }
   },
@@ -123,6 +128,7 @@ const dockerController = {
   async restartContainer(req: DockerRequest, res: Response): Promise<void> {
     try {
       if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
 
       const { containerId } = req.params;
       const { timeout = 10 } = req.body;
@@ -138,7 +144,6 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to restart container',
-        error: error.message,
       });
     }
   },
@@ -146,6 +151,7 @@ const dockerController = {
   async removeContainer(req: DockerRequest, res: Response): Promise<void> {
     try {
       if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
 
       const { containerId } = req.params;
       const { force = false } = req.body;
@@ -160,7 +166,6 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to remove container',
-        error: error.message,
       });
     }
   },
@@ -168,6 +173,7 @@ const dockerController = {
   async getContainerStatus(req: DockerRequest, res: Response): Promise<void> {
     try {
       if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
 
       const { containerId } = req.params;
       const containerStatus = await dockerService.getContainerStatus(containerId);
@@ -189,7 +195,6 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to get container status',
-        error: error.message,
       });
     }
   },
@@ -197,6 +202,7 @@ const dockerController = {
   async getContainerStats(req: DockerRequest, res: Response): Promise<void> {
     try {
       if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
 
       const { containerId } = req.params;
       const stats = await dockerService.getContainerStats(containerId);
@@ -210,7 +216,6 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to get container stats',
-        error: error.message,
       });
     }
   },
@@ -218,6 +223,7 @@ const dockerController = {
   async listContainers(req: DockerRequest, res: Response): Promise<void> {
     try {
       if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
 
       const { vmId, status } = req.query;
       const filters: Record<string, string[]> = {};
@@ -237,7 +243,6 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to list containers',
-        error: error.message,
       });
     }
   },
@@ -245,6 +250,7 @@ const dockerController = {
   async pullImage(req: DockerRequest, res: Response): Promise<void> {
     try {
       if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
 
       const { imageName } = req.body;
 
@@ -267,13 +273,15 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to pull image',
-        error: error.message,
       });
     }
   },
 
-  async getSystemInfo(_req: Request, res: Response): Promise<void> {
+  async getSystemInfo(req: Request, res: Response): Promise<void> {
     try {
+      if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
+
       const systemInfo = await dockerService.getSystemInfo();
 
       res.json({
@@ -285,13 +293,15 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to get Docker system info',
-        error: error.message,
       });
     }
   },
 
   async createNetwork(req: DockerRequest, res: Response): Promise<void> {
     try {
+      if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
+
       const { networkName = 'sahary-network' } = req.body;
       const network = await dockerService.createNetwork(networkName);
 
@@ -305,13 +315,15 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to create network',
-        error: error.message,
       });
     }
   },
 
   async checkContainerHealth(req: DockerRequest, res: Response): Promise<void> {
     try {
+      if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
+
       const { containerId } = req.params;
       const health = await dockerService.checkContainerHealth(containerId);
 
@@ -324,15 +336,19 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to check container health',
-        error: error.message,
       });
     }
   },
 
   async getContainerLogs(req: DockerRequest, res: Response): Promise<void> {
     try {
+      if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
+
       const { containerId } = req.params;
-      const { tail = 100, since, until, timestamps = true } = req.query;
+      const {
+        tail = 100, since, until, timestamps = true,
+      } = req.query;
 
       const logs = await dockerService.getContainerLogs(containerId, {
         tail: Number.parseInt(String(tail), 10),
@@ -353,13 +369,15 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to get container logs',
-        error: error.message,
       });
     }
   },
 
   async execInContainer(req: DockerRequest, res: Response): Promise<void> {
     try {
+      if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
+
       const { containerId } = req.params;
       const { command } = req.body;
 
@@ -382,13 +400,15 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to execute command in container',
-        error: error.message,
       });
     }
   },
 
   async createContainerBackup(req: DockerRequest, res: Response): Promise<void> {
     try {
+      if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
+
       const { containerId } = req.params;
       const { backupName } = req.body;
 
@@ -412,15 +432,24 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to create container backup',
-        error: error.message,
       });
     }
   },
 
   async restoreFromBackup(req: DockerRequest, res: Response): Promise<void> {
     try {
+      if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
+
       const { backupId } = req.params;
-      const vmConfig = req.body;
+      // Whitelist allowed VM config fields — never pass the raw body through,
+      // otherwise callers could inject volumes/environment/ports/HostConfig.
+      const {
+        vmId, name, cpu, ram, storage,
+      } = req.body;
+      const vmConfig = {
+        vmId, name, cpu, ram, storage,
+      };
       const containerInfo = await dockerService.restoreFromBackup(backupId, vmConfig);
 
       res.json({
@@ -433,13 +462,15 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to restore container from backup',
-        error: error.message,
       });
     }
   },
 
-  async cleanup(_req: Request, res: Response): Promise<void> {
+  async cleanup(req: Request, res: Response): Promise<void> {
     try {
+      if (requireDocker(res)) return;
+      if (handleValidationErrors(req, res)) return;
+
       const results = await dockerService.cleanup();
 
       res.json({
@@ -452,13 +483,14 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to cleanup Docker resources',
-        error: error.message,
       });
     }
   },
 
-  async checkConnection(_req: Request, res: Response): Promise<void> {
+  async checkConnection(req: Request, res: Response): Promise<void> {
     try {
+      if (handleValidationErrors(req, res)) return;
+
       const isConnected = await dockerService.checkConnection();
 
       res.json({
@@ -473,7 +505,6 @@ const dockerController = {
       res.status(500).json({
         success: false,
         message: 'Failed to check Docker connection',
-        error: error.message,
       });
     }
   },

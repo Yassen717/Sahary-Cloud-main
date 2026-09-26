@@ -17,6 +17,7 @@ export interface DockerVmConfig {
   ports?: DockerPortConfig[];
   environment?: string[];
   volumes?: string[];
+  command?: string[];
 }
 
 export interface DockerContainerInfo {
@@ -162,21 +163,48 @@ class DockerService {
     this._systemInfo = null;
 
     const dockerConfig = config.docker || {};
+    const dockerHost = String(
+      dockerConfig.host || process.env.DOCKER_HOST || 'unix:///var/run/docker.sock',
+    );
+    const useTls = Boolean(dockerConfig.tlsVerify && dockerConfig.certPath);
     const opts: Record<string, unknown> = { timeout: 30000 };
 
-    if (dockerConfig.tlsVerify && dockerConfig.certPath) {
+    // Parse DOCKER_HOST by scheme: unix:///npipe:// -> socketPath, tcp:// -> host + port.
+    const tcpMatch = dockerHost.match(/^(?:tcp|http|https):\/\/([^:/]+)(?::(\d+))?/);
+
+    if (dockerHost.startsWith('npipe://')) {
+      // Strip the scheme — docker-modem expects the bare pipe path.
+      opts.socketPath = dockerHost.replace(/^npipe:\/\//, '') || '//./pipe/docker_engine';
+    } else if (tcpMatch) {
+      const isSecure = dockerHost.startsWith('https://') || useTls;
+      opts.host = tcpMatch[1];
+      opts.port = tcpMatch[2] ? Number.parseInt(tcpMatch[2], 10) : (isSecure ? 2376 : 2375);
+      opts.protocol = isSecure ? 'https' : 'http';
+    } else {
+      // unix:// (or a bare path) -> socketPath without the scheme.
+      opts.socketPath = dockerHost.replace(/^unix:\/\//, '') || '/var/run/docker.sock';
+    }
+
+    // TLS material is guarded by an existence check so missing certs can't
+    // crash the process at module-load time.
+    if (useTls) {
       const fs = require('fs');
       const path = require('path');
 
-      opts.host = String(dockerConfig.host).replace(/^tcp:\/\//, '');
-      opts.protocol = 'https';
-      opts.ca = fs.readFileSync(path.join(dockerConfig.certPath, 'ca.pem'));
-      opts.cert = fs.readFileSync(path.join(dockerConfig.certPath, 'cert.pem'));
-      opts.key = fs.readFileSync(path.join(dockerConfig.certPath, 'key.pem'));
-    } else {
-      opts.socketPath = dockerConfig.host === 'unix:///var/run/docker.sock'
-        ? '/var/run/docker.sock'
-        : process.env.DOCKER_HOST || '/var/run/docker.sock';
+      const certFiles = ['ca.pem', 'cert.pem', 'key.pem'];
+      const missing = certFiles.filter(
+        (file) => !fs.existsSync(path.join(dockerConfig.certPath, file)),
+      );
+
+      if (missing.length === 0) {
+        opts.ca = fs.readFileSync(path.join(dockerConfig.certPath, 'ca.pem'));
+        opts.cert = fs.readFileSync(path.join(dockerConfig.certPath, 'cert.pem'));
+        opts.key = fs.readFileSync(path.join(dockerConfig.certPath, 'key.pem'));
+      } else {
+        console.warn(
+          `⚠️  Docker TLS files missing in ${dockerConfig.certPath}: ${missing.join(', ')} — connecting without client certs`,
+        );
+      }
     }
 
     this.docker = new Docker(opts);
@@ -243,8 +271,10 @@ class DockerService {
         Name: networkName,
         Driver: 'bridge',
         Internal: false,
+        // No explicit Gateway: deriving it from the subnet string breaks on
+        // non-/16 or non-.0 networks — let Docker auto-assign it.
         IPAM: {
-          Config: [{ Subnet: subnet, Gateway: subnet.replace('/16', '').replace(/\.0$/, '.1') }],
+          Config: [{ Subnet: subnet }],
         },
         Options: {
           'com.docker.network.bridge.enable_icc': 'true',
@@ -353,6 +383,7 @@ class DockerService {
       ports = [],
       environment = [],
       volumes = [],
+      command,
     } = vmConfig;
 
     try {
@@ -363,24 +394,31 @@ class DockerService {
 
       const networkName = config.docker?.vmNetwork || 'sahary-vm-network';
 
+      // StorageOpt.size is only honored by devicemapper/zfs/btrfs (and overlay2
+      // on XFS with pquota); on the common overlay2/ext4 setup Docker rejects it.
+      const storageDriver = this._systemInfo?.Driver;
+      const supportsStorageOpt = ['devicemapper', 'zfs', 'btrfs'].includes(storageDriver || '');
+
       const containerConfig = {
         name: `sahary-vm-${vmId}`,
         Image: image,
+        // Default images like ubuntu:latest have no long-running command — keep
+        // the container alive instead of exiting instantly and restart-looping.
+        Cmd: command && command.length > 0 ? command : ['sleep', 'infinity'],
         HostConfig: {
-          NanoCpus: cpu * 1000000000,
+          // Docker's Go API unmarshals these as int64 — fractional cpu values
+          // must be rounded or container creation fails.
+          NanoCpus: Math.round(cpu * 1000000000),
           Memory: ram * 1024 * 1024,
-          StorageOpt: {
-            size: `${storage}G`,
-          },
+          ...(supportsStorageOpt ? { StorageOpt: { size: `${storage}G` } } : {}),
           PortBindings: this.formatPortBindings(ports),
           Binds: volumes,
           NetworkMode: networkName,
           RestartPolicy: {
             Name: 'unless-stopped',
-            MaximumRetryCount: 3,
           },
           SecurityOpt: ['no-new-privileges:true'],
-          CpuShares: cpu * 1024,
+          CpuShares: Math.round(cpu * 1024),
           MemorySwap: ram * 1024 * 1024 * 2,
           LogConfig: {
             Type: 'json-file',
@@ -404,16 +442,7 @@ class DockerService {
           'sahary.service': 'vm',
           'sahary.managed': 'true',
         },
-        WorkingDir: '/app',
-        User: '1000:1000',
         ExposedPorts: this.formatExposedPorts(ports),
-        Healthcheck: {
-          Test: ['CMD-SHELL', 'echo "healthy"'],
-          Interval: 30000000000,
-          Timeout: 10000000000,
-          Retries: 3,
-          StartPeriod: 60000000000,
-        },
       };
 
       const container = await this.docker.createContainer(containerConfig);
@@ -438,7 +467,7 @@ class DockerService {
       const container = this.docker.getContainer(containerId);
 
       await container.start();
-      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+      await this.waitForContainerRunning(container);
 
       const containerInfo = await container.inspect();
 
@@ -480,7 +509,7 @@ class DockerService {
       const container = this.docker.getContainer(containerId);
 
       await container.restart({ t: timeout });
-      await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+      await this.waitForContainerRunning(container);
 
       const containerInfo = await container.inspect();
 
@@ -507,7 +536,14 @@ class DockerService {
           await container.stop({ t: 10 });
         }
       } catch (stopError) {
-        console.warn('Container might already be stopped:', getErrorMessage(stopError));
+        // Tolerate only "gone" or "not running" states — any other failure
+        // (daemon unreachable, permission errors, ...) must surface to the caller.
+        const { statusCode } = (stopError as { statusCode?: number });
+        if (statusCode === 404 || statusCode === 304 || statusCode === 409) {
+          console.warn('Container already gone or not running:', getErrorMessage(stopError));
+        } else {
+          throw stopError;
+        }
       }
 
       await container.remove({ force, v: true });
@@ -520,10 +556,12 @@ class DockerService {
     try {
       const container = this.docker.getContainer(containerId);
 
-      const [containerInfo, stats] = await Promise.all([
-        container.inspect(),
-        this.getContainerStats(containerId).catch(() => null),
-      ]);
+      const containerInfo = await container.inspect();
+
+      // stats() can block ~30s on stopped containers — only call it when running.
+      const stats = containerInfo.State.Running
+        ? await this.getContainerStats(containerId).catch(() => null)
+        : null;
 
       return {
         containerId: containerInfo.Id,
@@ -585,11 +623,18 @@ class DockerService {
 
   async listContainers(filters: Record<string, unknown> = {}): Promise<Array<Record<string, unknown>>> {
     try {
+      // Merge caller-supplied label filters with the managed-only constraint
+      // instead of letting them overwrite it.
+      const { label, ...restFilters } = filters;
+      const extraLabels = (Array.isArray(label) ? label : [label])
+        .filter(Boolean)
+        .map(String);
+
       const listOptions = {
         all: true,
         filters: {
-          label: ['sahary.managed=true'],
-          ...filters,
+          ...restFilters,
+          label: ['sahary.managed=true', ...extraLabels],
         },
       };
 
@@ -614,9 +659,18 @@ class DockerService {
 
   async pullImage(imageName: string): Promise<void> {
     try {
-      console.log(`Pulling Docker image: ${imageName}`);
+      // docker.pull() without a tag fetches EVERY tag of the repo (unlike the
+      // CLI). Default to :latest. Check for a tag/digest only in the segment
+      // after the last '/' so a registry host port (host:5000/img) doesn't
+      // count as a tag.
+      const lastSegment = imageName.slice(imageName.lastIndexOf('/') + 1);
+      const imageRef = lastSegment.includes(':') || lastSegment.includes('@')
+        ? imageName
+        : `${imageName}:latest`;
 
-      const stream = await this.docker.pull(imageName);
+      console.log(`Pulling Docker image: ${imageRef}`);
+
+      const stream = await this.docker.pull(imageRef);
 
       await new Promise<void>((resolve, reject) => {
         this.docker.modem.followProgress(stream, (err: unknown) => {
@@ -628,7 +682,7 @@ class DockerService {
         });
       });
 
-      console.log(`Successfully pulled image: ${imageName}`);
+      console.log(`Successfully pulled image: ${imageRef}`);
     } catch (error) {
       throw new Error(`Failed to pull image ${imageName}: ${getErrorMessage(error)}`);
     }
@@ -675,8 +729,10 @@ class DockerService {
         Name: name,
         Driver: 'bridge',
         Internal: false,
+        // Let Docker auto-assign the gateway — string-mangling the subnet only
+        // works for /16 networks ending in .0.
         IPAM: {
-          Config: [{ Subnet: subnet, Gateway: subnet.replace('/16', '').replace(/\.0$/, '.1') }],
+          Config: [{ Subnet: subnet }],
         },
         Options: {
           'com.docker.network.bridge.enable_icc': 'true',
@@ -735,7 +791,7 @@ class DockerService {
 
       const container = this.docker.getContainer(containerId);
 
-      const logStream = await container.logs({
+      const logBuffer = await container.logs({
         stdout: true,
         stderr: true,
         tail,
@@ -744,13 +800,20 @@ class DockerService {
         timestamps,
       });
 
-      return logStream.toString();
+      // logs() returns raw multiplexed frames (8-byte headers) for non-Tty
+      // containers — strip them so clients get clean log text.
+      const rawLogs = Buffer.isBuffer(logBuffer) ? logBuffer : Buffer.from(String(logBuffer));
+      return this.demuxDockerBuffer(rawLogs).toString();
     } catch (error) {
       throw new Error(`Failed to get container logs: ${getErrorMessage(error)}`);
     }
   }
 
-  async execInContainer(containerId: string, command: string[]): Promise<{ exitCode: number; output: string; command: string }> {
+  async execInContainer(
+    containerId: string,
+    command: string[],
+    timeoutMs = 60000,
+  ): Promise<{ exitCode: number; output: string; command: string }> {
     try {
       const container = this.docker.getContainer(containerId);
 
@@ -763,20 +826,55 @@ class DockerService {
 
       const stream = await exec.start({ Detach: false, Tty: false });
 
-      let output = '';
-      stream.on('data', (chunk: Buffer) => {
-        output += chunk.toString();
-      });
+      // With Tty:false the stream is multiplexed with 8-byte frame headers —
+      // demux stdout/stderr into sinks instead of reading raw chunks.
+      const { PassThrough } = require('stream');
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
+      const stdoutSink = new PassThrough();
+      const stderrSink = new PassThrough();
 
-      await new Promise<void>((resolve) => {
-        stream.on('end', resolve);
+      stdoutSink.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+      stderrSink.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+      this.docker.modem.demuxStream(stream, stdoutSink, stderrSink);
+
+      await new Promise<void>((resolve, reject) => {
+        let ended = false;
+
+        const timer = setTimeout(() => {
+          stream.destroy();
+          reject(new Error(`Command timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+
+        stream.on('end', () => {
+          ended = true;
+          clearTimeout(timer);
+          resolve();
+        });
+
+        stream.on('error', (streamError: Error) => {
+          clearTimeout(timer);
+          reject(streamError);
+        });
+
+        // 'close' without a preceding 'end' means the stream died early —
+        // without this the promise would hang forever.
+        stream.on('close', () => {
+          if (!ended) {
+            clearTimeout(timer);
+            reject(new Error('Exec stream closed before completing'));
+          }
+        });
       });
 
       const execInfo = await exec.inspect();
 
+      const stdout = Buffer.concat(stdoutChunks).toString();
+      const stderr = Buffer.concat(stderrChunks).toString();
+
       return {
         exitCode: execInfo.ExitCode,
-        output: output.trim(),
+        output: `${stdout}${stderr}`.trim(),
         command: command.join(' '),
       };
     } catch (error) {
@@ -841,16 +939,24 @@ class DockerService {
       results.containers = containerPrune.ContainersDeleted?.length || 0;
       results.reclaimedSpace += containerPrune.SpaceReclaimed || 0;
 
+      // dangling:true removes only untagged images — dangling:false would delete
+      // EVERY unused image including sahary-backup/* restore points.
       const imagePrune = await this.docker.pruneImages({
         filters: {
-          dangling: ['false'],
+          dangling: ['true'],
         },
       });
 
       results.images = imagePrune.ImagesDeleted?.length || 0;
       results.reclaimedSpace += imagePrune.SpaceReclaimed || 0;
 
-      const volumePrune = await this.docker.pruneVolumes();
+      // Label-filtered: an unfiltered pruneVolumes would delete all unattached
+      // host volumes, including data unrelated to Sahary.
+      const volumePrune = await this.docker.pruneVolumes({
+        filters: {
+          label: ['sahary.managed=true'],
+        },
+      });
       results.volumes = volumePrune.VolumesDeleted?.length || 0;
       results.reclaimedSpace += volumePrune.SpaceReclaimed || 0;
 
@@ -969,6 +1075,45 @@ class DockerService {
       writeBytes,
       totalBytes: readBytes + writeBytes,
     };
+  }
+
+  async waitForContainerRunning(container: any, attempts = 10, intervalMs = 500): Promise<void> {
+    for (let i = 0; i < attempts; i++) {
+      const info = await container.inspect();
+      const status = info.State.Status;
+
+      if (info.State.Running || status === 'exited' || status === 'dead') {
+        return;
+      }
+
+      await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+
+  demuxDockerBuffer(buffer: Buffer): Buffer {
+    // Docker multiplexes stdout/stderr into 8-byte frames:
+    // [stream(1) | 0 0 0 | payloadSize(4 BE)] + payload.
+    const chunks: Buffer[] = [];
+    let offset = 0;
+
+    while (offset + 8 <= buffer.length) {
+      const streamType = buffer[offset];
+      const payloadSize = buffer.readUInt32BE(offset + 4);
+
+      if (streamType > 2 || offset + 8 + payloadSize > buffer.length) {
+        // Not multiplexed output (e.g. a Tty container) — return it untouched.
+        return buffer;
+      }
+
+      chunks.push(buffer.subarray(offset + 8, offset + 8 + payloadSize));
+      offset += 8 + payloadSize;
+    }
+
+    if (offset !== buffer.length) {
+      return buffer;
+    }
+
+    return Buffer.concat(chunks);
   }
 
   async checkConnection(): Promise<boolean> {

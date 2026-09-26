@@ -15,6 +15,8 @@ const initSocket = (httpServer: HttpServer): Server => {
     pingInterval: 25000,
   });
 
+  // The default '/' namespace intentionally registers no event handlers — all
+  // socket functionality lives behind the JWT-authenticated '/terminal' namespace.
   setupTerminalSocket(io);
 
   logger.info('🔌 Socket.io server initialised');
