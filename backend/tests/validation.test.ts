@@ -1,7 +1,7 @@
-import ValidationHelpers from '../src/utils/validation.helpers';
-import { validate } from '../src/middlewares/validation';
-import { registerSchema, loginSchema } from '../src/validations/user.validation';
-import { createVMSchema } from '../src/validations/vm.validation';
+const ValidationHelpers = require('../src/utils/validation.helpers').default;
+const { validate } = require('../src/middlewares/validation');
+const { registerSchema, loginSchema } = require('../src/validations/user.validation');
+const { createVMSchema } = require('../src/validations/vm.validation');
 
 describe('Validation Helpers', () => {
   describe('Password Validation', () => {
@@ -28,13 +28,13 @@ describe('Validation Helpers', () => {
     test('should hash and compare passwords', async () => {
       const password = 'TestPassword123!';
       const hash = await ValidationHelpers.hashPassword(password);
-
+      
       expect(hash).toBeDefined();
       expect(hash).not.toBe(password);
-
+      
       const isMatch = await ValidationHelpers.comparePassword(password, hash);
       expect(isMatch).toBe(true);
-
+      
       const isNotMatch = await ValidationHelpers.comparePassword('wrongpassword', hash);
       expect(isNotMatch).toBe(false);
     });
@@ -76,7 +76,7 @@ describe('Validation Helpers', () => {
         storage: 40,
         bandwidth: 1000
       };
-
+      
       const result = ValidationHelpers.validateVMResources(resources);
       expect(result.isValid).toBe(true);
       expect(result.errors).toHaveLength(0);
@@ -89,7 +89,7 @@ describe('Validation Helpers', () => {
         ram: 1024, // Too low for 4 CPU cores
         storage: 40
       };
-
+      
       const result = ValidationHelpers.validateVMResources(resources);
       expect(result.isValid).toBe(false);
       expect(result.errors).toContain('RAM should be at least 2048MB for 4 CPU core(s)');
@@ -101,7 +101,7 @@ describe('Validation Helpers', () => {
         ram: 2048, // Low RAM for high CPU
         storage: 40
       };
-
+      
       const result = ValidationHelpers.validateVMResources(resources);
       expect(result.warnings.length).toBeGreaterThan(0);
       expect(result.warnings[0]).toContain('High CPU count with low RAM');
@@ -114,7 +114,7 @@ describe('Validation Helpers', () => {
         storage: 40,
         bandwidth: 1000
       };
-
+      
       const cost = ValidationHelpers.calculateVMCost(resources);
       expect(cost).toBeGreaterThan(0);
       expect(typeof cost).toBe('number');
@@ -125,7 +125,7 @@ describe('Validation Helpers', () => {
     test('should validate correct date range', () => {
       const startDate = new Date('2024-01-01');
       const endDate = new Date('2024-01-31');
-
+      
       const result = ValidationHelpers.validateDateRange(startDate, endDate);
       expect(result.isValid).toBe(true);
       expect(result.errors).toHaveLength(0);
@@ -135,7 +135,7 @@ describe('Validation Helpers', () => {
     test('should reject invalid date order', () => {
       const startDate = new Date('2024-01-31');
       const endDate = new Date('2024-01-01');
-
+      
       const result = ValidationHelpers.validateDateRange(startDate, endDate);
       expect(result.isValid).toBe(false);
       expect(result.errors).toContain('Start date must be before or equal to end date');
@@ -144,7 +144,7 @@ describe('Validation Helpers', () => {
     test('should reject future dates when not allowed', () => {
       const startDate = new Date();
       const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000); // Tomorrow
-
+      
       const result = ValidationHelpers.validateDateRange(startDate, endDate, { allowFuture: false });
       expect(result.isValid).toBe(false);
       expect(result.errors).toContain('End date cannot be in the future');
@@ -153,7 +153,7 @@ describe('Validation Helpers', () => {
     test('should reject date range exceeding max days', () => {
       const startDate = new Date('2024-01-01');
       const endDate = new Date('2024-12-31');
-
+      
       const result = ValidationHelpers.validateDateRange(startDate, endDate, { maxDays: 30 });
       expect(result.isValid).toBe(false);
       expect(result.errors).toContain('Date range cannot exceed 30 days');
@@ -167,7 +167,7 @@ describe('Validation Helpers', () => {
         mimetype: 'image/jpeg',
         originalname: 'test.jpg'
       };
-
+      
       const result = ValidationHelpers.validateFileUpload(file);
       expect(result.isValid).toBe(true);
       expect(result.errors).toHaveLength(0);
@@ -180,7 +180,7 @@ describe('Validation Helpers', () => {
         mimetype: 'image/jpeg',
         originalname: 'test.jpg'
       };
-
+      
       const result = ValidationHelpers.validateFileUpload(file);
       expect(result.isValid).toBe(false);
       expect(result.errors).toContain('File size cannot exceed 10MB');
@@ -192,7 +192,7 @@ describe('Validation Helpers', () => {
         mimetype: 'application/pdf',
         originalname: 'test.pdf'
       };
-
+      
       const result = ValidationHelpers.validateFileUpload(file);
       expect(result.isValid).toBe(false);
       expect(result.errors[0]).toContain('File type not allowed');

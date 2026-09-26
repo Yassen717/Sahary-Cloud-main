@@ -1,136 +1,14 @@
-import { Prisma } from '@prisma/client';
-import { prisma } from '../config/database';
+// @ts-nocheck
+const { prisma } = require('../config/database');
 
-type AuditLogWithUser = Prisma.AuditLogGetPayload<{
-    include: {
-        user: {
-            select: {
-                id: true;
-                email: true;
-                firstName: true;
-                lastName: true;
-            };
-        };
-    };
-}>;
+const ANALYTICS_MAX_RANGE_MS = 366 * 24 * 60 * 60 * 1000; // ~1 year
+const ANALYTICS_DEFAULT_RANGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-type UserStatistics = {
-    total: number;
-    active: number;
-    verified: number;
-    inactive: number;
-    unverified: number;
-    roleDistribution: Record<string, number>;
-    recentSignups: number;
+const badRequest = (message) => {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
 };
-
-type VmStatistics = {
-    total: number;
-    statusDistribution: Record<string, number>;
-    resources: {
-        totalCPU: number;
-        totalRAM: number;
-        totalStorage: number;
-        totalBandwidth: number;
-    };
-    averageHourlyRate: number;
-};
-
-type InvoiceStatistics = {
-    total: number;
-    statusDistribution: Record<string, number>;
-    amounts: {
-        totalRevenue: number;
-        totalSubtotal: number;
-        totalTax: number;
-        totalDiscounts: number;
-    };
-    recentInvoices: number;
-};
-
-type PaymentStatistics = {
-    total: number;
-    statusDistribution: Record<string, number>;
-    totalProcessed: number;
-};
-
-type UsageStatistics = {
-    totalRecords: number;
-    totalCost: number;
-    totalDuration: number;
-    totalBandwidth: number;
-    averages: {
-        cpu: number;
-        ram: number;
-    };
-};
-
-type DashboardStats = {
-    users: UserStatistics;
-    vms: VmStatistics;
-    invoices: InvoiceStatistics;
-    payments: PaymentStatistics;
-    usage: UsageStatistics;
-    recentActivity: AuditLogWithUser[];
-    timestamp: Date;
-};
-
-type SubSystemHealth = {
-    status: string;
-} & Record<string, unknown>;
-
-type SystemHealth = {
-    status: string;
-    database?: SubSystemHealth;
-    vms?: SubSystemHealth;
-    services?: SubSystemHealth;
-    error?: string;
-    timestamp: Date;
-};
-
-type ResourceLimits = {
-    cpu: number;
-    ram: number;
-    storage: number;
-    bandwidth: number;
-};
-
-type SystemResourceUsage = {
-    used: ResourceLimits;
-    limits: ResourceLimits;
-    usage: ResourceLimits;
-    available: ResourceLimits;
-};
-
-type AnalyticsOptions = {
-    startDate?: string | Date;
-    endDate?: string | Date;
-    groupBy?: string;
-};
-
-type GroupableItem = {
-    createdAt: Date | string;
-} & Record<string, any>;
-
-type GroupedPeriod = {
-    period: string;
-    count: number;
-    total?: number;
-};
-
-type AuditLogOptions = {
-    page?: string | number;
-    limit?: string | number;
-    userId?: string;
-    action?: string;
-    resource?: string;
-    startDate?: string | Date;
-    endDate?: string | Date;
-    sortBy?: string;
-    sortOrder?: string;
-};
-
-const getErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : 'Unknown error');
 
 /**
  * Admin Service
@@ -141,8 +19,9 @@ class AdminService {
 
   /**
      * Get comprehensive dashboard statistics
+     * @returns {Promise<Object>} Dashboard statistics
      */
-  static async getDashboardStats(): Promise<DashboardStats> {
+  static async getDashboardStats() {
     try {
       const [
         userStats,
@@ -170,14 +49,15 @@ class AdminService {
         timestamp: new Date(),
       };
     } catch (error) {
-      throw new Error(`Failed to get dashboard stats: ${getErrorMessage(error)}`);
+      throw new Error(`Failed to get dashboard stats: ${error.message}`);
     }
   }
 
   /**
      * Get user statistics
+     * @returns {Promise<Object>} User statistics
      */
-  static async getUserStatistics(): Promise<UserStatistics> {
+  static async getUserStatistics() {
     try {
       const [total, active, verified, byRole, recentSignups] = await Promise.all([
         prisma.user.count(),
@@ -196,7 +76,7 @@ class AdminService {
         }),
       ]);
 
-      const roleDistribution: Record<string, number> = {};
+      const roleDistribution = {};
       byRole.forEach((item) => {
         roleDistribution[item.role] = item._count;
       });
@@ -211,14 +91,15 @@ class AdminService {
         recentSignups,
       };
     } catch (error) {
-      throw new Error(`Failed to get user statistics: ${getErrorMessage(error)}`);
+      throw new Error(`Failed to get user statistics: ${error.message}`);
     }
   }
 
   /**
      * Get VM statistics
+     * @returns {Promise<Object>} VM statistics
      */
-  static async getVMStatistics(): Promise<VmStatistics> {
+  static async getVMStatistics() {
     try {
       const [total, byStatus, resourceUsage] = await Promise.all([
         prisma.virtualMachine.count(),
@@ -239,7 +120,7 @@ class AdminService {
         }),
       ]);
 
-      const statusDistribution: Record<string, number> = {};
+      const statusDistribution = {};
       byStatus.forEach((item) => {
         statusDistribution[item.status] = item._count;
       });
@@ -248,22 +129,23 @@ class AdminService {
         total,
         statusDistribution,
         resources: {
-          totalCPU: resourceUsage._sum.cpu || 0,
-          totalRAM: resourceUsage._sum.ram || 0,
-          totalStorage: resourceUsage._sum.storage || 0,
-          totalBandwidth: resourceUsage._sum.bandwidth || 0,
+          totalCPU: resourceUsage._sum.cpu || 0, // cores
+          totalRAM: resourceUsage._sum.ram || 0, // MB
+          totalStorage: resourceUsage._sum.storage || 0, // GB
+          totalBandwidth: resourceUsage._sum.bandwidth || 0, // GB/month
         },
         averageHourlyRate: parseFloat((resourceUsage._avg.hourlyRate || 0).toFixed(4)),
       };
     } catch (error) {
-      throw new Error(`Failed to get VM statistics: ${getErrorMessage(error)}`);
+      throw new Error(`Failed to get VM statistics: ${error.message}`);
     }
   }
 
   /**
      * Get invoice statistics
+     * @returns {Promise<Object>} Invoice statistics
      */
-  static async getInvoiceStatistics(): Promise<InvoiceStatistics> {
+  static async getInvoiceStatistics() {
     try {
       const [total, byStatus, amounts, recentInvoices] = await Promise.all([
         prisma.invoice.count(),
@@ -288,7 +170,7 @@ class AdminService {
         }),
       ]);
 
-      const statusDistribution: Record<string, number> = {};
+      const statusDistribution = {};
       byStatus.forEach((item) => {
         statusDistribution[item.status] = item._count;
       });
@@ -297,22 +179,23 @@ class AdminService {
         total,
         statusDistribution,
         amounts: {
-          totalRevenue: parseFloat((amounts._sum?.amount || 0).toFixed(2)),
-          totalSubtotal: parseFloat((amounts._sum?.subtotal || 0).toFixed(2)),
-          totalTax: parseFloat((amounts._sum?.tax || 0).toFixed(2)),
-          totalDiscounts: parseFloat((amounts._sum?.discount || 0).toFixed(2)),
+          totalRevenue: parseFloat((amounts._sum.amount || 0).toFixed(2)),
+          totalSubtotal: parseFloat((amounts._sum.subtotal || 0).toFixed(2)),
+          totalTax: parseFloat((amounts._sum.tax || 0).toFixed(2)),
+          totalDiscounts: parseFloat((amounts._sum.discount || 0).toFixed(2)),
         },
         recentInvoices,
       };
     } catch (error) {
-      throw new Error(`Failed to get invoice statistics: ${getErrorMessage(error)}`);
+      throw new Error(`Failed to get invoice statistics: ${error.message}`);
     }
   }
 
   /**
      * Get payment statistics
+     * @returns {Promise<Object>} Payment statistics
      */
-  static async getPaymentStatistics(): Promise<PaymentStatistics> {
+  static async getPaymentStatistics() {
     try {
       const [total, byStatus, amounts] = await Promise.all([
         prisma.payment.count(),
@@ -328,7 +211,7 @@ class AdminService {
         }),
       ]);
 
-      const statusDistribution: Record<string, number> = {};
+      const statusDistribution = {};
       byStatus.forEach((item) => {
         statusDistribution[item.status] = item._count;
       });
@@ -339,14 +222,15 @@ class AdminService {
         totalProcessed: parseFloat((amounts._sum.amount || 0).toFixed(2)),
       };
     } catch (error) {
-      throw new Error(`Failed to get payment statistics: ${getErrorMessage(error)}`);
+      throw new Error(`Failed to get payment statistics: ${error.message}`);
     }
   }
 
   /**
      * Get usage statistics
+     * @returns {Promise<Object>} Usage statistics
      */
-  static async getUsageStatistics(): Promise<UsageStatistics> {
+  static async getUsageStatistics() {
     try {
       const [totalRecords, aggregation] = await Promise.all([
         prisma.usageRecord.count(),
@@ -367,22 +251,24 @@ class AdminService {
         totalRecords,
         totalCost: parseFloat((aggregation._sum.cost || 0).toFixed(2)),
         totalDuration: aggregation._sum.duration || 0,
-        totalBandwidth: parseFloat(((aggregation._sum.bandwidthUsage || 0) / 1024).toFixed(2)),
+        // bandwidthUsage is stored in GB; reported here in TB (GB / 1024).
+        totalBandwidthTB: parseFloat(((aggregation._sum.bandwidthUsage || 0) / 1024).toFixed(2)),
         averages: {
           cpu: parseFloat((aggregation._avg.cpuUsage || 0).toFixed(2)),
           ram: parseFloat((aggregation._avg.ramUsage || 0).toFixed(2)),
         },
       };
     } catch (error) {
-      throw new Error(`Failed to get usage statistics: ${getErrorMessage(error)}`);
+      throw new Error(`Failed to get usage statistics: ${error.message}`);
     }
   }
 
   /**
      * Get recent activity
-     * @param limit - Number of activities to retrieve
+     * @param {number} limit - Number of activities to retrieve
+     * @returns {Promise<Array>} Recent activities
      */
-  static async getRecentActivity(limit = 20): Promise<AuditLogWithUser[]> {
+  static async getRecentActivity(limit = 20) {
     try {
       const activities = await prisma.auditLog.findMany({
         take: limit,
@@ -401,7 +287,7 @@ class AdminService {
 
       return activities;
     } catch (error) {
-      throw new Error(`Failed to get recent activity: ${getErrorMessage(error)}`);
+      throw new Error(`Failed to get recent activity: ${error.message}`);
     }
   }
 
@@ -409,8 +295,9 @@ class AdminService {
 
   /**
      * Get system health status
+     * @returns {Promise<Object>} System health
      */
-  static async getSystemHealth(): Promise<SystemHealth> {
+  static async getSystemHealth() {
     try {
       const [dbHealth, vmHealth, serviceHealth] = await Promise.all([
         this.checkDatabaseHealth(),
@@ -434,7 +321,7 @@ class AdminService {
     } catch (error) {
       return {
         status: 'error',
-        error: getErrorMessage(error),
+        error: error.message,
         timestamp: new Date(),
       };
     }
@@ -442,8 +329,9 @@ class AdminService {
 
   /**
      * Check database health
+     * @returns {Promise<Object>} Database health status
      */
-  static async checkDatabaseHealth(): Promise<SubSystemHealth> {
+  static async checkDatabaseHealth() {
     try {
       const start = Date.now();
       await prisma.$queryRaw`SELECT 1`;
@@ -456,43 +344,45 @@ class AdminService {
     } catch (error) {
       return {
         status: 'unhealthy',
-        error: getErrorMessage(error),
+        error: error.message,
       };
     }
   }
 
   /**
      * Check VM health
+     * @returns {Promise<Object>} VM health status
      */
-  static async checkVMHealth(): Promise<SubSystemHealth> {
+  static async checkVMHealth() {
     try {
-      const [total, running, errorCount] = await Promise.all([
+      const [total, running, error] = await Promise.all([
         prisma.virtualMachine.count(),
         prisma.virtualMachine.count({ where: { status: 'RUNNING' } }),
         prisma.virtualMachine.count({ where: { status: 'ERROR' } }),
       ]);
 
-      const healthPercentage = total > 0 ? ((total - errorCount) / total) * 100 : 100;
+      const healthPercentage = total > 0 ? ((total - error) / total) * 100 : 100;
 
       return {
         status: healthPercentage >= 95 ? 'healthy' : 'degraded',
         total,
         running,
-        error: errorCount,
+        error,
         healthPercentage: parseFloat(healthPercentage.toFixed(2)),
       };
     } catch (error) {
       return {
         status: 'unhealthy',
-        error: getErrorMessage(error),
+        error: error.message,
       };
     }
   }
 
   /**
      * Check service health
+     * @returns {Promise<Object>} Service health status
      */
-  static async checkServiceHealth(): Promise<SubSystemHealth> {
+  static async checkServiceHealth() {
     try {
       // Check if critical services are running
       const checks = {
@@ -510,7 +400,7 @@ class AdminService {
     } catch (error) {
       return {
         status: 'unhealthy',
-        error: getErrorMessage(error),
+        error: error.message,
       };
     }
   }
@@ -519,8 +409,9 @@ class AdminService {
 
   /**
      * Get system resource usage
+     * @returns {Promise<Object>} Resource usage
      */
-  static async getSystemResourceUsage(): Promise<SystemResourceUsage> {
+  static async getSystemResourceUsage() {
     try {
       const [vmResources, limits] = await Promise.all([
         prisma.virtualMachine.aggregate({
@@ -565,51 +456,85 @@ class AdminService {
         },
       };
     } catch (error) {
-      throw new Error(`Failed to get system resource usage: ${getErrorMessage(error)}`);
+      throw new Error(`Failed to get system resource usage: ${error.message}`);
     }
   }
 
   /**
      * Get system resource limits
+     * @returns {Promise<Object>} Resource limits
      */
-  static async getSystemResourceLimits(): Promise<ResourceLimits> {
+  static async getSystemResourceLimits() {
     // In production, these would come from system configuration
     return {
-      cpu: parseInt(process.env.SYSTEM_CPU_LIMIT ?? '', 10) || 1000,
-      ram: parseInt(process.env.SYSTEM_RAM_LIMIT ?? '', 10) || 2048000, // 2TB in MB
-      storage: parseInt(process.env.SYSTEM_STORAGE_LIMIT ?? '', 10) || 100000, // 100TB in GB
-      bandwidth: parseInt(process.env.SYSTEM_BANDWIDTH_LIMIT ?? '', 10) || 1000000, // 1PB in GB
+      cpu: parseInt(process.env.SYSTEM_CPU_LIMIT) || 1000,
+      ram: parseInt(process.env.SYSTEM_RAM_LIMIT) || 2048000, // 2TB in MB
+      storage: parseInt(process.env.SYSTEM_STORAGE_LIMIT) || 100000, // 100TB in GB
+      bandwidth: parseInt(process.env.SYSTEM_BANDWIDTH_LIMIT) || 1000000, // 1PB in GB
     };
   }
 
   // ==================== Analytics ====================
 
   /**
-     * Get revenue analytics
-     * @param options - Query options
+     * Resolve a bounded [start, end] date range for analytics queries.
+     * Defaults to the last 30 days and clamps oversized ranges so the
+     * analytics endpoints never scan the full table.
+     * @param {Object} options - Query options with startDate/endDate
+     * @returns {Object} { start, end } Date range
      */
-  static async getRevenueAnalytics(options: AnalyticsOptions = {}): Promise<{
-        totalRevenue: number;
-        totalPayments: number;
-        revenueByPeriod: GroupedPeriod[];
-        paymentsByPeriod: GroupedPeriod[];
-    }> {
+  static resolveAnalyticsRange(options = {}) {
+    const { startDate, endDate } = options;
+
+    let start = startDate ? new Date(startDate) : null;
+    let end = endDate ? new Date(endDate) : null;
+
+    if (start && Number.isNaN(start.getTime())) {
+      throw badRequest('Invalid startDate');
+    }
+    if (end && Number.isNaN(end.getTime())) {
+      throw badRequest('Invalid endDate');
+    }
+
+    if (!end) end = new Date();
+    if (!start) start = new Date(end.getTime() - ANALYTICS_DEFAULT_RANGE_MS);
+
+    if (start > end) {
+      throw badRequest('startDate must be before endDate');
+    }
+
+    if (end.getTime() - start.getTime() > ANALYTICS_MAX_RANGE_MS) {
+      start = new Date(end.getTime() - ANALYTICS_MAX_RANGE_MS);
+    }
+
+    return { start, end };
+  }
+
+  /**
+     * Get revenue analytics
+     * @param {Object} options - Query options
+     * @returns {Promise<Object>} Revenue analytics
+     */
+  static async getRevenueAnalytics(options = {}) {
     try {
-      const { startDate, endDate, groupBy = 'day' } = options;
+      const { start, end } = this.resolveAnalyticsRange(options);
+      const groupBy = ['hour', 'day', 'week', 'month'].includes(options.groupBy)
+        ? options.groupBy
+        : 'day';
 
-      const where: Record<string, any> = {};
-      if (startDate || endDate) {
-        where.createdAt = {};
-        if (startDate) where.createdAt.gte = new Date(startDate);
-        if (endDate) where.createdAt.lte = new Date(endDate);
-      }
+      const where = { createdAt: { gte: start, lte: end } };
 
-      const [invoices, payments] = await Promise.all([
+      // Revenue counts PAID invoices only; payments stay COMPLETED.
+      const [revenueAggregate, paidInvoices, payments] = await Promise.all([
+        prisma.invoice.aggregate({
+          where: { ...where, status: 'PAID' },
+          _sum: { amount: true },
+          _count: true,
+        }),
         prisma.invoice.findMany({
-          where,
+          where: { ...where, status: 'PAID' },
           select: {
             amount: true,
-            status: true,
             createdAt: true,
           },
           orderBy: { createdAt: 'asc' },
@@ -628,44 +553,43 @@ class AdminService {
       ]);
 
       // Group by time period
-      const revenueByPeriod = this.groupByPeriod(invoices, groupBy, 'amount');
+      const revenueByPeriod = this.groupByPeriod(paidInvoices, groupBy, 'amount');
       const paymentsByPeriod = this.groupByPeriod(payments, groupBy, 'amount');
 
       return {
-        totalRevenue: invoices.reduce((sum, inv) => sum + Number(inv.amount), 0),
-        totalPayments: payments.reduce((sum, pay) => sum + Number(pay.amount), 0),
+        totalRevenue: parseFloat((revenueAggregate._sum.amount || 0).toFixed(2)),
+        paidInvoiceCount: revenueAggregate._count,
+        totalPayments: parseFloat(
+          payments.reduce((sum, pay) => sum + parseFloat(pay.amount), 0).toFixed(2),
+        ),
         revenueByPeriod,
         paymentsByPeriod,
+        range: { startDate: start.toISOString(), endDate: end.toISOString() },
       };
     } catch (error) {
-      throw new Error(`Failed to get revenue analytics: ${getErrorMessage(error)}`);
+      if (error.statusCode) throw error;
+      throw new Error(`Failed to get revenue analytics: ${error.message}`);
     }
   }
 
   /**
      * Get user growth analytics
-     * @param options - Query options
+     * @param {Object} options - Query options
+     * @returns {Promise<Object>} User growth analytics
      */
-  static async getUserGrowthAnalytics(options: AnalyticsOptions = {}): Promise<{
-        totalSignups: number;
-        signupsByPeriod: GroupedPeriod[];
-    }> {
+  static async getUserGrowthAnalytics(options = {}) {
     try {
-      const { startDate, endDate, groupBy = 'day' } = options;
+      const { start, end } = this.resolveAnalyticsRange(options);
+      const groupBy = ['hour', 'day', 'week', 'month'].includes(options.groupBy)
+        ? options.groupBy
+        : 'day';
 
-      const where: Record<string, any> = {};
-      if (startDate || endDate) {
-        where.createdAt = {};
-        if (startDate) where.createdAt.gte = new Date(startDate);
-        if (endDate) where.createdAt.lte = new Date(endDate);
-      }
+      const where = { createdAt: { gte: start, lte: end } };
 
       const users = await prisma.user.findMany({
         where,
         select: {
           createdAt: true,
-          isActive: true,
-          isVerified: true,
         },
         orderBy: { createdAt: 'asc' },
       });
@@ -675,24 +599,27 @@ class AdminService {
       return {
         totalSignups: users.length,
         signupsByPeriod,
+        range: { startDate: start.toISOString(), endDate: end.toISOString() },
       };
     } catch (error) {
-      throw new Error(`Failed to get user growth analytics: ${getErrorMessage(error)}`);
+      if (error.statusCode) throw error;
+      throw new Error(`Failed to get user growth analytics: ${error.message}`);
     }
   }
 
   /**
      * Group data by time period
-     * @param data - Data to group
-     * @param groupBy - Grouping period
-     * @param sumField - Field to sum (optional)
+     * @param {Array} data - Data to group
+     * @param {string} groupBy - Grouping period
+     * @param {string} sumField - Field to sum (optional)
+     * @returns {Array} Grouped data
      */
-  static groupByPeriod(data: GroupableItem[], groupBy: string, sumField: string | null = null): GroupedPeriod[] {
-    const grouped: Record<string, { period: string; count: number; total: number }> = {};
+  static groupByPeriod(data, groupBy, sumField = null) {
+    const grouped = {};
 
     data.forEach((item) => {
       const date = new Date(item.createdAt);
-      let key: string;
+      let key;
 
       switch (groupBy) {
         case 'hour':
@@ -701,12 +628,13 @@ class AdminService {
         case 'day':
           key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
           break;
-        case 'week': {
+        case 'week':
           const weekStart = new Date(date);
           weekStart.setDate(date.getDate() - date.getDay());
-          key = `${weekStart.getFullYear()}-W${String(Math.ceil((weekStart.getDate() + 1) / 7)).padStart(2, '0')}`;
+          // Key by the week-start date so weeks can never collide
+          // across months or years.
+          key = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`;
           break;
-        }
         case 'month':
           key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
           break;
@@ -739,17 +667,10 @@ class AdminService {
 
   /**
      * Get audit logs with filtering
-     * @param options - Query options
+     * @param {Object} options - Query options
+     * @returns {Promise<Object>} Paginated audit logs
      */
-  static async getAuditLogs(options: AuditLogOptions = {}): Promise<{
-        data: AuditLogWithUser[];
-        pagination: {
-            page: number;
-            limit: number;
-            total: number;
-            totalPages: number;
-        };
-    }> {
+  static async getAuditLogs(options = {}) {
     try {
       const {
         page = 1,
@@ -763,7 +684,7 @@ class AdminService {
         sortOrder = 'desc',
       } = options;
 
-      const where: Record<string, any> = {};
+      const where = {};
 
       if (userId) where.userId = userId;
       if (action) where.action = action;
@@ -775,13 +696,21 @@ class AdminService {
         if (endDate) where.timestamp.lte = new Date(endDate);
       }
 
-      const skip = (parseInt(String(page), 10) - 1) * parseInt(String(limit), 10);
+      // Clamp pagination and whitelist sortable columns — the column
+      // name and direction come straight from the client otherwise.
+      const SORTABLE_FIELDS = ['timestamp', 'action', 'resource', 'userId'];
+      const sortField = SORTABLE_FIELDS.includes(sortBy) ? sortBy : 'timestamp';
+      const sortDirection = String(sortOrder).toLowerCase() === 'asc' ? 'asc' : 'desc';
+      const pageNumber = Math.max(1, parseInt(page) || 1);
+      const limitNumber = Math.min(200, Math.max(1, parseInt(limit) || 50));
+
+      const skip = (pageNumber - 1) * limitNumber;
       const [logs, total] = await Promise.all([
         prisma.auditLog.findMany({
           where,
-          orderBy: { [sortBy]: sortOrder } as any,
+          orderBy: { [sortField]: sortDirection },
           skip,
-          take: parseInt(String(limit), 10),
+          take: limitNumber,
           include: {
             user: {
               select: {
@@ -799,16 +728,16 @@ class AdminService {
       return {
         data: logs,
         pagination: {
-          page: parseInt(String(page), 10),
-          limit: parseInt(String(limit), 10),
+          page: pageNumber,
+          limit: limitNumber,
           total,
-          totalPages: Math.ceil(total / parseInt(String(limit), 10)),
+          totalPages: Math.ceil(total / limitNumber),
         },
       };
     } catch (error) {
-      throw new Error(`Failed to get audit logs: ${getErrorMessage(error)}`);
+      throw new Error(`Failed to get audit logs: ${error.message}`);
     }
   }
 }
 
-export = AdminService;
+module.exports = AdminService;

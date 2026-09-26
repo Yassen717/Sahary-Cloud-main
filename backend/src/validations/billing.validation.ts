@@ -1,4 +1,5 @@
-import { z } from 'zod';
+// @ts-nocheck
+const { z } = require('zod');
 
 // Invoice query validation
 const invoiceQuerySchema = z.object({
@@ -28,7 +29,7 @@ const invoiceQuerySchema = z.object({
     endDate: z.string().datetime('Invalid end date format').optional(),
 
     sortBy: z
-      .enum(['createdAt', 'total', 'dueDate', 'status'])
+      .enum(['createdAt', 'amount', 'dueDate', 'status'])
       .optional()
       .default('createdAt'),
 
@@ -69,6 +70,7 @@ const usageQuerySchema = z.object({
       .string()
       .regex(/^\d+$/, 'Limit must be a positive integer')
       .transform(Number)
+      .refine((val) => val > 0 && val <= 100, 'Limit must be between 1 and 100')
       .optional()
       .default('100'),
   }),
@@ -100,6 +102,7 @@ const vmUsageQuerySchema = z.object({
       .string()
       .regex(/^\d+$/, 'Limit must be a positive integer')
       .transform(Number)
+      .refine((val) => val > 0 && val <= 100, 'Limit must be between 1 and 100')
       .optional()
       .default('100'),
   }),

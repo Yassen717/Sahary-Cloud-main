@@ -1,8 +1,8 @@
-import request from 'supertest';
-import app from '../src/index';
-import { prisma } from '../src/config/database';
-import AuthService from '../src/services/authService';
-import JWTUtils from '../src/utils/jwt';
+const request = require('supertest');
+const app = require('../src/index');
+const { prisma } = require('../src/config/database');
+const AuthService = require('../src/services/authService').default;
+const JWTUtils = require('../src/utils/jwt').default;
 
 // Test data
 const testUser = {
@@ -19,29 +19,54 @@ const testAdmin = {
   lastName: 'User',
 };
 
+// Second user that is never deactivated — 'Account Management' deactivates
+// testUser, so userToken is dead (401) for every test after that point.
+const freshUser = {
+  email: 'fresh@example.com',
+  password: 'FreshPassword123!',
+  firstName: 'Fresh',
+  lastName: 'User',
+};
+
 describe('Authentication API Integration Tests', () => {
-  let userToken: string;
-  let adminToken: string;
-  let userId: string;
-  let adminId: string;
+  let userToken;
+  let adminToken;
+  let freshUserToken;
+  let userId;
+  let adminId;
 
   beforeAll(async () => {
-    // Clean up leftover data owned by this suite's users only — other
-    // test files run in parallel against the same database.
-    await (global as any).cleanupTestUsers(prisma, [
-      testUser.email,
-      testAdmin.email,
-      'xss-test@example.com',
-    ]);
+    // Clean up existing test data
+    await prisma.auditLog.deleteMany({});
+    await prisma.session.deleteMany({});
+    await prisma.user.deleteMany({
+      where: {
+        email: {
+          in: [testUser.email, testAdmin.email, freshUser.email]
+        }
+      }
+    });
+
+    // Register the never-deactivated user and mint its token up front
+    const freshResult = await AuthService.register(freshUser);
+    freshUserToken = JWTUtils.generateAccessToken({
+      userId: freshResult.user.id,
+      email: freshUser.email,
+      role: freshResult.user.role || 'USER',
+    });
   });
 
   afterAll(async () => {
-    // Clean up after all tests — scoped to this suite's users only.
-    await (global as any).cleanupTestUsers(prisma, [
-      testUser.email,
-      testAdmin.email,
-      'xss-test@example.com',
-    ]);
+    // Clean up after all tests
+    await prisma.auditLog.deleteMany({});
+    await prisma.session.deleteMany({});
+    await prisma.user.deleteMany({
+      where: {
+        email: {
+          in: [testUser.email, testAdmin.email, freshUser.email]
+        }
+      }
+    });
     await prisma.$disconnect();
   });
 
@@ -132,7 +157,7 @@ describe('Authentication API Integration Tests', () => {
         });
 
       const refreshToken = loginResponse.body.data.tokens?.refreshToken;
-
+      
       if (refreshToken) {
         const response = await request(app)
           .post('/api/v1/auth/refresh')
@@ -184,12 +209,6 @@ describe('Authentication API Integration Tests', () => {
 
   describe('Password Operations', () => {
     test('should change password', async () => {
-      // change-password requires a verified email; mark the test user verified.
-      await prisma.user.update({
-        where: { id: userId },
-        data: { isVerified: true }
-      });
-
       const newPassword = 'NewPassword123!';
 
       const response = await request(app)
@@ -226,7 +245,7 @@ describe('Authentication API Integration Tests', () => {
 
       if (resetRequest.body.data?.resetToken) {
         const newPassword = 'ResetPassword123!';
-
+        
         const response = await request(app)
           .post('/api/v1/auth/reset-password')
           .send({
@@ -252,10 +271,10 @@ describe('Authentication API Integration Tests', () => {
         select: { emailVerificationToken: true }
       });
 
-      if (user!.emailVerificationToken) {
+      if (user.emailVerificationToken) {
         const response = await request(app)
           .post('/api/v1/auth/verify-email')
-          .send({ token: user!.emailVerificationToken });
+          .send({ token: user.emailVerificationToken });
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
@@ -264,29 +283,12 @@ describe('Authentication API Integration Tests', () => {
     });
 
     test('should resend verification email', async () => {
-      // Use a fresh unverified user — testUser is already verified at this point,
-      // and resending for a verified account correctly returns an error.
-      const unverifiedEmail = 'resend-verification@example.com';
-      await prisma.user.deleteMany({ where: { email: unverifiedEmail } });
-
-      const registerResponse = await request(app)
-        .post('/api/v1/auth/register')
-        .send({
-          email: unverifiedEmail,
-          password: 'TestPassword123!',
-          firstName: 'Resend',
-          lastName: 'Verification',
-        });
-      expect(registerResponse.status).toBe(201);
-
       const response = await request(app)
         .post('/api/v1/auth/resend-verification')
-        .send({ email: unverifiedEmail });
+        .send({ email: testUser.email });
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-
-      await prisma.user.deleteMany({ where: { email: unverifiedEmail } });
     });
   });
 
@@ -382,10 +384,10 @@ describe('Authentication API Integration Tests', () => {
       const adminResult = await AuthService.register({
         ...testAdmin,
         role: 'SUPER_ADMIN',
-      } as any);
-
+      });
+      
       adminId = adminResult.user.id;
-
+      
       // Update user role to SUPER_ADMIN
       await prisma.user.update({
         where: { id: adminId },
@@ -413,16 +415,11 @@ describe('Authentication API Integration Tests', () => {
     });
 
     test('should not impersonate as regular user', async () => {
-      // The account was deactivated in the previous describe — reactivate it so
-      // the regular user's token authenticates and the permission check runs.
-      await prisma.user.update({
-        where: { id: userId },
-        data: { isActive: true }
-      });
-
+      // userToken is dead here (testUser was deactivated above) — a live
+      // regular-user token is required to reach the permission check (403).
       const response = await request(app)
         .post('/api/v1/auth/impersonate')
-        .set('Authorization', `Bearer ${userToken}`)
+        .set('Authorization', `Bearer ${freshUserToken}`)
         .send({ targetUserId: adminId });
 
       expect(response.status).toBe(403);
@@ -434,7 +431,7 @@ describe('Authentication API Integration Tests', () => {
     test('should check authentication status', async () => {
       const response = await request(app)
         .get('/api/v1/auth/check')
-        .set('Authorization', `Bearer ${userToken}`);
+        .set('Authorization', `Bearer ${freshUserToken}`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -453,7 +450,7 @@ describe('Authentication API Integration Tests', () => {
     test('should logout successfully', async () => {
       const response = await request(app)
         .post('/api/v1/auth/logout')
-        .set('Authorization', `Bearer ${userToken}`);
+        .set('Authorization', `Bearer ${freshUserToken}`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -473,7 +470,7 @@ describe('Authentication API Integration Tests', () => {
   describe('Rate Limiting', () => {
     test('should apply rate limiting to auth endpoints', async () => {
       // Make multiple rapid requests to test rate limiting
-      const promises = Array(10).fill(undefined).map(() =>
+      const promises = Array(10).fill().map(() =>
         request(app)
           .post('/api/v1/auth/login')
           .send({
@@ -483,7 +480,7 @@ describe('Authentication API Integration Tests', () => {
       );
 
       const responses = await Promise.all(promises);
-
+      
       // Some requests should be rate limited
       const rateLimitedResponses = responses.filter(res => res.status === 429);
       expect(rateLimitedResponses.length).toBeGreaterThan(0);
@@ -511,7 +508,7 @@ describe('Authentication API Integration Tests', () => {
       const response = await request(app)
         .post('/api/v1/auth/register')
         .send({
-          email: 'xss-test@example.com',
+          email: 'test@example.com',
           password: 'TestPassword123!',
           firstName: '<script>alert("xss")</script>John',
           lastName: 'Doe<img src=x onerror=alert(1)>',

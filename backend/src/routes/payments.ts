@@ -15,17 +15,20 @@ const {
 
 const router = express.Router();
 
+// Stripe signature verification needs the exact raw body, so the webhook is
+// registered BEFORE sanitizeInput()/xssProtection() — those middlewares must
+// never touch the payload.
+router.post('/webhook', express.raw({ type: 'application/json' }), PaymentController.handleWebhook);
+
 router.use(sanitizeInput());
 router.use(xssProtection());
-
-router.post('/webhook', express.raw({ type: 'application/json' }), PaymentController.handleWebhook);
 
 router.post(
   '/intent/:invoiceId',
   apiRateLimit(),
-  validate(paymentIntentSchema),
   authenticate,
   requireEmailVerification,
+  validate(paymentIntentSchema),
   requirePermission('payment:create'),
   PaymentController.createPaymentIntent,
 );
@@ -33,9 +36,9 @@ router.post(
 router.post(
   '/process/:invoiceId',
   apiRateLimit(),
-  validate(processPaymentSchema),
   authenticate,
   requireEmailVerification,
+  validate(processPaymentSchema),
   requirePermission('payment:create'),
   PaymentController.processPayment,
 );
@@ -43,8 +46,8 @@ router.post(
 router.get(
   '/',
   apiRateLimit(),
-  validate(paymentQuerySchema),
   authenticate,
+  validate(paymentQuerySchema),
   requirePermission('payment:read:own'),
   PaymentController.getUserPayments,
 );
@@ -68,8 +71,8 @@ router.get('/health', (_req: unknown, res: { status(code: number): { json(payloa
 router.get(
   '/:id',
   apiRateLimit(),
-  validate(paymentIdSchema),
   authenticate,
+  validate(paymentIdSchema),
   requireAnyPermission('payment:read:own', 'payment:read:all'),
   PaymentController.getPaymentById,
 );
@@ -77,8 +80,8 @@ router.get(
 router.post(
   '/:id/refund',
   apiRateLimit(),
-  validate(refundPaymentSchema),
   authenticate,
+  validate(refundPaymentSchema),
   requirePermission('payment:refund'),
   PaymentController.refundPayment,
 );

@@ -17,9 +17,16 @@ const getHeaderValue = (value: string | string[] | undefined): string | undefine
   return undefined;
 };
 
+// Client-supplied IDs are echoed into a response header and log lines, so
+// they must be restricted to a safe shape — anything else (invalid header
+// chars, forged log lines) falls back to a generated UUID.
+const CORRELATION_ID_PATTERN = /^[\w-]{1,128}$/;
+
+const sanitizeCorrelationId = (value: string | undefined): string | undefined => (value && CORRELATION_ID_PATTERN.test(value) ? value : undefined);
+
 const correlationId = (req: CorrelationRequest, res: Response, next: NextFunction): void => {
-  const id = getHeaderValue(req.headers['x-correlation-id'])
-    || getHeaderValue(req.headers['x-request-id'])
+  const id = sanitizeCorrelationId(getHeaderValue(req.headers['x-correlation-id']))
+    || sanitizeCorrelationId(getHeaderValue(req.headers['x-request-id']))
     || randomUUID();
 
   req.correlationId = id;

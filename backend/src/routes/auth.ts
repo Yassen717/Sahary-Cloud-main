@@ -2,7 +2,9 @@
 const express = require('express');
 const AuthController = require('../controllers/authController');
 const { validate } = require('../middlewares/validation');
-const { authenticate, requireEmailVerification } = require('../middlewares/auth');
+const {
+  authenticate, requireEmailVerification, requireSuperAdmin,
+} = require('../middlewares/auth');
 const {
   authRateLimit,
   apiRateLimit,
@@ -292,6 +294,7 @@ router.post(
   '/impersonate',
   authRateLimit(),
   authenticate,
+  requireSuperAdmin,
   validate(impersonateUserSchema),
   AuthController.impersonateUser,
 );
@@ -343,7 +346,7 @@ router.post(
 );
 
 // Health check for auth routes
-router.get('/health', (_req: unknown, res: { status(code: number): { json(payload: unknown): void } }) => {
+router.get('/health', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'Auth routes are healthy',

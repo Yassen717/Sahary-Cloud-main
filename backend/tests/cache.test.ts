@@ -1,5 +1,5 @@
-import cacheMonitorService from '../src/services/cacheMonitorService';
-import redisService from '../src/services/redisService';
+const cacheMonitorService = require('../src/services/cacheMonitorService');
+const redisService = require('../src/services/redisService');
 
 describe('Cache Monitor Service', () => {
   beforeAll(async () => {
@@ -139,11 +139,12 @@ describe('Cache Monitor Service', () => {
     });
 
     it('should return warning status with low hit rate', async () => {
-      // Simulate poor cache performance
+      // Simulate poor cache performance. The service warns when
+      // hitRate < 50 AND total > 100, so exceed 100 records here
+      // (40/101 ≈ 39.6% hit rate).
       for (let i = 0; i < 40; i++) {
         cacheMonitorService.recordHit(`key${i}`);
       }
-      // 61 misses -> 101 total lookups, above the health check's >100 threshold
       for (let i = 0; i < 61; i++) {
         cacheMonitorService.recordMiss(`key${i}`);
       }
@@ -170,7 +171,7 @@ describe('Cache Monitor Service', () => {
 
   describe('Cache Warmup', () => {
     it('should warm up cache with provided functions', async () => {
-      const warmupFunctions: Array<() => Promise<void>> = [
+      const warmupFunctions = [
         async () => {
           await redisService.set('cache:warmup:1', 'data1', 60);
         },
@@ -192,7 +193,7 @@ describe('Cache Monitor Service', () => {
     });
 
     it('should handle warmup function errors gracefully', async () => {
-      const warmupFunctions: Array<() => Promise<void>> = [
+      const warmupFunctions = [
         async () => {
           throw new Error('Warmup error');
         },

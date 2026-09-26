@@ -22,13 +22,15 @@ const config: AppConfig = {
     password: process.env.REDIS_PASSWORD || '',
   },
   jwt: {
-    secret: process.env.JWT_SECRET,
+    // Secrets are typed required: validateEnv()/validateAuthConfig() throw at
+    // boot when they're missing, so the cast documents that contract.
+    secret: process.env.JWT_SECRET as string,
     expiresIn: process.env.JWT_EXPIRE || '15m',
-    refreshSecret: process.env.JWT_REFRESH_SECRET,
+    refreshSecret: process.env.JWT_REFRESH_SECRET as string,
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRE || '7d',
   },
   session: {
-    secret: process.env.SESSION_SECRET,
+    secret: process.env.SESSION_SECRET as string,
     maxAge: parseInt(process.env.SESSION_MAX_AGE || '86400000', 10),
   },
   email: {

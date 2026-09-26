@@ -1,37 +1,11 @@
+// @ts-nocheck
 const redisService = require('./redisService');
-
-const getErrorMessage = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return 'Unknown error';
-};
-
-type CacheStats = {
-  hits: number;
-  misses: number;
-  sets: number;
-  deletes: number;
-  errors: number;
-};
-
-type WarmupFunction = () => Promise<unknown>;
-
-type PatternBucket = {
-  count: number;
-  keys: string[];
-};
 
 /**
  * Cache Monitor Service
  * Monitors cache performance and provides analytics
  */
 class CacheMonitorService {
-  stats: CacheStats;
-
-  startTime: number;
-
   constructor() {
     this.stats = {
       hits: 0,
@@ -44,47 +18,79 @@ class CacheMonitorService {
   }
 
   /**
-   * Record cache hit
+   * Iterate keys matching a pattern via SCAN instead of KEYS, which blocks
+   * Redis on large keyspaces. Falls back to KEYS when the client does not
+   * expose a scan iterator.
+   * @param {string} pattern - Key pattern (e.g. 'cache:*')
+   * @returns {Promise<Array>} Matching keys
    */
-  recordHit(key: string): void {
+  async scanKeys(pattern) {
+    const client = redisService.getClient();
+
+    if (typeof client.scanIterator === 'function') {
+      const keys = [];
+      for await (const batch of client.scanIterator({ MATCH: pattern, COUNT: 100 })) {
+        if (Array.isArray(batch)) {
+          keys.push(...batch);
+        } else {
+          keys.push(batch);
+        }
+      }
+      return keys;
+    }
+
+    return redisService.keys(pattern);
+  }
+
+  /**
+   * Record cache hit
+   * @param {string} key - Cache key
+   */
+  recordHit(key) {
     this.stats.hits++;
     console.log(`✅ Cache HIT: ${key} (Total: ${this.stats.hits})`);
   }
 
   /**
    * Record cache miss
+   * @param {string} key - Cache key
    */
-  recordMiss(key: string): void {
+  recordMiss(key) {
     this.stats.misses++;
     console.log(`❌ Cache MISS: ${key} (Total: ${this.stats.misses})`);
   }
 
   /**
    * Record cache set
+   * @param {string} key - Cache key
    */
-  recordSet(_key: string): void {
+  recordSet(_key) {
     this.stats.sets++;
   }
 
   /**
    * Record cache delete
+   * @param {string} key - Cache key
    */
-  recordDelete(_key: string): void {
+  recordDelete(_key) {
     this.stats.deletes++;
   }
 
   /**
    * Record cache error
+   * @param {string} key - Cache key
+   * @param {Error} error - Error object
    */
-  recordError(key: string, error: Error): void {
+  recordError(key, error) {
     this.stats.errors++;
     console.error(`❌ Cache ERROR for ${key}:`, error.message);
   }
 
   /**
    * Get cache statistics
+   * @returns {Object} Cache statistics
    */
-  getStats(): Record<string, any> {
+  getStats() {
     const total = this.stats.hits + this.stats.misses;
     const hitRate = total > 0 ? (this.stats.hits / total) * 100 : 0;
     const uptime = Date.now() - this.startTime;
@@ -105,7 +111,7 @@ class CacheMonitorService {
   /**
    * Reset statistics
    */
-  resetStats(): void {
+  resetStats() {
     this.stats = {
       hits: 0,
       misses: 0,
@@ -119,10 +125,12 @@ class CacheMonitorService {
 
   /**
    * Get cache size by pattern
+   * @param {string} pattern - Key pattern
+   * @returns {Promise<Object>} Size information
    */
-  async getCacheSize(pattern = '*'): Promise<Record<string, any>> {
+  async getCacheSize(pattern = '*') {
     try {
-      const keys = await redisService.keys(pattern);
+      const keys = await this.scanKeys(pattern);
       let totalSize = 0;
 
       for (const key of keys) {
@@ -143,18 +151,20 @@ class CacheMonitorService {
       return {
         keys: 0,
         sizeBytes: 0,
-        error: getErrorMessage(error),
+        error: error.message,
       };
     }
   }
 
   /**
    * Get top cached keys
+   * @param {number} limit - Number of keys to return
+   * @returns {Promise<Array>} Top keys with TTL
    */
-  async getTopKeys(limit = 10): Promise<Array<Record<string, any>>> {
+  async getTopKeys(limit = 10) {
     try {
-      const keys = await redisService.keys('cache:*');
-      const keyInfo: Array<{ key: string; ttl: number; expiresIn: string }> = [];
+      const keys = await this.scanKeys('cache:*');
+      const keyInfo = [];
 
       for (const key of keys.slice(0, limit)) {
         const ttl = await redisService.ttl(key);
@@ -174,11 +184,12 @@ class CacheMonitorService {
 
   /**
    * Analyze cache patterns
+   * @returns {Promise<Object>} Pattern analysis
    */
-  async analyzeCachePatterns(): Promise<Record<string, any>> {
+  async analyzeCachePatterns() {
     try {
-      const keys = await redisService.keys('cache:*');
-      const patterns: Record<string, PatternBucket> = {};
+      const keys = await this.scanKeys('cache:*');
+      const patterns = {};
 
       for (const key of keys) {
         const parts = key.split(':');
@@ -213,22 +224,23 @@ class CacheMonitorService {
       return {
         totalKeys: 0,
         patterns: [],
-        error: getErrorMessage(error),
+        error: error.message,
       };
     }
   }
 
   /**
    * Get cache health status
+   * @returns {Promise<Object>} Health status
    */
-  async getHealthStatus(): Promise<Record<string, any>> {
+  async getHealthStatus() {
     try {
       const stats = this.getStats();
       const redisStats = await redisService.getStats();
       const cacheSize = await this.getCacheSize('cache:*');
 
       let status = 'healthy';
-      const issues: string[] = [];
+      const issues = [];
 
       // Check hit rate
       if (stats.hitRate < 50 && stats.total > 100) {
@@ -263,7 +275,7 @@ class CacheMonitorService {
     } catch (error) {
       return {
         status: 'error',
-        issues: [getErrorMessage(error)],
+        issues: [error.message],
         timestamp: new Date().toISOString(),
       };
     }
@@ -271,10 +283,11 @@ class CacheMonitorService {
 
   /**
    * Optimize cache (remove expired keys, etc.)
+   * @returns {Promise<Object>} Optimization result
    */
-  async optimizeCache(): Promise<Record<string, any>> {
+  async optimizeCache() {
     try {
-      const keys = await redisService.keys('cache:*');
+      const keys = await this.scanKeys('cache:*');
       let removed = 0;
 
       for (const key of keys) {
@@ -297,15 +310,17 @@ class CacheMonitorService {
       console.error('Error optimizing cache:', error);
       return {
         success: false,
-        error: getErrorMessage(error),
+        error: error.message,
       };
     }
   }
 
   /**
    * Warm up cache with frequently accessed data
+   * @param {Array} warmupFunctions - Array of functions to warm up cache
+   * @returns {Promise<Object>} Warmup result
    */
-  async warmupCache(warmupFunctions: WarmupFunction[] = []): Promise<Record<string, any>> {
+  async warmupCache(warmupFunctions = []) {
     try {
       let warmedUp = 0;
 
@@ -330,13 +345,10 @@ class CacheMonitorService {
       console.error('Error warming up cache:', error);
       return {
         success: false,
-        error: getErrorMessage(error),
+        error: error.message,
       };
     }
   }
 }
 
-// Export singleton instance (module.exports shape preserved via export =)
-const cacheMonitorService = new CacheMonitorService();
-
-export = cacheMonitorService;
+module.exports = new CacheMonitorService();

@@ -1,23 +1,16 @@
-import logger from '../utils/logger';
-
-// BillingService is intentionally loaded via require: the runtime JS module's
-// return shapes differ from the migrated service's declared types, and require
-// keeps this job typed against what it actually consumes.
-const BillingService = require('../services/billingService');
+// @ts-nocheck
+const BillingService = require('../services/billingService').default;
+const logger = require('../utils/logger').default;
 
 /**
  * Usage Collector Job
  * Periodically collects usage data from running VMs
  */
 class UsageCollector {
-  intervalId: NodeJS.Timeout | null = null;
-
-  isRunning = false;
-
-  collectionInterval: number;
-
   constructor() {
-    this.collectionInterval = Number.parseInt(process.env.USAGE_COLLECTION_INTERVAL || '', 10) || 5 * 60 * 1000; // 5 minutes default
+    this.intervalId = null;
+    this.isRunning = false;
+    this.collectionInterval = parseInt(process.env.USAGE_COLLECTION_INTERVAL) || 5 * 60 * 1000; // 5 minutes default
   }
 
   /**
@@ -69,7 +62,9 @@ class UsageCollector {
       logger.info('Starting usage collection cycle');
 
       const startTime = Date.now();
-      const results = await BillingService.collectAllRunningVMsUsage();
+      const results = await BillingService.collectAllRunningVMsUsage({
+        intervalMs: this.collectionInterval,
+      });
       const duration = Date.now() - startTime;
 
       logger.info('Usage collection completed', {
@@ -88,10 +83,9 @@ class UsageCollector {
 
       return results;
     } catch (error) {
-      const err = error as Error;
       logger.error('Usage collection failed', {
-        error: err.message,
-        stack: err.stack,
+        error: error.message,
+        stack: error.stack,
       });
     }
   }
@@ -109,9 +103,9 @@ class UsageCollector {
 
   /**
    * Update collection interval
-   * @param intervalMs - New interval in milliseconds
+   * @param {number} intervalMs - New interval in milliseconds
    */
-  updateInterval(intervalMs: number) {
+  updateInterval(intervalMs) {
     if (intervalMs < 60000) {
       throw new Error('Collection interval must be at least 1 minute');
     }
@@ -130,4 +124,4 @@ class UsageCollector {
 // Create singleton instance
 const usageCollector = new UsageCollector();
 
-export = usageCollector;
+module.exports = usageCollector;

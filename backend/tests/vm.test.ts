@@ -4,7 +4,6 @@ const { prisma } = require('../src/config/database');
 const VMService = require('../src/services/vmService').default;
 const AuthService = require('../src/services/authService').default;
 const JWTUtils = require('../src/utils/jwt').default;
-const dockerService = require('../src/services/dockerService').default;
 
 // Test data
 const testUser = {
@@ -32,20 +31,24 @@ const testVM = {
 };
 
 describe('VM Service', () => {
-  let userId: any;
-  let adminId: any;
-  let userToken: any;
-  let adminToken: any;
-  let vmId: any;
+  let userId;
+  let adminId;
+  let userToken;
+  let adminToken;
+  let vmId;
 
   beforeAll(async () => {
-    // Clean up leftover data owned by this suite's users only — other
-    // test files run in parallel against the same database.
-    await (global as any).cleanupTestUsers(prisma, [testUser.email, testAdmin.email]);
-
-    // Connect to the Docker daemon — startVM needs system info for
-    // resource validation (same as application startup).
-    await dockerService.connect();
+    // Clean up existing test data
+    await prisma.usageRecord.deleteMany({});
+    await prisma.virtualMachine.deleteMany({});
+    await prisma.auditLog.deleteMany({});
+    await prisma.user.deleteMany({
+      where: {
+        email: {
+          in: [testUser.email, testAdmin.email]
+        }
+      }
+    });
 
     // Create test user
     const userResult = await AuthService.register(testUser);
@@ -77,8 +80,17 @@ describe('VM Service', () => {
   });
 
   afterAll(async () => {
-    // Clean up after all tests — scoped to this suite's users only.
-    await (global as any).cleanupTestUsers(prisma, [testUser.email, testAdmin.email]);
+    // Clean up after all tests
+    await prisma.usageRecord.deleteMany({});
+    await prisma.virtualMachine.deleteMany({});
+    await prisma.auditLog.deleteMany({});
+    await prisma.user.deleteMany({
+      where: {
+        email: {
+          in: [testUser.email, testAdmin.email]
+        }
+      }
+    });
     await prisma.$disconnect();
   });
 
@@ -93,7 +105,7 @@ describe('VM Service', () => {
       expect(vm.storage).toBe(testVM.storage);
       expect(vm.status).toBe('STOPPED');
       expect(vm.userId).toBe(userId);
-      expect(Number(vm.hourlyRate)).toBeGreaterThan(0);
+      expect(vm.hourlyRate).toBeGreaterThan(0);
 
       vmId = vm.id;
     });
@@ -138,7 +150,7 @@ describe('VM Service', () => {
       const result = await VMService.getUserVMs(userId, { status: 'STOPPED' });
 
       expect(result.data).toBeInstanceOf(Array);
-      result.data.forEach((vm: any) => {
+      result.data.forEach(vm => {
         expect(vm.status).toBe('STOPPED');
       });
     });
@@ -147,7 +159,7 @@ describe('VM Service', () => {
       const result = await VMService.getUserVMs(userId, { search: 'test' });
 
       expect(result.data).toBeInstanceOf(Array);
-      result.data.forEach((vm: any) => {
+      result.data.forEach(vm => {
         expect(vm.name.toLowerCase()).toContain('test');
       });
     });
@@ -168,7 +180,7 @@ describe('VM Service', () => {
       expect(updatedVM.description).toBe(updateData.description);
       expect(updatedVM.cpu).toBe(updateData.cpu);
       expect(updatedVM.ram).toBe(updateData.ram);
-      expect(Number(updatedVM.hourlyRate)).toBeGreaterThan(0);
+      expect(updatedVM.hourlyRate).toBeGreaterThan(0);
     });
 
     test('should not update VM with invalid resources', async () => {
@@ -188,26 +200,16 @@ describe('VM Service', () => {
     test('should start VM successfully', async () => {
       const vm = await VMService.startVM(vmId, userId);
 
-      // startVM completes the start synchronously and returns the final
-      // record (identical in the original JS implementation).
+      // startVM awaits the Docker start and re-fetches the VM, so the
+      // returned record is already RUNNING (STARTING is never returned).
       expect(vm.status).toBe('RUNNING');
-      
-      // Wait for async status update
-      await new Promise(resolve => setTimeout(resolve, 2500));
-      
+
       const updatedVM = await VMService.getVMById(vmId, userId);
       expect(updatedVM.status).toBe('RUNNING');
       expect(updatedVM.ipAddress).toBeDefined();
     });
 
     test('should not start already running VM', async () => {
-      // Put the VM into RUNNING state directly — a real start requires a
-      // reachable Docker daemon, which is not guaranteed in this environment.
-      await prisma.virtualMachine.update({
-        where: { id: vmId },
-        data: { status: 'RUNNING' },
-      });
-
       await expect(VMService.startVM(vmId, userId)).rejects.toThrow('already running');
     });
 
@@ -226,12 +228,10 @@ describe('VM Service', () => {
     test('should stop running VM', async () => {
       const vm = await VMService.stopVM(vmId, userId);
 
-      // stopVM completes the stop synchronously and returns the final record
+      // stopVM awaits the Docker stop and re-fetches the VM, so the
+      // returned record is already STOPPED (STOPPING is never returned).
       expect(vm.status).toBe('STOPPED');
-      
-      // Wait for async status update
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
+
       const updatedVM = await VMService.getVMById(vmId, userId);
       expect(updatedVM.status).toBe('STOPPED');
     });
@@ -314,12 +314,9 @@ describe('VM Service', () => {
 
   describe('VM Deletion', () => {
     test('should not delete running VM', async () => {
-      // Put the VM into RUNNING state directly — a real start requires a
-      // reachable Docker daemon, which is not guaranteed in this environment.
-      await prisma.virtualMachine.update({
-        where: { id: vmId },
-        data: { status: 'RUNNING' },
-      });
+      // Start VM first
+      await VMService.startVM(vmId, userId);
+      await new Promise(resolve => setTimeout(resolve, 2500));
 
       await expect(VMService.deleteVM(vmId, userId)).rejects.toThrow('Cannot delete running VM');
     });
@@ -339,19 +336,11 @@ describe('VM Service', () => {
 });
 
 describe('VM API Integration Tests', () => {
-  let userId: any;
-  let userToken: any;
-  let vmId: any;
+  let userId;
+  let userToken;
+  let vmId;
 
   beforeAll(async () => {
-    // Clean up leftover data owned by this suite's users only — other
-    // test files run in parallel against the same database.
-    await (global as any).cleanupTestUsers(prisma, ['vmapi@example.com']);
-
-    // Connect to the Docker daemon — the API start endpoint creates a
-    // real container, which needs Docker system info for validation.
-    await dockerService.connect();
-
     // Create test user
     const userResult = await AuthService.register({
       email: 'vmapi@example.com',
@@ -371,8 +360,12 @@ describe('VM API Integration Tests', () => {
   });
 
   afterAll(async () => {
-    // Clean up — scoped to this suite's users only.
-    await (global as any).cleanupTestUsers(prisma, ['vmapi@example.com']);
+    // Clean up
+    await prisma.usageRecord.deleteMany({});
+    await prisma.virtualMachine.deleteMany({});
+    await prisma.user.deleteMany({
+      where: { email: 'vmapi@example.com' }
+    });
   });
 
   describe('VM CRUD Operations', () => {
@@ -449,10 +442,12 @@ describe('VM API Integration Tests', () => {
         .post('/api/v1/vms/pricing')
         .set('Authorization', `Bearer ${userToken}`)
         .send({
-          cpu: 2,
-          ram: 2048,
-          storage: 40,
-          bandwidth: 1000,
+          resources: {
+            cpu: 2,
+            ram: 2048,
+            storage: 40,
+            bandwidth: 1000,
+          },
           duration: 24, // 24 hours
         });
 
@@ -471,8 +466,8 @@ describe('VM API Integration Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      // startVM completes the start synchronously and returns the final
-      // record (identical in the original JS implementation).
+      // The start endpoint returns the VM after the awaited Docker start —
+      // status is already RUNNING, never the transitional STARTING.
       expect(response.body.data.vm.status).toBe('RUNNING');
     });
 
@@ -486,7 +481,8 @@ describe('VM API Integration Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      // stopVM completes the stop synchronously and returns the final record
+      // The stop endpoint returns the VM after the awaited Docker stop —
+      // status is already STOPPED, never the transitional STOPPING.
       expect(response.body.data.vm.status).toBe('STOPPED');
     });
 
@@ -539,9 +535,10 @@ describe('VM API Integration Tests', () => {
           storage: 20,
         });
 
-      if (response.status === 201) {
-        expect(response.body.data.vm.description).not.toContain('<script>');
-      }
+      // Assert the precondition instead of silently skipping: VM creation
+      // is a DB-only operation and should succeed without Docker.
+      expect(response.status).toBe(201);
+      expect(response.body.data.vm.description).not.toContain('<script>');
     });
   });
 });

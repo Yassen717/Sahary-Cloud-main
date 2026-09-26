@@ -1,78 +1,18 @@
-import logger from '../utils/logger';
-
-type ErrorStats = {
-  totalErrors: number;
-  errorsByType: Record<string, number>;
-  recentErrors: unknown[];
-};
-
-type ErrorStatsResult = {
-  totalErrors: number;
-  errorsByType: Record<string, number>;
-  recentErrors?: unknown[];
-  error?: string;
-};
-
-type ErrorTrends = {
-  period: string;
-  data: Array<{ errorName: string; count: number }>;
-  summary: {
-    total: number;
-    average: number;
-    peak: number;
-  };
-};
-
-type ErrorTrendsResult = {
-  period: string;
-  data: Array<{ errorName: string; count: number }>;
-  summary?: {
-    total: number;
-    average: number;
-    peak: number;
-  };
-  error?: string;
-};
-
-type TrackedErrorData = {
-  name: string;
-  message: string;
-  stack: string | undefined;
-  statusCode: number;
-  errorCode: string;
-  context: string;
-  timestamp: Date;
-};
-
-type TrackableError = Error & {
-  statusCode?: number;
-  errorCode?: string | null;
-};
-
-type ErrorStatsOptions = {
-  startDate?: string;
-  endDate?: string;
-  errorName?: string;
-  limit?: number;
-};
-
-const getErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+// @ts-nocheck
+const logger = require('../utils/logger').default;
 
 /**
  * Error Tracking Service
  * Tracks and reports application errors
  */
 class ErrorTrackingService {
-  errorCounts: Map<string, number[]>;
-
-  errorThreshold: number;
-
-  timeWindow: number;
-
   constructor() {
-    this.errorCounts = new Map();
-    this.errorThreshold = parseInt(process.env.ERROR_THRESHOLD || '') || 10;
-    this.timeWindow = parseInt(process.env.ERROR_TIME_WINDOW || '') || 60000; // 1 minute
+    this.errorCounts = new Map(); // errorName -> [timestamps]
+    this.lastNotifiedAt = new Map(); // errorName -> timestamp of last alert
+    this.errorThreshold = parseInt(process.env.ERROR_THRESHOLD) || 10;
+    this.timeWindow = parseInt(process.env.ERROR_TIME_WINDOW) || 60000; // 1 minute
+    this.maxErrorNames = 500; // bound distinct error names held in memory
+    this.maxTimestampsPerName = 1000; // bound per-name timestamp history
   }
 
   /**
@@ -81,9 +21,9 @@ class ErrorTrackingService {
    * @param {Object} context - Error context
    * @returns {Promise<Object>} Tracked error
    */
-  async trackError(error: TrackableError, context: Record<string, unknown> = {}): Promise<TrackedErrorData | null> {
+  async trackError(error, context = {}) {
     try {
-      const errorData: TrackedErrorData = {
+      const errorData = {
         name: error.name,
         message: error.message,
         stack: error.stack,
@@ -99,10 +39,19 @@ class ErrorTrackingService {
       // Track in memory for rate limiting
       this.incrementErrorCount(error.name);
 
-      // Check if error rate is too high
+      // Check if error rate is too high — notify at most once per name per
+      // window instead of on every error once the threshold is crossed.
       if (this.isErrorRateTooHigh(error.name)) {
-        logger.warn(`High error rate detected for ${error.name}`);
-        await this.notifyHighErrorRate(error.name);
+        const lastNotified = this.lastNotifiedAt.get(error.name) || 0;
+        if (Date.now() - lastNotified >= this.timeWindow) {
+          this.lastNotifiedAt.set(error.name, Date.now());
+          if (this.lastNotifiedAt.size > this.maxErrorNames) {
+            const oldest = this.lastNotifiedAt.keys().next().value;
+            this.lastNotifiedAt.delete(oldest);
+          }
+          logger.warn(`High error rate detected for ${error.name}`);
+          await this.notifyHighErrorRate(error.name);
+        }
       }
 
       logger.error('Error tracked', errorData);
@@ -118,19 +67,27 @@ class ErrorTrackingService {
    * Increment error count
    * @param {string} errorName - Error name
    */
-  incrementErrorCount(errorName: string): void {
+  incrementErrorCount(errorName) {
     const now = Date.now();
 
-    if (!this.errorCounts.has(errorName)) {
-      this.errorCounts.set(errorName, []);
-    }
+    // Refresh recency: re-insert so eviction drops the least-recent name.
+    const counts = this.errorCounts.get(errorName) || [];
+    this.errorCounts.delete(errorName);
 
-    const counts = this.errorCounts.get(errorName)!;
     counts.push(now);
 
-    // Remove old entries outside time window
-    const filtered = counts.filter((timestamp) => now - timestamp < this.timeWindow);
+    // Remove old entries outside time window, cap history length.
+    let filtered = counts.filter((timestamp) => now - timestamp < this.timeWindow);
+    if (filtered.length > this.maxTimestampsPerName) {
+      filtered = filtered.slice(filtered.length - this.maxTimestampsPerName);
+    }
     this.errorCounts.set(errorName, filtered);
+
+    // Bound the number of distinct error names held in memory.
+    while (this.errorCounts.size > this.maxErrorNames) {
+      const oldest = this.errorCounts.keys().next().value;
+      this.errorCounts.delete(oldest);
+    }
   }
 
   /**
@@ -138,7 +95,7 @@ class ErrorTrackingService {
    * @param {string} errorName - Error name
    * @returns {boolean} Is rate too high
    */
-  isErrorRateTooHigh(errorName: string): boolean {
+  isErrorRateTooHigh(errorName) {
     const counts = this.errorCounts.get(errorName) || [];
     return counts.length >= this.errorThreshold;
   }
@@ -147,7 +104,7 @@ class ErrorTrackingService {
    * Notify about high error rate
    * @param {string} errorName - Error name
    */
-  async notifyHighErrorRate(errorName: string): Promise<void> {
+  async notifyHighErrorRate(errorName) {
     try {
       // Send notification to admins
       logger.warn(`High error rate notification: ${errorName}`);
@@ -164,13 +121,17 @@ class ErrorTrackingService {
    * @param {Object} options - Query options
    * @returns {Promise<Object>} Error statistics
    */
-  async getErrorStats(_options: ErrorStatsOptions = {}): Promise<ErrorStatsResult> {
+  async getErrorStats(options = {}) {
+    const {
+      startDate: _startDate, endDate: _endDate, errorName: _errorName, limit: _limit = 100,
+    } = options;
+
     try {
       // This would query from database if ErrorLog model exists
       // const errors = await prisma.errorLog.findMany({...});
 
       // For now, return in-memory stats
-      const stats: ErrorStats = {
+      const stats = {
         totalErrors: 0,
         errorsByType: {},
         recentErrors: [],
@@ -187,7 +148,7 @@ class ErrorTrackingService {
       return {
         totalErrors: 0,
         errorsByType: {},
-        error: getErrorMessage(error),
+        error: error.message,
       };
     }
   }
@@ -197,9 +158,9 @@ class ErrorTrackingService {
    * @param {string} period - Time period (hour, day, week)
    * @returns {Promise<Object>} Error trends
    */
-  async getErrorTrends(period: string = 'day'): Promise<ErrorTrendsResult> {
+  async getErrorTrends(period = 'day') {
     try {
-      const trends: ErrorTrends = {
+      const trends = {
         period,
         data: [],
         summary: {
@@ -229,7 +190,7 @@ class ErrorTrackingService {
       return {
         period,
         data: [],
-        error: getErrorMessage(error),
+        error: error.message,
       };
     }
   }
@@ -237,8 +198,9 @@ class ErrorTrackingService {
   /**
    * Clear error counts
    */
-  clearErrorCounts(): void {
+  clearErrorCounts() {
     this.errorCounts.clear();
+    this.lastNotifiedAt.clear();
     logger.info('Error counts cleared');
   }
 
@@ -247,7 +209,7 @@ class ErrorTrackingService {
    * @param {number} limit - Number of errors to return
    * @returns {Array} Most common errors
    */
-  getMostCommonErrors(limit: number = 10): Array<{ errorName: string; count: number }> {
+  getMostCommonErrors(limit = 10) {
     const errors = Array.from(this.errorCounts.entries())
       .map(([name, counts]) => ({
         errorName: name,
@@ -263,19 +225,12 @@ class ErrorTrackingService {
    * Check system health based on error rates
    * @returns {Object} Health status
    */
-  getHealthStatus(): {
-    status: string;
-    totalErrors: number;
-    threshold: number;
-    timeWindow: number;
-    issues: string[];
-    timestamp: string;
-    } {
+  getHealthStatus() {
     const totalErrors = Array.from(this.errorCounts.values())
       .reduce((sum, counts) => sum + counts.length, 0);
 
     let status = 'healthy';
-    const issues: string[] = [];
+    const issues = [];
 
     if (totalErrors > this.errorThreshold * 5) {
       status = 'critical';
@@ -296,6 +251,4 @@ class ErrorTrackingService {
   }
 }
 
-const errorTrackingService = new ErrorTrackingService();
-
-export = errorTrackingService;
+module.exports = new ErrorTrackingService();

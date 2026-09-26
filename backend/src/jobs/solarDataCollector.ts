@@ -1,34 +1,29 @@
+// @ts-nocheck
 const cron = require('node-cron');
 const solarService = require('../services/solarService');
 const solarAlertService = require('../services/solarAlertService');
 
-// Set up the connection between services
+// Set up the connection between services. solarService already wires this in
+// its constructor (the dependency is one-directional, no cycle); this explicit
+// call is kept as a defensive no-op in case the instance is ever overridden.
 solarService.setAlertService(solarAlertService);
-
-type ScheduledTask = {
-  stop: () => void;
-  nextDate: () => unknown;
-};
-
-const getErrorMessage = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return 'Unknown error';
-};
 
 /**
  * Solar Data Collector Job
  * Collects and records solar energy data at regular intervals
  */
 class SolarDataCollector {
-  task: ScheduledTask | null = null;
-
-  isRunning = false;
-
-  // Collect data every 15 minutes
-  schedule: string = process.env.SOLAR_COLLECTION_SCHEDULE || '*/15 * * * *';
+  constructor() {
+    this.task = null;
+    this.isRunning = false;
+    // Collect data every 15 minutes; fall back to the default if the
+    // configured expression isn't a valid cron schedule
+    this.schedule = process.env.SOLAR_COLLECTION_SCHEDULE || '*/15 * * * *';
+    if (!cron.validate(this.schedule)) {
+      console.warn(`⚠️  Invalid SOLAR_COLLECTION_SCHEDULE "${this.schedule}", falling back to */15 * * * *`);
+      this.schedule = '*/15 * * * *';
+    }
+  }
 
   /**
    * Start the solar data collection job
@@ -50,15 +45,16 @@ class SolarDataCollector {
           timestamp: data.timestamp,
         });
       } catch (error) {
-        console.error('❌ Error collecting solar data:', getErrorMessage(error));
+        console.error('❌ Error collecting solar data:', error.message);
       }
     });
 
     this.isRunning = true;
     console.log(`🌞 Solar data collector started (Schedule: ${this.schedule})`);
 
-    // Collect initial data immediately
-    this.collectNow();
+    // Collect initial data immediately — swallow rejection so a failed first
+    // run can't crash startup with an unhandled promise rejection
+    this.collectNow().catch((err) => console.error('❌ Initial solar data collection failed:', err.message));
   }
 
   /**
@@ -82,7 +78,7 @@ class SolarDataCollector {
       console.log('✅ Solar data collected:', data);
       return data;
     } catch (error) {
-      console.error('❌ Error in manual collection:', getErrorMessage(error));
+      console.error('❌ Error in manual collection:', error.message);
       throw error;
     }
   }
@@ -94,11 +90,8 @@ class SolarDataCollector {
     return {
       isRunning: this.isRunning,
       schedule: this.schedule,
-      nextRun: this.task ? this.task.nextDate() : null,
     };
   }
 }
 
-const solarDataCollector = new SolarDataCollector();
-
-export = solarDataCollector;
+module.exports = new SolarDataCollector();

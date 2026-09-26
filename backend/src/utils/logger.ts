@@ -23,31 +23,51 @@ winston.addColors(colors);
 
 const level = () => {
   const env = process.env.NODE_ENV || 'development';
-  return env === 'development' ? 'debug' : process.env.LOG_LEVEL || 'info';
+  // LOG_LEVEL is honored everywhere; dev only defaults to debug when unset.
+  return process.env.LOG_LEVEL || (env === 'development' ? 'debug' : 'info');
 };
+
+const SENSITIVE_FIELD_PATTERN = /password|token|authorization|secret|refreshtoken|jwt/i;
+
+// Masks credential-ish fields in logged metadata (recursively) so secrets
+// can't leak into log files/stdout via logger.*(..., meta) calls.
+const redactSensitive = winston.format((info) => {
+  const mask = (obj: Record<string, unknown>) => {
+    for (const key of Object.keys(obj)) {
+      const value = obj[key];
+      if (SENSITIVE_FIELD_PATTERN.test(key)) {
+        obj[key] = '[REDACTED]';
+      } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+        mask(value as Record<string, unknown>);
+      }
+    }
+  };
+  mask(info as unknown as Record<string, unknown>);
+  return info;
+});
 
 const format = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
   winston.format.splat(),
+  redactSensitive(),
   winston.format.json(),
 );
 
 const consoleFormat = winston.format.combine(
+  redactSensitive(),
   winston.format.colorize({ all: true }),
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.printf((info) => `${info.timestamp} ${info.level}: ${info.message}${info.stack ? `\n${info.stack}` : ''}`),
 );
 
-const transports: Array<InstanceType<typeof winston.transports.Console> | DailyRotateFile> = [];
-
-if (process.env.NODE_ENV !== 'production') {
-  transports.push(
-    new winston.transports.Console({
-      format: consoleFormat,
-    }),
-  );
-}
+// Console is always on: in prod it emits JSON so docker/k8s log collectors
+// capture it; elsewhere it uses the colored human-readable format.
+const transports: Array<InstanceType<typeof winston.transports.Console> | DailyRotateFile> = [
+  new winston.transports.Console({
+    format: process.env.NODE_ENV === 'production' ? format : consoleFormat,
+  }),
+];
 
 const errorFileTransport = new DailyRotateFile({
   filename: path.join(process.env.LOG_FILE_PATH || './logs', 'error-%DATE%.log'),

@@ -16,14 +16,16 @@ export interface RedisConfig {
 }
 
 export interface JwtConfig {
-  secret?: string;
+  // Secrets are required: env validation/auth config throw at boot when
+  // they're missing, so they can never be absent at runtime.
+  secret: string;
   expiresIn: string;
-  refreshSecret?: string;
+  refreshSecret: string;
   refreshExpiresIn: string;
 }
 
 export interface SessionConfig {
-  secret?: string;
+  secret: string;
   maxAge: number;
 }
 

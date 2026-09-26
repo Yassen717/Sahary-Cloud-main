@@ -1,50 +1,29 @@
+// @ts-nocheck
 const { v4: uuidv4 } = require('uuid');
 const redisService = require('./redisService');
-
-const getErrorMessage = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return 'Unknown error';
-};
-
-type SessionMetadata = Record<string, any> & {
-  createdAt?: string;
-  lastAccessedAt?: string;
-};
-
-type Session = {
-  id: string;
-  userId: string;
-  data: Record<string, any>;
-  metadata: SessionMetadata;
-};
 
 /**
  * Session Management Service
  * Handles user sessions with Redis
  */
 class SessionService {
-  sessionPrefix: string;
-
-  userSessionsPrefix: string;
-
-  defaultTTL: number;
-
   constructor() {
     this.sessionPrefix = 'session';
     this.userSessionsPrefix = 'user_sessions';
-    this.defaultTTL = parseInt(process.env.SESSION_MAX_AGE || '', 10) || 86400; // 24 hours
+    this.defaultTTL = parseInt(process.env.SESSION_MAX_AGE) || 86400; // 24 hours
   }
 
   /**
    * Create a new session
+   * @param {string} userId - User ID
+   * @param {Object} data - Session data
+   * @param {Object} metadata - Additional metadata (IP, user agent, etc.)
+   * @returns {Promise<Object>} Session object
    */
-  async createSession(userId: string, data: Record<string, any> = {}, metadata: SessionMetadata = {}): Promise<Session> {
+  async createSession(userId, data = {}, metadata = {}) {
     try {
       const sessionId = uuidv4();
-      const session: Session = {
+      const session = {
         id: sessionId,
         userId,
         data,
@@ -71,10 +50,13 @@ class SessionService {
 
   /**
    * Get session by ID
+   * @param {string} sessionId - Session ID
+   * @param {boolean} updateAccess - Update last accessed time
+   * @returns {Promise<Object>} Session object
    */
-  async getSession(sessionId: string, updateAccess = true): Promise<Session | null> {
+  async getSession(sessionId, updateAccess = true) {
     try {
-      const session: Session | null = await redisService.getSession(sessionId);
+      const session = await redisService.getSession(sessionId);
 
       if (!session) {
         return null;
@@ -95,8 +77,11 @@ class SessionService {
 
   /**
    * Update session data
+   * @param {string} sessionId - Session ID
+   * @param {Object} data - Data to update
+   * @returns {Promise<Object>} Updated session
    */
-  async updateSession(sessionId: string, data: Record<string, any>): Promise<Session> {
+  async updateSession(sessionId, data) {
     try {
       const session = await this.getSession(sessionId, false);
 
@@ -121,8 +106,10 @@ class SessionService {
 
   /**
    * Delete session
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<boolean>} Success status
    */
-  async deleteSession(sessionId: string): Promise<boolean> {
+  async deleteSession(sessionId) {
     try {
       const session = await this.getSession(sessionId, false);
 
@@ -144,8 +131,11 @@ class SessionService {
 
   /**
    * Extend session expiration
+   * @param {string} sessionId - Session ID
+   * @param {number} ttl - Time to live in seconds
+   * @returns {Promise<boolean>} Success status
    */
-  async extendSession(sessionId: string, ttl: number | null = null): Promise<boolean> {
+  async extendSession(sessionId, ttl = null) {
     try {
       const expiry = ttl || this.defaultTTL;
       return await redisService.extendSession(sessionId, expiry);
@@ -157,8 +147,11 @@ class SessionService {
 
   /**
    * Add session to user's session list
+   * @param {string} userId - User ID
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<void>}
    */
-  async addUserSession(userId: string, sessionId: string): Promise<void> {
+  async addUserSession(userId, sessionId) {
     try {
       const key = `${this.userSessionsPrefix}:${userId}`;
       await redisService.sAdd(key, sessionId);
@@ -170,8 +163,11 @@ class SessionService {
 
   /**
    * Remove session from user's session list
+   * @param {string} userId - User ID
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<void>}
    */
-  async removeUserSession(userId: string, sessionId: string): Promise<void> {
+  async removeUserSession(userId, sessionId) {
     try {
       const key = `${this.userSessionsPrefix}:${userId}`;
       await redisService.sRem(key, sessionId);
@@ -182,13 +178,15 @@ class SessionService {
 
   /**
    * Get all sessions for a user
+   * @param {string} userId - User ID
+   * @returns {Promise<Array>} Array of sessions
    */
-  async getUserSessions(userId: string): Promise<Session[]> {
+  async getUserSessions(userId) {
     try {
       const key = `${this.userSessionsPrefix}:${userId}`;
       const sessionIds = await redisService.sMembers(key);
 
-      const sessions: Session[] = [];
+      const sessions = [];
       for (const sessionId of sessionIds) {
         const session = await this.getSession(sessionId, false);
         if (session) {
@@ -208,8 +206,10 @@ class SessionService {
 
   /**
    * Delete all sessions for a user
+   * @param {string} userId - User ID
+   * @returns {Promise<number>} Number of sessions deleted
    */
-  async deleteUserSessions(userId: string): Promise<number> {
+  async deleteUserSessions(userId) {
     try {
       const sessions = await this.getUserSessions(userId);
       let count = 0;
@@ -233,8 +233,10 @@ class SessionService {
 
   /**
    * Validate session
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<boolean>} Validation result
    */
-  async validateSession(sessionId: string): Promise<boolean> {
+  async validateSession(sessionId) {
     try {
       const session = await this.getSession(sessionId, true);
       return session !== null;
@@ -246,8 +248,9 @@ class SessionService {
 
   /**
    * Get session statistics
+   * @returns {Promise<Object>} Session statistics
    */
-  async getSessionStats(): Promise<Record<string, any>> {
+  async getSessionStats() {
     try {
       const pattern = `${this.sessionPrefix}:*`;
       const sessionKeys = await redisService.keys(pattern);
@@ -260,15 +263,16 @@ class SessionService {
       console.error('Error getting session stats:', error);
       return {
         totalSessions: 0,
-        error: getErrorMessage(error),
+        error: error.message,
       };
     }
   }
 
   /**
    * Clean up expired sessions (maintenance task)
+   * @returns {Promise<number>} Number of sessions cleaned
    */
-  async cleanupExpiredSessions(): Promise<number> {
+  async cleanupExpiredSessions() {
     try {
       const pattern = `${this.sessionPrefix}:*`;
       const sessionKeys = await redisService.keys(pattern);
@@ -293,8 +297,9 @@ class SessionService {
 
   /**
    * Get active sessions count
+   * @returns {Promise<number>} Number of active sessions
    */
-  async getActiveSessionsCount(): Promise<number> {
+  async getActiveSessionsCount() {
     try {
       const pattern = `${this.sessionPrefix}:*`;
       const sessionKeys = await redisService.keys(pattern);
@@ -307,8 +312,10 @@ class SessionService {
 
   /**
    * Check if user has active sessions
+   * @param {string} userId - User ID
+   * @returns {Promise<boolean>} Has active sessions
    */
-  async hasActiveSessions(userId: string): Promise<boolean> {
+  async hasActiveSessions(userId) {
     try {
       const sessions = await this.getUserSessions(userId);
       return sessions.length > 0;
@@ -319,7 +326,4 @@ class SessionService {
   }
 }
 
-// Export singleton instance (module.exports shape preserved via export =)
-const sessionService = new SessionService();
-
-export = sessionService;
+module.exports = new SessionService();

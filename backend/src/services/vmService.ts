@@ -14,11 +14,37 @@ import type {
   UpdateVmInput,
 } from '../types/vm';
 
+// Resource limits are hardcoded until per-plan limits are modeled in the schema.
+const MAX_VMS_PER_USER = 5;
+const DEFAULT_VM_BANDWIDTH_GB = 1000;
+const DEFAULT_USER_RESOURCE_LIMITS: VmResourceLimits = {
+  cpu: 16,
+  ram: 32768,
+  storage: 1024,
+  bandwidth: 10000,
+};
+
 /**
  * Virtual Machine Service
  * Handles VM creation, management, resource allocation, and state management
  */
 class VMService {
+  private static getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private static isDockerNotFoundError(error: unknown): boolean {
+    return /404|no such container|does not exist|not found/i.test(this.getErrorMessage(error));
+  }
+
+  private static isDockerNotModifiedError(error: unknown): boolean {
+    return /304|already running|already started|already stopped/i.test(this.getErrorMessage(error));
+  }
+
+  private static isDockerConflictError(error: unknown): boolean {
+    return /409|already in use|conflict/i.test(this.getErrorMessage(error));
+  }
+
   static async createVM(userId: string, vmData: CreateVmInput): Promise<VmRecord> {
     const {
       name, description, cpu, ram, storage, bandwidth, dockerImage,
@@ -29,7 +55,7 @@ class VMService {
         cpu,
         ram,
         storage,
-        bandwidth: bandwidth || 1000,
+        bandwidth: bandwidth || DEFAULT_VM_BANDWIDTH_GB,
       });
 
       if (!resourceValidation.isValid) {
@@ -51,9 +77,8 @@ class VMService {
         where: { userId, status: { not: 'DELETED' } },
       });
 
-      const maxVMs = 5;
-      if (userVMCount >= maxVMs) {
-        throw new Error(`Maximum VM limit reached (${maxVMs})`);
+      if (userVMCount >= MAX_VMS_PER_USER) {
+        throw new Error(`Maximum VM limit reached (${MAX_VMS_PER_USER})`);
       }
 
       const totalResourceUsage = await this.getUserResourceUsage(userId);
@@ -71,11 +96,15 @@ class VMService {
         throw new Error('Insufficient storage resources available');
       }
 
+      if (totalResourceUsage.bandwidth + (bandwidth || DEFAULT_VM_BANDWIDTH_GB) > maxResources.bandwidth) {
+        throw new Error('Insufficient bandwidth resources available');
+      }
+
       const hourlyRate = ValidationHelpers.calculateVMCost({
         cpu,
         ram,
         storage,
-        bandwidth: bandwidth || 1000,
+        bandwidth: bandwidth || DEFAULT_VM_BANDWIDTH_GB,
       });
 
       const vm = await prisma.virtualMachine.create({
@@ -85,7 +114,7 @@ class VMService {
           cpu,
           ram,
           storage,
-          bandwidth: bandwidth || 1000,
+          bandwidth: bandwidth || DEFAULT_VM_BANDWIDTH_GB,
           dockerImage: dockerImage || 'ubuntu:latest',
           hourlyRate,
           status: 'STOPPED',
@@ -223,7 +252,7 @@ class VMService {
     }
   }
 
-  static async updateVM(vmId: string, userId: string, updateData: UpdateVmInput): Promise<VmRecord> {
+  static async updateVM(vmId: string, userId: string | null = null, updateData: UpdateVmInput = {}): Promise<VmRecord> {
     try {
       const existingVM = await this.getVMById(vmId, userId);
       if (!existingVM) {
@@ -238,12 +267,21 @@ class VMService {
         name, description, cpu, ram, storage, bandwidth,
       } = updateData;
 
-      if (cpu !== undefined || ram !== undefined || storage !== undefined || bandwidth !== undefined) {
+      // The live container would keep the old spec, so resource changes are
+      // only allowed while the VM is stopped to keep billing in sync.
+      if (existingVM.status === 'RUNNING' && (cpu || ram || storage || bandwidth)) {
+        throw new Error('Cannot change VM resources while it is running. Stop the VM first.');
+      }
+
+      const ownerId = existingVM.userId;
+      const existingBandwidth = existingVM.bandwidth || DEFAULT_VM_BANDWIDTH_GB;
+
+      if (cpu || ram || storage || bandwidth) {
         const newResources = {
-          cpu: cpu ?? existingVM.cpu,
-          ram: ram ?? existingVM.ram,
-          storage: storage ?? existingVM.storage,
-          bandwidth: bandwidth ?? existingVM.bandwidth ?? 1000,
+          cpu: cpu || existingVM.cpu,
+          ram: ram || existingVM.ram,
+          storage: storage || existingVM.storage,
+          bandwidth: bandwidth || existingBandwidth,
         };
 
         const resourceValidation = ValidationHelpers.validateVMResources(newResources);
@@ -251,13 +289,14 @@ class VMService {
           throw new Error(`Resource validation failed: ${resourceValidation.errors.join(', ')}`);
         }
 
-        if ((cpu ?? existingVM.cpu) > existingVM.cpu || (ram ?? existingVM.ram) > existingVM.ram || (storage ?? existingVM.storage) > existingVM.storage) {
-          const totalResourceUsage = await this.getUserResourceUsage(userId);
-          const maxResources = await this.getUserResourceLimits(userId);
+        if ((cpu || existingVM.cpu) > existingVM.cpu || (ram || existingVM.ram) > existingVM.ram || (storage || existingVM.storage) > existingVM.storage || (bandwidth || existingBandwidth) > existingBandwidth) {
+          const totalResourceUsage = await this.getUserResourceUsage(ownerId);
+          const maxResources = await this.getUserResourceLimits(ownerId);
 
-          const cpuIncrease = Math.max(0, (cpu ?? existingVM.cpu) - existingVM.cpu);
-          const ramIncrease = Math.max(0, (ram ?? existingVM.ram) - existingVM.ram);
-          const storageIncrease = Math.max(0, (storage ?? existingVM.storage) - existingVM.storage);
+          const cpuIncrease = Math.max(0, (cpu || existingVM.cpu) - existingVM.cpu);
+          const ramIncrease = Math.max(0, (ram || existingVM.ram) - existingVM.ram);
+          const storageIncrease = Math.max(0, (storage || existingVM.storage) - existingVM.storage);
+          const bandwidthIncrease = Math.max(0, (bandwidth || existingBandwidth) - existingBandwidth);
 
           if (totalResourceUsage.cpu + cpuIncrease > maxResources.cpu) {
             throw new Error('Insufficient CPU resources for upgrade');
@@ -270,13 +309,17 @@ class VMService {
           if (totalResourceUsage.storage + storageIncrease > maxResources.storage) {
             throw new Error('Insufficient storage resources for upgrade');
           }
+
+          if (totalResourceUsage.bandwidth + bandwidthIncrease > maxResources.bandwidth) {
+            throw new Error('Insufficient bandwidth resources for upgrade');
+          }
         }
       }
 
       if (name && name !== existingVM.name) {
         const nameExists = await prisma.virtualMachine.findFirst({
           where: {
-            userId,
+            userId: ownerId,
             name,
             id: { not: vmId },
           },
@@ -288,12 +331,12 @@ class VMService {
       }
 
       let newHourlyRate = Number(existingVM.hourlyRate);
-      if (cpu !== undefined || ram !== undefined || storage !== undefined || bandwidth !== undefined) {
+      if (cpu || ram || storage || bandwidth) {
         newHourlyRate = ValidationHelpers.calculateVMCost({
-          cpu: cpu ?? existingVM.cpu,
-          ram: ram ?? existingVM.ram,
-          storage: storage ?? existingVM.storage,
-          bandwidth: bandwidth ?? existingVM.bandwidth ?? 1000,
+          cpu: cpu || existingVM.cpu,
+          ram: ram || existingVM.ram,
+          storage: storage || existingVM.storage,
+          bandwidth: bandwidth || existingBandwidth,
         });
       }
 
@@ -302,10 +345,10 @@ class VMService {
         data: {
           ...(name && { name }),
           ...(description !== undefined && { description }),
-          ...(cpu !== undefined && { cpu }),
-          ...(ram !== undefined && { ram }),
-          ...(storage !== undefined && { storage }),
-          ...(bandwidth !== undefined && { bandwidth }),
+          ...(cpu && { cpu }),
+          ...(ram && { ram }),
+          ...(storage && { storage }),
+          ...(bandwidth && { bandwidth }),
           hourlyRate: newHourlyRate,
         },
         include: {
@@ -334,7 +377,7 @@ class VMService {
     }
   }
 
-  static async deleteVM(vmId: string, userId: string): Promise<void> {
+  static async deleteVM(vmId: string, userId: string | null = null): Promise<void> {
     try {
       const existingVM = await this.getVMById(vmId, userId);
       if (!existingVM) {
@@ -358,9 +401,15 @@ class VMService {
         }
       }
 
-      await prisma.usageRecord.deleteMany({ where: { vmId } });
-      await prisma.backup.deleteMany({ where: { vmId } });
-      await prisma.virtualMachine.delete({ where: { id: vmId } });
+      // TODO: remove the named data volume `sahary-vm-${vmId}-data` once
+      // dockerService exposes a removeVolume helper (not available yet).
+
+      // Usage records are billing history — the schema preserves them via
+      // onDelete: SetNull, so only backups and the VM row are deleted here.
+      await prisma.$transaction([
+        prisma.backup.deleteMany({ where: { vmId } }),
+        prisma.virtualMachine.delete({ where: { id: vmId } }),
+      ]);
 
       await this.logVMEvent(userId, 'VM_DELETED', vmId, {
         vmName: existingVM.name,
@@ -376,7 +425,7 @@ class VMService {
     }
   }
 
-  static async startVM(vmId: string, userId: string): Promise<VmRecord> {
+  static async startVM(vmId: string, userId: string | null = null): Promise<VmRecord> {
     try {
       const existingVM = await this.getVMById(vmId, userId);
       if (!existingVM) {
@@ -400,30 +449,76 @@ class VMService {
         data: { status: 'STARTING' },
       });
 
+      const containerConfig = {
+        vmId: existingVM.id,
+        name: existingVM.name,
+        image: existingVM.dockerImage || 'ubuntu:latest',
+        cpu: existingVM.cpu,
+        ram: existingVM.ram,
+        storage: existingVM.storage,
+        ports: [],
+        environment: [
+          `VM_ID=${existingVM.id}`,
+          `VM_NAME=${existingVM.name}`,
+          `USER_ID=${existingVM.userId}`,
+        ],
+        volumes: [`sahary-vm-${existingVM.id}-data:/data`],
+      };
+
+      const createAndStartContainer = async (): Promise<{ containerId: string; ipAddress?: string | null }> => {
+        let created;
+        try {
+          created = await dockerService.createContainer(containerConfig);
+        } catch (createError) {
+          // A leftover container holding the name `sahary-vm-${vmId}` (e.g.
+          // orphaned by an earlier failed start) 409s every retry — remove
+          // the stale container and try once more.
+          if (!VMService.isDockerConflictError(createError)) {
+            throw createError;
+          }
+          await dockerService.removeContainer(`sahary-vm-${existingVM.id}`, true).catch(() => {});
+          created = await dockerService.createContainer(containerConfig);
+        }
+
+        try {
+          return await dockerService.startContainer(created.containerId);
+        } catch (startError) {
+          // Remove the just-created container so the next retry does not
+          // hit a name conflict and the VM stays recoverable.
+          await dockerService.removeContainer(created.containerId, true).catch(() => {});
+          throw startError;
+        }
+      };
+
       try {
         let containerInfo: { containerId: string; ipAddress?: string | null };
 
         if (existingVM.dockerContainerId) {
-          containerInfo = await dockerService.startContainer(existingVM.dockerContainerId);
+          try {
+            containerInfo = await dockerService.startContainer(existingVM.dockerContainerId);
+          } catch (startError) {
+            if (VMService.isDockerNotFoundError(startError)) {
+              // The stored container no longer exists in Docker — clear the
+              // stale reference and recreate it instead of failing forever.
+              await prisma.virtualMachine.update({
+                where: { id: vmId },
+                data: { dockerContainerId: null },
+              });
+              containerInfo = await createAndStartContainer();
+            } else if (VMService.isDockerNotModifiedError(startError)) {
+              // Docker 304 — the container is already running; inspect it
+              // and continue instead of forcing the VM into ERROR.
+              const status = await dockerService.getContainerStatus(existingVM.dockerContainerId);
+              if (!status) {
+                throw new Error('Container not found in Docker');
+              }
+              containerInfo = status as { containerId: string; ipAddress?: string | null };
+            } else {
+              throw startError;
+            }
+          }
         } else {
-          const containerConfig = {
-            vmId: existingVM.id,
-            name: existingVM.name,
-            image: existingVM.dockerImage || 'ubuntu:latest',
-            cpu: existingVM.cpu,
-            ram: existingVM.ram,
-            storage: existingVM.storage,
-            ports: [],
-            environment: [
-              `VM_ID=${existingVM.id}`,
-              `VM_NAME=${existingVM.name}`,
-              `USER_ID=${userId}`,
-            ],
-            volumes: [`sahary-vm-${existingVM.id}-data:/data`],
-          };
-
-          containerInfo = await dockerService.createContainer(containerConfig);
-          containerInfo = await dockerService.startContainer(containerInfo.containerId);
+          containerInfo = await createAndStartContainer();
         }
 
         await prisma.virtualMachine.update({
@@ -462,7 +557,7 @@ class VMService {
     }
   }
 
-  static async stopVM(vmId: string, userId: string): Promise<VmRecord> {
+  static async stopVM(vmId: string, userId: string | null = null): Promise<VmRecord> {
     try {
       const existingVM = await this.getVMById(vmId, userId);
       if (!existingVM) {
@@ -484,7 +579,15 @@ class VMService {
 
       try {
         if (existingVM.dockerContainerId) {
-          await dockerService.stopContainer(existingVM.dockerContainerId, 10);
+          try {
+            await dockerService.stopContainer(existingVM.dockerContainerId, 10);
+          } catch (stopError) {
+            // Stopping is idempotent — if the container is already gone
+            // (404) or already stopped (304), the desired state is reached.
+            if (!VMService.isDockerNotFoundError(stopError) && !VMService.isDockerNotModifiedError(stopError)) {
+              throw stopError;
+            }
+          }
         }
 
         await prisma.virtualMachine.update({
@@ -520,14 +623,16 @@ class VMService {
     }
   }
 
-  static async restartVM(vmId: string, userId: string): Promise<VmRecord> {
+  static async restartVM(vmId: string, userId: string | null = null): Promise<VmRecord> {
     try {
       const existingVM = await this.getVMById(vmId, userId);
       if (!existingVM) {
         throw new Error('VM not found or access denied');
       }
 
-      if (existingVM.status !== 'RUNNING') {
+      // RESTARTING is accepted too so a VM left in that state (e.g. by a
+      // process crash mid-restart) can be recovered instead of bricking.
+      if (!['RUNNING', 'RESTARTING'].includes(existingVM.status)) {
         throw new Error('VM must be running to restart');
       }
 
@@ -536,36 +641,135 @@ class VMService {
         data: { status: 'RESTARTING' },
       });
 
-      setTimeout(async () => {
-        try {
-          await prisma.virtualMachine.update({
-            where: { id: vmId },
-            data: {
-              status: 'RUNNING',
-              startedAt: new Date(),
-            },
-          });
-
-          await this.logVMEvent(userId, 'VM_RESTARTED', vmId, {
-            vmName: existingVM.name,
-          });
-        } catch (error) {
-          await prisma.virtualMachine.update({
-            where: { id: vmId },
-            data: { status: 'ERROR' },
-          });
-
-          await this.logVMEvent(userId, 'VM_RESTART_FAILED', vmId, {
-            vmName: existingVM.name,
-            error: error instanceof Error ? error.message : String(error),
-          });
+      try {
+        if (!existingVM.dockerContainerId) {
+          throw new Error('No container associated with this VM');
         }
-      }, 3000);
+
+        await dockerService.restartContainer(existingVM.dockerContainerId, 10);
+
+        await prisma.virtualMachine.update({
+          where: { id: vmId },
+          data: {
+            status: 'RUNNING',
+            startedAt: new Date(),
+          },
+        });
+
+        await this.logVMEvent(userId, 'VM_RESTARTED', vmId, {
+          vmName: existingVM.name,
+          dockerContainerId: existingVM.dockerContainerId,
+        });
+      } catch (error) {
+        await prisma.virtualMachine.update({
+          where: { id: vmId },
+          data: { status: 'ERROR' },
+        });
+
+        await this.logVMEvent(userId, 'VM_RESTART_FAILED', vmId, {
+          vmName: existingVM.name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        throw error;
+      }
 
       return await this.getVMById(vmId, userId) as VmRecord;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`VM restart failed: ${message}`);
+    }
+  }
+
+  static async suspendVM(vmId: string, userId: string | null = null): Promise<VmRecord> {
+    try {
+      const existingVM = await this.getVMById(vmId, userId);
+      if (!existingVM) {
+        throw new Error('VM not found or access denied');
+      }
+
+      if (existingVM.status !== 'RUNNING') {
+        throw new Error('Only a running VM can be suspended');
+      }
+
+      if (existingVM.dockerContainerId) {
+        try {
+          // Stop the container so a suspended VM actually stops consuming
+          // host resources instead of only flipping a DB flag.
+          await dockerService.stopContainer(existingVM.dockerContainerId, 10);
+        } catch (stopError) {
+          // Container already gone (404) or already stopped (304) — the VM
+          // can still be marked suspended.
+          if (!VMService.isDockerNotFoundError(stopError) && !VMService.isDockerNotModifiedError(stopError)) {
+            throw stopError;
+          }
+        }
+      }
+
+      await prisma.virtualMachine.update({
+        where: { id: vmId },
+        data: { status: 'SUSPENDED' },
+      });
+
+      return await this.getVMById(vmId, userId) as VmRecord;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`VM suspension failed: ${message}`);
+    }
+  }
+
+  static async resumeVM(vmId: string, userId: string | null = null): Promise<VmRecord> {
+    try {
+      const existingVM = await this.getVMById(vmId, userId);
+      if (!existingVM) {
+        throw new Error('VM not found or access denied');
+      }
+
+      if (existingVM.status !== 'SUSPENDED') {
+        throw new Error('VM is not in suspended state');
+      }
+
+      if (!existingVM.dockerContainerId) {
+        // Nothing to start — return the VM to a clean stopped state so a
+        // regular start can recreate the container.
+        await prisma.virtualMachine.update({
+          where: { id: vmId },
+          data: { status: 'STOPPED' },
+        });
+        return await this.getVMById(vmId, userId) as VmRecord;
+      }
+
+      try {
+        await dockerService.startContainer(existingVM.dockerContainerId);
+      } catch (startError) {
+        if (VMService.isDockerNotFoundError(startError)) {
+          // Container was removed externally — clear the stale reference and
+          // leave the VM stopped so the next start recreates it cleanly.
+          await prisma.virtualMachine.update({
+            where: { id: vmId },
+            data: { status: 'STOPPED', dockerContainerId: null },
+          });
+          return await this.getVMById(vmId, userId) as VmRecord;
+        }
+        // Docker 304 — already running; fall through and mark RUNNING to
+        // match Docker reality.
+        if (!VMService.isDockerNotModifiedError(startError)) {
+          throw startError;
+        }
+      }
+
+      await prisma.virtualMachine.update({
+        where: { id: vmId },
+        data: {
+          status: 'RUNNING',
+          startedAt: new Date(),
+        },
+      });
+
+      return await this.getVMById(vmId, userId) as VmRecord;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`VM resumption failed: ${message}`);
     }
   }
 
@@ -598,25 +802,14 @@ class VMService {
 
   static async getUserResourceLimits(_userId: string): Promise<VmResourceLimits> {
     try {
-      return {
-        cpu: 16,
-        ram: 32768,
-        storage: 1024,
-        bandwidth: 10000,
-      };
+      return { ...DEFAULT_USER_RESOURCE_LIMITS };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to get resource limits: ${message}`);
     }
   }
 
-  static async assignIPAddress(): Promise<string> {
-    const baseIP = '192.168.1.';
-    const lastOctet = Math.floor(Math.random() * 200) + 50;
-    return `${baseIP}${lastOctet}`;
-  }
-
-  static async getVMStatistics(vmId: string, userId: string, options: VmStatisticsOptions = {}): Promise<VmStatisticsResult> {
+  static async getVMStatistics(vmId: string, userId: string | null = null, options: VmStatisticsOptions = {}): Promise<VmStatisticsResult> {
     try {
       const { startDate, endDate } = options;
 
@@ -662,7 +855,7 @@ class VMService {
   }
 
   static async logVMEvent(
-    userId: string,
+    userId: string | null,
     action: string,
     vmId: string,
     metadata: Record<string, unknown> = {},
@@ -777,20 +970,17 @@ class VMService {
       ]);
 
       return {
-        vms: {
-          total: totalVMs,
-          running: runningVMs,
-          stopped: stoppedVMs,
-          error: errorVMs,
+        totalVMs,
+        runningVMs,
+        stoppedVMs,
+        errorVMs,
+        totalResources: {
+          cpu: totalResources._sum.cpu || 0,
+          ram: totalResources._sum.ram || 0,
+          storage: totalResources._sum.storage || 0,
+          bandwidth: totalResources._sum.bandwidth || 0,
         },
-        resources: {
-          totalCPU: totalResources._sum.cpu || 0,
-          totalRAM: totalResources._sum.ram || 0,
-          totalStorage: totalResources._sum.storage || 0,
-          totalBandwidth: totalResources._sum.bandwidth || 0,
-        },
-        totalRevenue: parseFloat(String(totalCost._sum.cost || 0)),
-        timestamp: new Date().toISOString(),
+        totalCost: totalCost._sum.cost || 0,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -798,7 +988,7 @@ class VMService {
     }
   }
 
-  static async getVMContainerStatus(vmId: string, userId: string): Promise<Record<string, unknown>> {
+  static async getVMContainerStatus(vmId: string, userId: string | null = null): Promise<Record<string, unknown>> {
     try {
       const vm = await this.getVMById(vmId, userId);
       if (!vm) {
@@ -840,7 +1030,7 @@ class VMService {
     }
   }
 
-  static async getVMContainerLogs(vmId: string, userId: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  static async getVMContainerLogs(vmId: string, userId: string | null = null, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     try {
       const vm = await this.getVMById(vmId, userId);
       if (!vm) {
@@ -870,11 +1060,15 @@ class VMService {
     }
   }
 
-  static async execInVMContainer(vmId: string, userId: string, command: string[]): Promise<Record<string, unknown>> {
+  static async execInVMContainer(vmId: string, userId: string | null, command: string[]): Promise<Record<string, unknown>> {
     try {
       const vm = await this.getVMById(vmId, userId);
       if (!vm) {
         throw new Error('VM not found or access denied');
+      }
+
+      if (vm.status !== 'RUNNING') {
+        throw new Error('VM must be running to execute commands');
       }
 
       if (!vm.dockerContainerId) {
@@ -895,62 +1089,189 @@ class VMService {
     }
   }
 
-  static async createVMBackup(vmId: string, userId: string, backupName: string): Promise<Record<string, unknown>> {
+  static async createVMBackup(vmId: string, userId: string | null, backupName: string): Promise<Record<string, unknown>> {
     try {
       const vm = await this.getVMById(vmId, userId);
       if (!vm) {
         throw new Error('VM not found or access denied');
       }
 
+      if (!vm.dockerContainerId) {
+        throw new Error('No container associated with this VM');
+      }
+
       const backup = await prisma.backup.create({
         data: {
           vmId,
-          userId,
+          userId: vm.userId,
           name: backupName,
           status: 'PENDING',
           backupType: 'FULL',
         },
       });
 
-      await this.logVMEvent(userId, 'VM_BACKUP_CREATED', vmId, {
-        backupId: (backup as Record<string, unknown>).id,
-        backupName,
-      });
+      try {
+        const dockerBackup = await dockerService.createContainerBackup(vm.dockerContainerId, backupName);
 
-      return backup as Record<string, unknown>;
+        const tags = Array.isArray(dockerBackup.tags) ? dockerBackup.tags : [];
+
+        const completedBackup = await prisma.backup.update({
+          where: { id: backup.id },
+          data: {
+            status: 'COMPLETED',
+            dockerImageId: dockerBackup.backupId ? String(dockerBackup.backupId) : null,
+            backupPath: tags.length > 0 ? String(tags[0]) : null,
+            size: BigInt(Math.max(0, Math.round(Number(dockerBackup.size) || 0))),
+            completedAt: new Date(),
+          },
+        });
+
+        await this.logVMEvent(userId, 'VM_BACKUP_CREATED', vmId, {
+          backupId: backup.id,
+          backupName,
+          dockerImageId: dockerBackup.backupId,
+          size: dockerBackup.size,
+        });
+
+        return completedBackup as Record<string, unknown>;
+      } catch (error) {
+        await prisma.backup.update({
+          where: { id: backup.id },
+          data: { status: 'FAILED' },
+        });
+
+        await this.logVMEvent(userId, 'VM_BACKUP_FAILED', vmId, {
+          backupId: backup.id,
+          backupName,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        throw error;
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to create VM backup: ${message}`);
     }
   }
 
-  static async restoreVMFromBackup(backupId: string, userId: string, restoreConfig: UpdateVmInput = {}): Promise<Record<string, unknown>> {
+  static async restoreVMFromBackup(backupId: string, userId: string | null = null, restoreConfig: UpdateVmInput = {}): Promise<Record<string, unknown>> {
     try {
       const backup = await prisma.backup.findFirst({
-        where: { id: backupId, userId },
+        where: userId ? { id: backupId, userId } : { id: backupId },
       });
 
       if (!backup) {
         throw new Error('Backup not found or access denied');
       }
 
-      await this.logVMEvent(userId, 'VM_BACKUP_RESTORE_REQUESTED', (backup as any).vmId, {
-        backupId,
-        restoreConfig,
+      if (backup.status !== 'COMPLETED' || !backup.dockerImageId) {
+        throw new Error('Backup is not completed and cannot be restored');
+      }
+
+      const sourceVM = await prisma.virtualMachine.findUnique({
+        where: { id: backup.vmId },
       });
 
-      return {
+      if (!sourceVM) {
+        throw new Error('Source VM for this backup no longer exists');
+      }
+
+      const ownerId = sourceVM.userId;
+      const name = restoreConfig.name || `${sourceVM.name}-restored`;
+      const cpu = restoreConfig.cpu || sourceVM.cpu;
+      const ram = restoreConfig.ram || sourceVM.ram;
+      const storage = restoreConfig.storage || sourceVM.storage;
+      const bandwidth = restoreConfig.bandwidth || sourceVM.bandwidth || DEFAULT_VM_BANDWIDTH_GB;
+
+      const nameExists = await prisma.virtualMachine.findFirst({
+        where: { userId: ownerId, name },
+      });
+
+      if (nameExists) {
+        throw new Error('VM with this name already exists');
+      }
+
+      const resourceValidation = ValidationHelpers.validateVMResources({
+        cpu, ram, storage, bandwidth,
+      });
+      if (!resourceValidation.isValid) {
+        throw new Error(`Resource validation failed: ${resourceValidation.errors.join(', ')}`);
+      }
+
+      const hourlyRate = ValidationHelpers.calculateVMCost({
+        cpu, ram, storage, bandwidth,
+      });
+
+      const restoredVM = await prisma.virtualMachine.create({
+        data: {
+          name,
+          description: restoreConfig.description ?? `Restored from backup: ${backup.name}`,
+          cpu,
+          ram,
+          storage,
+          bandwidth,
+          dockerImage: backup.dockerImageId,
+          hourlyRate,
+          status: 'STOPPED',
+          userId: ownerId,
+        },
+      });
+
+      try {
+        const containerInfo = await dockerService.restoreFromBackup(backup.dockerImageId, {
+          vmId: restoredVM.id,
+          name: restoredVM.name,
+          image: backup.dockerImageId,
+          cpu,
+          ram,
+          storage,
+          ports: [],
+          environment: [
+            `VM_ID=${restoredVM.id}`,
+            `VM_NAME=${restoredVM.name}`,
+            `USER_ID=${ownerId}`,
+          ],
+          volumes: [`sahary-vm-${restoredVM.id}-data:/data`],
+        });
+
+        // The container is created but not started — the user starts the
+        // restored VM explicitly through the normal start flow.
+        await prisma.virtualMachine.update({
+          where: { id: restoredVM.id },
+          data: {
+            dockerContainerId: containerInfo.containerId,
+            ipAddress: containerInfo.ipAddress || null,
+          },
+        });
+      } catch (error) {
+        await prisma.virtualMachine.update({
+          where: { id: restoredVM.id },
+          data: { status: 'ERROR' },
+        });
+
+        await this.logVMEvent(userId || ownerId, 'VM_BACKUP_RESTORE_FAILED', restoredVM.id, {
+          backupId,
+          sourceVMId: sourceVM.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        throw error;
+      }
+
+      await this.logVMEvent(userId || ownerId, 'VM_BACKUP_RESTORED', restoredVM.id, {
         backupId,
-        restoreConfig,
-        status: 'REQUESTED',
-      };
+        sourceVMId: sourceVM.id,
+        vmName: name,
+      });
+
+      return (await this.getVMById(restoredVM.id)) as unknown as Record<string, unknown>;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to restore VM from backup: ${message}`);
     }
   }
 
-  static async getVMResourceStats(vmId: string, userId: string): Promise<VmResourceStatsResult> {
+  static async getVMResourceStats(vmId: string, userId: string | null = null): Promise<VmResourceStatsResult> {
     try {
       const vm = await this.getVMById(vmId, userId);
       if (!vm) {

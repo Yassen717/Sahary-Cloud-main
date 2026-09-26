@@ -1,9 +1,10 @@
-import request from 'supertest';
-import bcrypt from 'bcryptjs';
-import app from '../src/index';
-import { prisma } from '../src/config/database';
-import AuthService from '../src/services/authService';
-import JWTUtils from '../src/utils/jwt';
+const request = require('supertest');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const app = require('../src/index');
+const { prisma } = require('../src/config/database');
+const AuthService = require('../src/services/authService').default;
+const JWTUtils = require('../src/utils/jwt').default;
 
 // Test data
 const testUser = {
@@ -22,14 +23,29 @@ const testUser2 = {
 
 describe('Authentication Service', () => {
   beforeEach(async () => {
-    // Clean up test data — scoped to this suite's users only; other test
-    // files run in parallel against the same database.
-    await (global as any).cleanupTestUsers(prisma, [testUser.email, testUser2.email]);
+    // Clean up test data
+    await prisma.auditLog.deleteMany({});
+    await prisma.session.deleteMany({});
+    await prisma.user.deleteMany({
+      where: {
+        email: {
+          in: [testUser.email, testUser2.email]
+        }
+      }
+    });
   });
 
   afterAll(async () => {
-    // Clean up after all tests — scoped to this suite's users only.
-    await (global as any).cleanupTestUsers(prisma, [testUser.email, testUser2.email]);
+    // Clean up after all tests
+    await prisma.auditLog.deleteMany({});
+    await prisma.session.deleteMany({});
+    await prisma.user.deleteMany({
+      where: {
+        email: {
+          in: [testUser.email, testUser2.email]
+        }
+      }
+    });
     await prisma.$disconnect();
   });
 
@@ -114,7 +130,7 @@ describe('Authentication Service', () => {
   });
 
   describe('Token Operations', () => {
-    let userTokens: any;
+    let userTokens;
 
     beforeEach(async () => {
       // Register and login user
@@ -127,18 +143,7 @@ describe('Authentication Service', () => {
     });
 
     test('should refresh token successfully', async () => {
-      // JWTs encode `iat` at second resolution — shift the clock forward so the
-      // refreshed token differs even when the refresh happens within one second.
-      const nowSpy = jest
-        .spyOn(Date, 'now')
-        .mockReturnValue(Date.now() + 2000);
-
-      let newTokens: any;
-      try {
-        newTokens = await AuthService.refreshToken(userTokens.refreshToken);
-      } finally {
-        nowSpy.mockRestore();
-      }
+      const newTokens = await AuthService.refreshToken(userTokens.refreshToken);
 
       expect(newTokens).toBeDefined();
       expect(newTokens.accessToken).toBeDefined();
@@ -156,7 +161,7 @@ describe('Authentication Service', () => {
   });
 
   describe('Password Operations', () => {
-    let userId: string;
+    let userId;
 
     beforeEach(async () => {
       const result = await AuthService.register(testUser);
@@ -217,7 +222,7 @@ describe('Authentication Service', () => {
   });
 
   describe('Email Verification', () => {
-    let user: any;
+    let user;
 
     beforeEach(async () => {
       const result = await AuthService.register(testUser);
@@ -231,7 +236,7 @@ describe('Authentication Service', () => {
         select: { emailVerificationToken: true }
       });
 
-      const result = await AuthService.verifyEmail(dbUser!.emailVerificationToken!);
+      const result = await AuthService.verifyEmail(dbUser.emailVerificationToken);
 
       expect(result).toBeDefined();
       expect(result.user.isVerified).toBe(true);
@@ -259,7 +264,7 @@ describe('Authentication Service', () => {
   });
 
   describe('Profile Operations', () => {
-    let userId: string;
+    let userId;
 
     beforeEach(async () => {
       const result = await AuthService.register(testUser);
@@ -328,8 +333,8 @@ describe('JWT Utils', () => {
   });
 
   describe('Token Verification', () => {
-    let accessToken: string;
-    let refreshToken: string;
+    let accessToken;
+    let refreshToken;
 
     beforeEach(() => {
       const tokens = JWTUtils.generateTokenPair(testPayload);
@@ -361,20 +366,29 @@ describe('JWT Utils', () => {
     });
 
     test('should not verify wrong token type', async () => {
-      // A refresh token is signed with the refresh secret, so it fails
-      // signature verification before the type check. Use an access-secret-
-      // signed token with a non-access type to actually reach the type check.
-      const emailToken = JWTUtils.generateEmailVerificationToken(
-        testPayload.userId,
-        testPayload.email
+      // A refresh token is signed with the REFRESH secret, so it fails
+      // signature verification before the type check. To exercise the type
+      // check, sign a 'refresh'-type payload with the ACCESS secret.
+      const wrongTypeToken = jwt.sign(
+        {
+          userId: testPayload.userId,
+          email: testPayload.email,
+          type: 'refresh',
+        },
+        process.env.JWT_SECRET,
+        {
+          issuer: 'sahary-cloud',
+          audience: 'sahary-cloud-users',
+        }
       );
-      await expect(JWTUtils.verifyAccessToken(emailToken))
+
+      await expect(JWTUtils.verifyAccessToken(wrongTypeToken))
         .rejects.toThrow('Invalid token type');
     });
   });
 
   describe('Token Utilities', () => {
-    let token: string;
+    let token;
 
     beforeEach(() => {
       token = JWTUtils.generateAccessToken(testPayload);

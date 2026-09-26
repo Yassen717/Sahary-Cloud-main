@@ -1,36 +1,22 @@
+// @ts-nocheck
 const { createClient } = require('redis');
-
-const getErrorMessage = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return 'Unknown error';
-};
-
-type FetchFunction = () => Promise<any>;
 
 /**
  * Redis Service
  * Handles caching and session management
  */
 class RedisService {
-  client: any;
-
-  isConnected: boolean;
-
-  defaultTTL: number;
-
   constructor() {
     this.client = null;
     this.isConnected = false;
-    this.defaultTTL = parseInt(process.env.REDIS_DEFAULT_TTL || '', 10) || 3600; // 1 hour
+    this.defaultTTL = parseInt(process.env.REDIS_DEFAULT_TTL) || 3600; // 1 hour
   }
 
   /**
    * Initialize Redis connection
+   * @returns {Promise<void>}
    */
-  async connect(): Promise<void> {
+  async connect() {
     if (this.isConnected) {
       console.log('Redis already connected');
       return;
@@ -41,7 +27,7 @@ class RedisService {
         url: process.env.REDIS_URL || 'redis://localhost:6379',
         password: process.env.REDIS_PASSWORD || undefined,
         socket: {
-          reconnectStrategy: (retries: number): number | false => {
+          reconnectStrategy: (retries) => {
             if (retries > 3) {
               console.warn('⚠️  Redis reconnection stopped after 3 attempts');
               return false; // Stop reconnecting
@@ -51,7 +37,7 @@ class RedisService {
         },
       });
 
-      this.client.on('error', (err: Error) => {
+      this.client.on('error', (err) => {
         console.warn('⚠️  Redis Client Error:', err.message);
         this.isConnected = false;
       });
@@ -76,22 +62,46 @@ class RedisService {
 
       await this.client.connect();
     } catch (error) {
-      console.warn('⚠️  Redis connection failed:', getErrorMessage(error));
+      console.warn('⚠️  Redis connection failed:', error.message);
       console.warn('⚠️  Server will start WITHOUT Redis caching');
       console.warn('⚠️  Session and caching features won\'t work until Redis is running');
       console.warn('⚠️  To start Redis: sudo systemctl start redis  OR  docker run -d -p 6379:6379 redis');
+      // Destroy the half-open client so no socket/reconnect timer lingers.
+      // NB: client.disconnect() is async in redis v4 - must be awaited or a
+      // sync throw inside it becomes an unhandled rejection.
+      if (this.client) {
+        try {
+          await this.client.disconnect();
+        } catch (_cleanupError) {
+          // already closed - ignore
+        }
+      }
       this.client = null;
       this.isConnected = false;
-      // Don't throw - allow server to start without Redis
+      // In development: don't throw - allow server to start without Redis.
+      // In production Redis is required: propagate so startup fails hard.
+      if (process.env.NODE_ENV === 'production') {
+        throw error;
+      }
     }
   }
 
   /**
    * Disconnect from Redis
+   * @returns {Promise<void>}
    */
-  async disconnect(): Promise<void> {
-    if (this.client && this.isConnected) {
-      await this.client.quit();
+  async disconnect() {
+    if (this.client) {
+      try {
+        if (this.isConnected) {
+          await this.client.quit();
+        } else {
+          await this.client.disconnect();
+        }
+      } catch (error) {
+        console.warn('⚠️  Redis disconnect error:', error.message);
+      }
+      this.client = null;
       this.isConnected = false;
       console.log('🔴 Redis disconnected');
     }
@@ -99,15 +109,17 @@ class RedisService {
 
   /**
    * Check if Redis is connected
+   * @returns {boolean}
    */
-  isReady(): boolean {
+  isReady() {
     return this.isConnected && this.client !== null;
   }
 
   /**
    * Get Redis client
+   * @returns {Object} Redis client
    */
-  getClient(): any {
+  getClient() {
     if (!this.isReady()) {
       throw new Error('Redis client is not connected');
     }
@@ -118,8 +130,12 @@ class RedisService {
 
   /**
    * Set a key-value pair
+   * @param {string} key - Cache key
+   * @param {any} value - Value to cache
+   * @param {number} ttl - Time to live in seconds (optional)
+   * @returns {Promise<string>}
    */
-  async set(key: string, value: any, ttl: number | null = null): Promise<string> {
+  async set(key, value, ttl = null) {
     try {
       const serializedValue = JSON.stringify(value);
       const expiry = ttl || this.defaultTTL;
@@ -134,8 +150,10 @@ class RedisService {
 
   /**
    * Get a value by key
+   * @param {string} key - Cache key
+   * @returns {Promise<any>}
    */
-  async get(key: string): Promise<any> {
+  async get(key) {
     try {
       const value = await this.client.get(key);
       return value ? JSON.parse(value) : null;
@@ -147,8 +165,10 @@ class RedisService {
 
   /**
    * Delete a key
+   * @param {string} key - Cache key
+   * @returns {Promise<number>}
    */
-  async del(key: string): Promise<number> {
+  async del(key) {
     try {
       return await this.client.del(key);
     } catch (error) {
@@ -159,8 +179,10 @@ class RedisService {
 
   /**
    * Check if key exists
+   * @param {string} key - Cache key
+   * @returns {Promise<boolean>}
    */
-  async exists(key: string): Promise<boolean> {
+  async exists(key) {
     try {
       const result = await this.client.exists(key);
       return result === 1;
@@ -172,11 +194,14 @@ class RedisService {
 
   /**
    * Set expiration time for a key
+   * @param {string} key - Cache key
+   * @param {number} seconds - Expiration time in seconds
+   * @returns {Promise<boolean>}
    */
-  async expire(key: string, seconds: number): Promise<boolean> {
+  async expire(key, seconds) {
     try {
       const result = await this.client.expire(key, seconds);
-      // node-redis v4 resolves EXPIRE with a boolean; older clients return 1/0
+      // node-redis v4 returns boolean true; ioredis/older clients return 1.
       return result === true || result === 1;
     } catch (error) {
       console.error(`Redis EXPIRE error for key ${key}:`, error);
@@ -186,8 +211,10 @@ class RedisService {
 
   /**
    * Get time to live for a key
+   * @param {string} key - Cache key
+   * @returns {Promise<number>}
    */
-  async ttl(key: string): Promise<number> {
+  async ttl(key) {
     try {
       return await this.client.ttl(key);
     } catch (error) {
@@ -200,8 +227,10 @@ class RedisService {
 
   /**
    * Get all keys matching a pattern
+   * @param {string} pattern - Key pattern (e.g., 'user:*')
+   * @returns {Promise<Array>}
    */
-  async keys(pattern: string): Promise<string[]> {
+  async keys(pattern) {
     try {
       return await this.client.keys(pattern);
     } catch (error) {
@@ -212,8 +241,10 @@ class RedisService {
 
   /**
    * Delete all keys matching a pattern
+   * @param {string} pattern - Key pattern
+   * @returns {Promise<number>}
    */
-  async delPattern(pattern: string): Promise<number> {
+  async delPattern(pattern) {
     try {
       const keys = await this.keys(pattern);
       if (keys.length === 0) return 0;
@@ -228,8 +259,12 @@ class RedisService {
 
   /**
    * Set hash field
+   * @param {string} key - Hash key
+   * @param {string} field - Field name
+   * @param {any} value - Field value
+   * @returns {Promise<number>}
    */
-  async hSet(key: string, field: string, value: any): Promise<number> {
+  async hSet(key, field, value) {
     try {
       const serializedValue = JSON.stringify(value);
       return await this.client.hSet(key, field, serializedValue);
@@ -241,8 +276,11 @@ class RedisService {
 
   /**
    * Get hash field
+   * @param {string} key - Hash key
+   * @param {string} field - Field name
+   * @returns {Promise<any>}
    */
-  async hGet(key: string, field: string): Promise<any> {
+  async hGet(key, field) {
     try {
       const value = await this.client.hGet(key, field);
       return value ? JSON.parse(value) : null;
@@ -254,14 +292,16 @@ class RedisService {
 
   /**
    * Get all hash fields
+   * @param {string} key - Hash key
+   * @returns {Promise<Object>}
    */
-  async hGetAll(key: string): Promise<Record<string, any>> {
+  async hGetAll(key) {
     try {
       const hash = await this.client.hGetAll(key);
-      const result: Record<string, any> = {};
+      const result = {};
       for (const [field, value] of Object.entries(hash)) {
         try {
-          result[field] = JSON.parse(value as string);
+          result[field] = JSON.parse(value);
         } catch {
           result[field] = value;
         }
@@ -275,8 +315,11 @@ class RedisService {
 
   /**
    * Delete hash field
+   * @param {string} key - Hash key
+   * @param {string} field - Field name
+   * @returns {Promise<number>}
    */
-  async hDel(key: string, field: string): Promise<number> {
+  async hDel(key, field) {
     try {
       return await this.client.hDel(key, field);
     } catch (error) {
@@ -289,8 +332,11 @@ class RedisService {
 
   /**
    * Push value to list (left)
+   * @param {string} key - List key
+   * @param {any} value - Value to push
+   * @returns {Promise<number>}
    */
-  async lPush(key: string, value: any): Promise<number> {
+  async lPush(key, value) {
     try {
       const serializedValue = JSON.stringify(value);
       return await this.client.lPush(key, serializedValue);
@@ -302,11 +348,15 @@ class RedisService {
 
   /**
    * Get list range
+   * @param {string} key - List key
+   * @param {number} start - Start index
+   * @param {number} stop - Stop index
+   * @returns {Promise<Array>}
    */
-  async lRange(key: string, start: number, stop: number): Promise<any[]> {
+  async lRange(key, start, stop) {
     try {
       const values = await this.client.lRange(key, start, stop);
-      return values.map((v: string) => {
+      return values.map((v) => {
         try {
           return JSON.parse(v);
         } catch {
@@ -321,8 +371,12 @@ class RedisService {
 
   /**
    * Trim list to specified range
+   * @param {string} key - List key
+   * @param {number} start - Start index
+   * @param {number} stop - Stop index
+   * @returns {Promise<string>}
    */
-  async lTrim(key: string, start: number, stop: number): Promise<string> {
+  async lTrim(key, start, stop) {
     try {
       return await this.client.lTrim(key, start, stop);
     } catch (error) {
@@ -335,8 +389,11 @@ class RedisService {
 
   /**
    * Add member to set
+   * @param {string} key - Set key
+   * @param {any} member - Member to add
+   * @returns {Promise<number>}
    */
-  async sAdd(key: string, member: any): Promise<number> {
+  async sAdd(key, member) {
     try {
       const serializedMember = JSON.stringify(member);
       return await this.client.sAdd(key, serializedMember);
@@ -348,11 +405,13 @@ class RedisService {
 
   /**
    * Get all set members
+   * @param {string} key - Set key
+   * @returns {Promise<Array>}
    */
-  async sMembers(key: string): Promise<any[]> {
+  async sMembers(key) {
     try {
       const members = await this.client.sMembers(key);
-      return members.map((m: string) => {
+      return members.map((m) => {
         try {
           return JSON.parse(m);
         } catch {
@@ -367,8 +426,11 @@ class RedisService {
 
   /**
    * Remove member from set
+   * @param {string} key - Set key
+   * @param {any} member - Member to remove
+   * @returns {Promise<number>}
    */
-  async sRem(key: string, member: any): Promise<number> {
+  async sRem(key, member) {
     try {
       const serializedMember = JSON.stringify(member);
       return await this.client.sRem(key, serializedMember);
@@ -382,8 +444,13 @@ class RedisService {
 
   /**
    * Cache with automatic key generation
+   * @param {string} prefix - Key prefix
+   * @param {string} identifier - Unique identifier
+   * @param {Function} fetchFunction - Function to fetch data if not cached
+   * @param {number} ttl - Time to live in seconds
+   * @returns {Promise<any>}
    */
-  async cache(prefix: string, identifier: string, fetchFunction: FetchFunction, ttl: number | null = null): Promise<any> {
+  async cache(prefix, identifier, fetchFunction, ttl = null) {
     const key = `${prefix}:${identifier}`;
 
     try {
@@ -409,8 +476,10 @@ class RedisService {
 
   /**
    * Invalidate cache by pattern
+   * @param {string} pattern - Cache key pattern
+   * @returns {Promise<number>}
    */
-  async invalidate(pattern: string): Promise<number> {
+  async invalidate(pattern) {
     try {
       return await this.delPattern(pattern);
     } catch (error) {
@@ -423,32 +492,43 @@ class RedisService {
 
   /**
    * Store session data
+   * @param {string} sessionId - Session ID
+   * @param {Object} data - Session data
+   * @param {number} ttl - Time to live in seconds
+   * @returns {Promise<string>}
    */
-  async setSession(sessionId: string, data: any, ttl = 86400): Promise<string> {
+  async setSession(sessionId, data, ttl = 86400) {
     const key = `session:${sessionId}`;
     return await this.set(key, data, ttl);
   }
 
   /**
    * Get session data
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Object>}
    */
-  async getSession(sessionId: string): Promise<any> {
+  async getSession(sessionId) {
     const key = `session:${sessionId}`;
     return await this.get(key);
   }
 
   /**
    * Delete session
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<number>}
    */
-  async deleteSession(sessionId: string): Promise<number> {
+  async deleteSession(sessionId) {
     const key = `session:${sessionId}`;
     return await this.del(key);
   }
 
   /**
    * Extend session expiration
+   * @param {string} sessionId - Session ID
+   * @param {number} ttl - Time to live in seconds
+   * @returns {Promise<boolean>}
    */
-  async extendSession(sessionId: string, ttl = 86400): Promise<boolean> {
+  async extendSession(sessionId, ttl = 86400) {
     const key = `session:${sessionId}`;
     return await this.expire(key, ttl);
   }
@@ -457,8 +537,9 @@ class RedisService {
 
   /**
    * Get Redis statistics
+   * @returns {Promise<Object>}
    */
-  async getStats(): Promise<Record<string, any>> {
+  async getStats() {
     try {
       const info = await this.client.info();
       const dbSize = await this.client.dbSize();
@@ -472,17 +553,19 @@ class RedisService {
       console.error('Error getting Redis stats:', error);
       return {
         connected: this.isConnected,
-        error: getErrorMessage(error),
+        error: error.message,
       };
     }
   }
 
   /**
    * Parse Redis INFO output
+   * @param {string} info - INFO output
+   * @returns {Object}
    */
-  parseInfo(info: string): Record<string, string> {
+  parseInfo(info) {
     const lines = info.split('\r\n');
-    const result: Record<string, string> = {};
+    const result = {};
 
     for (const line of lines) {
       if (line && !line.startsWith('#')) {
@@ -498,8 +581,9 @@ class RedisService {
 
   /**
    * Flush all data (use with caution!)
+   * @returns {Promise<string>}
    */
-  async flushAll(): Promise<string> {
+  async flushAll() {
     try {
       return await this.client.flushAll();
     } catch (error) {
@@ -509,7 +593,5 @@ class RedisService {
   }
 }
 
-// Export singleton instance (module.exports shape preserved via export =)
-const redisService = new RedisService();
-
-export = redisService;
+// Export singleton instance
+module.exports = new RedisService();

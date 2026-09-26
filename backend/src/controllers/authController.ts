@@ -4,8 +4,25 @@ import AuthService from '../services/authService';
 import JWTUtils from '../utils/jwt';
 import ValidationHelpers from '../utils/validation.helpers';
 
+const crypto = require('crypto');
 const redisService = require('../services/redisService');
+const emailService = require('../services/emailService');
 const { prisma } = require('../config/database');
+
+// Derive cookie lifetime from the token's actual expiry (which itself comes
+// from the JWT config) instead of hardcoding durations.
+const getTokenCookieMaxAge = (token: string, fallbackMs: number): number => {
+  const ttlSeconds = JWTUtils.getTimeUntilExpiration(token);
+  return ttlSeconds > 0 ? ttlSeconds * 1000 : fallbackMs;
+};
+
+const getRedisClient = (): any => {
+  try {
+    return redisService.isReady() ? redisService.getClient() : null;
+  } catch {
+    return null;
+  }
+};
 
 type AuthRequest = Request & {
   user: any;
@@ -30,13 +47,13 @@ class AuthController {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 15 * 60 * 1000,
+        maxAge: getTokenCookieMaxAge(result.tokens.accessToken, 15 * 60 * 1000),
       });
       res.cookie('refreshToken', result.tokens.refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
+        maxAge: getTokenCookieMaxAge(result.tokens.refreshToken, 7 * 24 * 60 * 60 * 1000),
       });
 
       res.status(201).json({
@@ -53,10 +70,31 @@ class AuthController {
         },
       });
     } catch (error: any) {
-      res.status(400).json({
+      const msg = error instanceof Error ? error.message : '';
+
+      if (msg.includes('already exists')) {
+        res.status(409).json({
+          success: false,
+          error: 'Registration failed',
+          message: 'A user with this email already exists',
+        });
+        return;
+      }
+
+      if (msg.includes('Password validation failed')) {
+        res.status(400).json({
+          success: false,
+          error: 'Registration failed',
+          message: msg,
+        });
+        return;
+      }
+
+      console.error('Registration error:', error);
+      res.status(500).json({
         success: false,
         error: 'Registration failed',
-        message: error.message,
+        message: 'Registration failed',
       });
     }
   }
@@ -76,7 +114,7 @@ class AuthController {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
           sameSite: 'strict',
-          maxAge: 7 * 24 * 60 * 60 * 1000,
+          maxAge: getTokenCookieMaxAge(result.tokens.refreshToken, 7 * 24 * 60 * 60 * 1000),
         });
       }
 
@@ -84,7 +122,7 @@ class AuthController {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 15 * 60 * 1000,
+        maxAge: getTokenCookieMaxAge(result.tokens.accessToken, 15 * 60 * 1000),
       });
 
       res.status(200).json({
@@ -128,13 +166,13 @@ class AuthController {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
+        maxAge: getTokenCookieMaxAge(tokens.refreshToken, 7 * 24 * 60 * 60 * 1000),
       });
       res.cookie('token', tokens.accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 15 * 60 * 1000,
+        maxAge: getTokenCookieMaxAge(tokens.accessToken, 15 * 60 * 1000),
       });
 
       res.status(200).json({
@@ -162,8 +200,9 @@ class AuthController {
   static async logout(req: AuthRequest, res: Response): Promise<void> {
     try {
       const accessToken = req.token || req.headers.authorization?.replace('Bearer ', '') || req.cookies?.token;
+      const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken || null;
       const redisClient = redisService.isReady() ? redisService.getClient() : null;
-      await AuthService.logout(accessToken, redisClient);
+      await AuthService.logout(accessToken, redisClient, refreshToken);
 
       res.clearCookie('token');
       res.clearCookie('refreshToken');
@@ -188,6 +227,25 @@ class AuthController {
 
       await AuthService.changePassword(userId, currentPassword, newPassword);
 
+      // Revoke the caller's tokens and session so the old credentials and
+      // tokens can no longer be used — user must log in with the new password.
+      const redisClient = getRedisClient();
+      if (redisClient) {
+        if (req.token) {
+          await JWTUtils.blacklistToken(req.token, redisClient);
+        }
+        const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
+        if (refreshToken) {
+          await JWTUtils.blacklistToken(refreshToken, redisClient);
+        }
+      }
+      if (req.token) {
+        await AuthService.removeSession(req.token, userId);
+      }
+
+      res.clearCookie('token');
+      res.clearCookie('refreshToken');
+
       res.status(200).json({
         success: true,
         message: 'Password changed successfully',
@@ -209,14 +267,6 @@ class AuthController {
       res.status(200).json({
         success: true,
         message: result.message,
-        ...(process.env.NODE_ENV === 'development'
-          ? {
-            data: {
-              resetToken: result.resetToken,
-              expiresAt: result.expiresAt,
-            },
-          }
-          : {}),
       });
     } catch (error: any) {
       res.status(400).json({
@@ -275,14 +325,6 @@ class AuthController {
       res.status(200).json({
         success: true,
         message: result.message,
-        ...(process.env.NODE_ENV === 'development'
-          ? {
-            data: {
-              verificationToken: (result as any).verificationToken,
-              expiresAt: result.expiresAt,
-            },
-          }
-          : {}),
       });
     } catch (error: any) {
       res.status(400).json({
@@ -385,13 +427,45 @@ class AuthController {
     }
   }
 
-  static async getSessions(_req: AuthRequest, res: Response): Promise<void> {
+  static async getSessions(req: AuthRequest, res: Response): Promise<void> {
     try {
+      const { userId } = req.user;
+
+      const sessions = await prisma.session.findMany({
+        where: {
+          userId,
+          expiresAt: { gt: new Date() },
+        },
+        // Never return the data blob — it embeds the access token.
+        select: {
+          sessionId: true,
+          ipAddress: true,
+          userAgent: true,
+          createdAt: true,
+          expiresAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const currentSession = req.token
+        ? await prisma.session.findFirst({
+          where: {
+            userId,
+            expiresAt: { gt: new Date() },
+            data: { contains: req.token },
+          },
+          select: { sessionId: true },
+        })
+        : null;
+
       res.status(200).json({
         success: true,
         message: 'Sessions retrieved successfully',
         data: {
-          sessions: [],
+          sessions: sessions.map((session: { sessionId: string }) => ({
+            ...session,
+            current: session.sessionId === currentSession?.sessionId,
+          })),
         },
       });
     } catch (error: any) {
@@ -406,7 +480,23 @@ class AuthController {
   static async revokeAllSessions(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { userId } = req.user;
-      void userId;
+
+      // Sign out everywhere, including the current session.
+      await prisma.session.deleteMany({ where: { userId } });
+
+      const redisClient = getRedisClient();
+      if (redisClient) {
+        if (req.token) {
+          await JWTUtils.blacklistToken(req.token, redisClient);
+        }
+        const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
+        if (refreshToken) {
+          await JWTUtils.blacklistToken(refreshToken, redisClient);
+        }
+      }
+
+      res.clearCookie('token');
+      res.clearCookie('refreshToken');
 
       res.status(200).json({
         success: true,
@@ -424,6 +514,37 @@ class AuthController {
   static async revokeSession(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { sessionId } = req.params;
+      const { userId } = req.user;
+
+      const session = await prisma.session.findFirst({
+        where: { sessionId, userId },
+        select: { id: true, data: true },
+      });
+
+      if (!session) {
+        res.status(404).json({
+          success: false,
+          error: 'Session not found',
+          message: 'Session not found or already revoked',
+        });
+        return;
+      }
+
+      // Blacklist the access token bound to this session, if any.
+      let sessionToken: string | null = null;
+      try {
+        const data = typeof session.data === 'string' ? JSON.parse(session.data) : session.data;
+        sessionToken = typeof data?.accessToken === 'string' ? data.accessToken : null;
+      } catch {
+        sessionToken = null;
+      }
+
+      const redisClient = getRedisClient();
+      if (redisClient && sessionToken) {
+        await JWTUtils.blacklistToken(sessionToken, redisClient);
+      }
+
+      await prisma.session.deleteMany({ where: { sessionId, userId } });
 
       res.status(200).json({
         success: true,
@@ -450,6 +571,23 @@ class AuthController {
           message: 'Please provide a token to validate',
         });
         return;
+      }
+
+      if (redisService.isReady()) {
+        try {
+          const isBlacklisted = await JWTUtils.isTokenBlacklisted(token, redisService.getClient());
+          if (isBlacklisted) {
+            res.status(401).json({
+              success: false,
+              error: 'Invalid token',
+              message: 'Token has been revoked',
+              valid: false,
+            });
+            return;
+          }
+        } catch (redisError) {
+          console.warn('Redis blacklist check failed:', redisError);
+        }
       }
 
       const decoded = await JWTUtils.verifyAccessToken(token);
@@ -717,6 +855,15 @@ class AuthController {
         select: { password: true },
       });
 
+      if (!user) {
+        res.status(404).json({
+          success: false,
+          error: 'User not found',
+          message: 'User account not found',
+        });
+        return;
+      }
+
       const isPasswordValid = await ValidationHelpers.comparePassword(password, user.password);
 
       if (!isPasswordValid) {
@@ -731,6 +878,10 @@ class AuthController {
       const reactivationToken = crypto.randomUUID();
       const reactivationTokenExpires = new Date(Date.now() + 72 * 60 * 60 * 1000);
 
+      // NOTE: the reactivation token is stored in the passwordResetToken
+      // column (no dedicated schema column exists). This is accepted for now,
+      // but it means deactivating an account clobbers any pending password
+      // reset token, and reactivateAccount must not confuse the two.
       await prisma.user.update({
         where: { id: userId },
         data: {
@@ -740,16 +891,35 @@ class AuthController {
         },
       });
 
+      // Fire-and-forget: email the reactivation link; a delivery failure must
+      // not fail the deactivation response.
+      const reactivationUrl = `${process.env.FRONTEND_URL}/reactivate`
+        + `?token=${reactivationToken}&email=${encodeURIComponent(req.user.email)}`;
+      void emailService
+        .sendEmail({
+          to: req.user.email,
+          subject: 'Your Sahary Cloud account was deactivated',
+          text: `Your account has been deactivated. To reactivate it within 72 hours, visit: ${reactivationUrl}`,
+          html: `
+      <h1>Account Deactivated</h1>
+      <p>Your Sahary Cloud account has been deactivated.</p>
+      <p>To reactivate it within the next 72 hours, click the link below:</p>
+      <a href="${reactivationUrl}">Reactivate Account</a>
+      <p>Or copy and paste this link in your browser:</p>
+      <p>${reactivationUrl}</p>
+      <p>If you did not request this, please contact support immediately.</p>
+    `,
+        })
+        .catch((error: unknown) => console.error('Failed to send reactivation email:', error));
+
       await AuthService.logAuditEvent(userId, 'ACCOUNT_DEACTIVATED', 'user', userId, {
         reason: reason || 'User requested deactivation',
       });
 
+      // The reactivation token is only delivered by email, never in the response.
       res.status(200).json({
         success: true,
         message: 'Account deactivated successfully',
-        ...(process.env.NODE_ENV === 'development'
-          ? { data: { reactivationToken, reactivationTokenExpires } }
-          : {}),
       });
     } catch (error: any) {
       res.status(400).json({
@@ -784,26 +954,16 @@ class AuthController {
         },
       });
 
-      if (!user) {
-        res.status(404).json({
-          success: false,
-          error: 'User not found',
-          message: 'No user found with this email',
-        });
-        return;
-      }
-
-      if (user.isActive) {
+      // Single uniform failure response — distinct 'not found' / 'already
+      // active' / 'bad token' errors would leak account existence and state.
+      if (
+        !user
+        || user.isActive
+        || user.passwordResetToken !== token
+        || !user.passwordResetExpires
+        || user.passwordResetExpires < new Date()
+      ) {
         res.status(400).json({
-          success: false,
-          error: 'Account already active',
-          message: 'This account is already active',
-        });
-        return;
-      }
-
-      if (user.passwordResetToken !== token || !user.passwordResetExpires || user.passwordResetExpires < new Date()) {
-        res.status(401).json({
           success: false,
           error: 'Invalid or expired token',
           message: 'Reactivation token is invalid or expired',

@@ -5,17 +5,23 @@ const JWTUtils = require('../src/utils/jwt').default;
 
 const prisma = new PrismaClient();
 
-// Helper function to generate JWT token — must carry { userId, type: 'access' }
-// with the app's issuer/audience, exactly like the auth middleware expects.
-const generateToken = (userId: string, role: string = 'USER') => {
-  return JWTUtils.generateAccessToken({ userId, role });
+// Helper function to generate JWT token — must match the shape
+// `authenticate` verifies: { userId, email, role, type: 'access' } signed
+// with the configured secret and issuer/audience. Hand-rolled tokens with
+// { id, role } always fail verification, so mint real access tokens.
+const generateToken = (user) => {
+  return JWTUtils.generateAccessToken({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+  });
 };
 
 describe('Solar Energy Monitoring API Integration Tests', () => {
-  let userToken: string;
-  let adminToken: string;
-  let testUser: any;
-  let testAdmin: any;
+  let userToken;
+  let adminToken;
+  let testUser;
+  let testAdmin;
 
   beforeAll(async () => {
     // Create test user
@@ -44,8 +50,8 @@ describe('Solar Energy Monitoring API Integration Tests', () => {
       }
     });
 
-    userToken = generateToken(testUser.id, 'USER');
-    adminToken = generateToken(testAdmin.id, 'ADMIN');
+    userToken = generateToken(testUser);
+    adminToken = generateToken(testAdmin);
   });
 
   afterAll(async () => {
@@ -277,7 +283,7 @@ describe('Solar Energy Monitoring API Integration Tests', () => {
   });
 
   describe('PUT /api/v1/solar/alerts/:id/resolve (Admin Only)', () => {
-    let testAlert: any;
+    let testAlert;
 
     beforeAll(async () => {
       // Create a test alert

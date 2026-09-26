@@ -50,8 +50,9 @@ describe('Monitoring Service', () => {
       expect(typeof memoryHealth.usagePercentage).toBe('number');
     });
 
-    it('should check CPU usage', () => {
-      const cpuHealth = monitoringService.checkCPU();
+    it('should check CPU usage', async () => {
+      // checkCPU samples over a 500ms window — it is async
+      const cpuHealth = await monitoringService.checkCPU();
 
       expect(cpuHealth).toHaveProperty('healthy');
       expect(cpuHealth).toHaveProperty('cores');
@@ -60,12 +61,14 @@ describe('Monitoring Service', () => {
       expect(typeof cpuHealth.usagePercentage).toBe('number');
     });
 
-    it('should check disk usage', () => {
-      const diskHealth = monitoringService.checkDisk();
+    it('should check system load', () => {
+      // The service exposes checkLoad() — there is no portable disk-usage
+      // API, so it honestly reports OS load average instead.
+      const loadHealth = monitoringService.checkLoad();
 
-      expect(diskHealth).toHaveProperty('healthy');
-      expect(diskHealth).toHaveProperty('loadAverage');
-      expect(Array.isArray(diskHealth.loadAverage)).toBe(true);
+      expect(loadHealth).toHaveProperty('healthy');
+      expect(loadHealth).toHaveProperty('loadAverage');
+      expect(Array.isArray(loadHealth.loadAverage)).toBe(true);
     });
   });
 

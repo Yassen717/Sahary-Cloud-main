@@ -1,4 +1,5 @@
-import { z } from 'zod';
+// @ts-nocheck
+const { z } = require('zod');
 
 // User registration validation
 const registerSchema = z.object({
@@ -19,7 +20,7 @@ const registerSchema = z.object({
       .min(8, 'Password must be at least 8 characters')
       .max(128, 'Password must not exceed 128 characters')
       .regex(
-        /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
+        /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^\-_.,~()[\]{}|+=:;'"\\/<>`!])\S+$/,
         'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
       ),
 
@@ -29,7 +30,7 @@ const registerSchema = z.object({
       })
       .min(2, 'First name must be at least 2 characters')
       .max(50, 'First name must not exceed 50 characters')
-      .regex(/^[a-zA-Z\s]+$/, 'First name can only contain letters and spaces'),
+      .regex(/^[\p{L}][\p{L}\s'’-]*$/u, 'First name can only contain letters, spaces, hyphens, and apostrophes'),
 
     lastName: z
       .string({
@@ -37,11 +38,11 @@ const registerSchema = z.object({
       })
       .min(2, 'Last name must be at least 2 characters')
       .max(50, 'Last name must not exceed 50 characters')
-      .regex(/^[a-zA-Z\s]+$/, 'Last name can only contain letters and spaces'),
+      .regex(/^[\p{L}][\p{L}\s'’-]*$/u, 'Last name can only contain letters, spaces, hyphens, and apostrophes'),
 
     phone: z
       .string()
-      .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format')
+      .regex(/^\+?[0-9\s\-()]{7,20}$/, 'Invalid phone number format')
       .optional(),
   }),
 });
@@ -71,25 +72,27 @@ const updateProfileSchema = z.object({
       .string()
       .min(2, 'First name must be at least 2 characters')
       .max(50, 'First name must not exceed 50 characters')
-      .regex(/^[a-zA-Z\s]+$/, 'First name can only contain letters and spaces')
+      .regex(/^[\p{L}][\p{L}\s'’-]*$/u, 'First name can only contain letters, spaces, hyphens, and apostrophes')
       .optional(),
 
     lastName: z
       .string()
       .min(2, 'Last name must be at least 2 characters')
       .max(50, 'Last name must not exceed 50 characters')
-      .regex(/^[a-zA-Z\s]+$/, 'Last name can only contain letters and spaces')
+      .regex(/^[\p{L}][\p{L}\s'’-]*$/u, 'Last name can only contain letters, spaces, hyphens, and apostrophes')
       .optional(),
 
     phone: z
       .string()
-      .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format')
+      .regex(/^\+?[0-9\s\-()]{7,20}$/, 'Invalid phone number format')
       .optional()
       .or(z.literal('')),
 
     avatar: z
       .string()
       .url('Invalid avatar URL')
+      .or(z.literal('')) // empty string clears the avatar
+      .nullable()
       .optional(),
   }),
 });
@@ -109,7 +112,7 @@ const changePasswordSchema = z.object({
       .min(8, 'Password must be at least 8 characters')
       .max(128, 'Password must not exceed 128 characters')
       .regex(
-        /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
+        /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^\-_.,~()[\]{}|+=:;'"\\/<>`!])\S+$/,
         'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
       ),
 
@@ -150,7 +153,7 @@ const resetPasswordSchema = z.object({
       .min(8, 'Password must be at least 8 characters')
       .max(128, 'Password must not exceed 128 characters')
       .regex(
-        /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
+        /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^\-_.,~()[\]{}|+=:;'"\\/<>`!])\S+$/,
         'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
       ),
 

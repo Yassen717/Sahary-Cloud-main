@@ -1,6 +1,6 @@
-import config from './index';
-
+// @ts-nocheck
 const swaggerJSDoc = require('swagger-jsdoc');
+const config = require('./index').default;
 
 const swaggerDefinition = {
   openapi: '3.0.0',
@@ -192,11 +192,11 @@ const swaggerDefinition = {
 
 const options = {
   swaggerDefinition,
-  // Scan all route and controller files for @swagger JSDoc comments
-  // (.ts sources and .js twins both exist during the migration)
+  // Scan all route files for @swagger JSDoc comments (.ts sources — the
+  // compiled .js siblings are gone and swagger-jsdoc reads .ts fine).
   apis: [
-    `${__dirname}/../routes/*.{ts,js}`,
-    `${__dirname}/../controllers/*.{ts,js}`,
+    `${__dirname}/../routes/*.ts`,
+    `${__dirname}/../controllers/*.ts`,
   ],
 };
 

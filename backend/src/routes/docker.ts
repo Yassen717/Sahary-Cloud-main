@@ -69,12 +69,13 @@ router.post(
 /**
  * @route   POST /api/docker/containers/:containerId/start
  * @desc    Start a container
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
 router.post(
   '/containers/:containerId/start',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -86,12 +87,13 @@ router.post(
 /**
  * @route   POST /api/docker/containers/:containerId/stop
  * @desc    Stop a container
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
 router.post(
   '/containers/:containerId/stop',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -107,12 +109,13 @@ router.post(
 /**
  * @route   POST /api/docker/containers/:containerId/restart
  * @desc    Restart a container
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
 router.post(
   '/containers/:containerId/restart',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -150,12 +153,13 @@ router.delete(
 /**
  * @route   GET /api/docker/containers/:containerId/status
  * @desc    Get container status and stats
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
 router.get(
   '/containers/:containerId/status',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -167,12 +171,13 @@ router.get(
 /**
  * @route   GET /api/docker/containers/:containerId/stats
  * @desc    Get container resource usage stats
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
 router.get(
   '/containers/:containerId/stats',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -184,12 +189,13 @@ router.get(
 /**
  * @route   GET /api/docker/containers
  * @desc    List all containers
- * @access  Private (Admin sees all, User sees own only)
+ * @access  Private (Admin only)
  */
 router.get(
   '/containers',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     query('vmId')
       .optional()
@@ -257,12 +263,13 @@ router.post(
 /**
  * @route   GET /api/docker/containers/:containerId/health
  * @desc    Check container health
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
 router.get(
   '/containers/:containerId/health',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -274,12 +281,13 @@ router.get(
 /**
  * @route   GET /api/docker/containers/:containerId/logs
  * @desc    Get container logs
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
 router.get(
   '/containers/:containerId/logs',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -307,12 +315,13 @@ router.get(
 /**
  * @route   POST /api/docker/containers/:containerId/exec
  * @desc    Execute command in container
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
 router.post(
   '/containers/:containerId/exec',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -331,12 +340,13 @@ router.post(
 /**
  * @route   POST /api/docker/containers/:containerId/backup
  * @desc    Create container backup
- * @access  Private (Admin and User - own containers only)
+ * @access  Private (Admin only)
  */
 router.post(
   '/containers/:containerId/backup',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('containerId')
       .isLength({ min: 12, max: 64 })
@@ -352,15 +362,16 @@ router.post(
 /**
  * @route   POST /api/docker/backups/:backupId/restore
  * @desc    Restore container from backup
- * @access  Private (Admin and User - own backups only)
+ * @access  Private (Admin only)
  */
 router.post(
   '/backups/:backupId/restore',
   apiRateLimit(),
   authenticate,
+  requirePermission('docker:manage'),
   [
     param('backupId')
-      .isLength({ min: 12, max: 64 })
+      .matches(/^(sha256:)?[a-f0-9]{12,64}$/i)
       .withMessage('Invalid backup ID'),
     body('vmId')
       .notEmpty()

@@ -1,3 +1,4 @@
+// @ts-nocheck
 const cron = require('node-cron');
 const cacheMonitorService = require('../services/cacheMonitorService');
 

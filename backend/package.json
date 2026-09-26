@@ -25,8 +25,8 @@
     "db:stop": "docker-compose -f docker-compose.dev.yml down",
     "db:logs": "docker-compose -f docker-compose.dev.yml logs -f",
     "openapi:export": "tsx scripts/export-openapi.js",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix"
+    "lint": "eslint src/ --ext .js,.ts --no-error-on-unmatched-pattern",
+    "lint:fix": "eslint src/ --ext .js,.ts --no-error-on-unmatched-pattern --fix"
   },
   "keywords": [
     "vps",

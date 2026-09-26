@@ -60,6 +60,14 @@ const getEnvironmentalImpact = async (req: SolarRequest, res: Response, next: Ne
   try {
     const { period = 'day' } = req.query;
 
+    if (!['day', 'week', 'month'].includes(period)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid period. Must be day, week, or month',
+      });
+      return;
+    }
+
     const statistics = await solarService.getSolarStatistics(period);
 
     res.status(200).json({
@@ -101,7 +109,11 @@ const getStatistics = async (req: SolarRequest, res: Response, next: NextFunctio
 
 const getHistory = async (req: SolarRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, limit } = req.query;
+
+    // Cap the number of returned rows (default 500, max 500)
+    const parsedLimit = Number.parseInt(String(limit ?? ''), 10);
+    const take = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 500) : 500;
 
     const start = startDate ? new Date(startDate) : new Date(Date.now() - 24 * 60 * 60 * 1000);
     const end = endDate ? new Date(endDate) : new Date();
@@ -122,7 +134,7 @@ const getHistory = async (req: SolarRequest, res: Response, next: NextFunction):
       return;
     }
 
-    const history = await solarService.getSolarDataByPeriod(start, end);
+    const history = await solarService.getSolarDataByPeriod(start, end, take);
 
     res.status(200).json({
       success: true,
@@ -198,8 +210,12 @@ const getEmergencyLogs = async (req: SolarRequest, res: Response, next: NextFunc
   try {
     const { limit, severity } = req.query;
 
+    // Validate limit: must be a finite integer, clamped to 1-500 (default 50)
+    const parsedLimit = Number.parseInt(String(limit ?? ''), 10);
+    const take = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 500) : 50;
+
     const logs = await solarAlertService.getEmergencyLogs({
-      limit: limit ? Number.parseInt(String(limit), 10) : 50,
+      limit: take,
       severity,
     });
 

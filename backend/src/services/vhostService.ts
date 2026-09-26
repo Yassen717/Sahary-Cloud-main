@@ -1,57 +1,46 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import { promisify } from 'util';
-import { execFile } from 'child_process';
-import logger from '../utils/logger';
+// @ts-nocheck
+const fs = require('fs').promises;
+const path = require('path');
+const { promisify } = require('util');
+const { execFile } = require('child_process');
+const logger = require('../utils/logger').default;
 
 const execFileAsync = promisify(execFile);
+const EXEC_TIMEOUT_MS = 10_000;
 
 const DOMAIN_REGEX = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
 
 const NGINX_ENABLED = process.env.HOSTING_NGINX_ENABLED === 'true';
 const SITES_AVAILABLE_DIR = process.env.HOSTING_NGINX_SITES_AVAILABLE || '/etc/nginx/sites-available';
 const SITES_ENABLED_DIR = process.env.HOSTING_NGINX_SITES_ENABLED || '/etc/nginx/sites-enabled';
-const NGINX_TEST_COMMAND = process.env.HOSTING_NGINX_TEST_COMMAND || 'nginx -t';
-const NGINX_RELOAD_COMMAND = process.env.HOSTING_NGINX_RELOAD_COMMAND || 'nginx -s reload';
+// Optional directory already included by nginx.conf inside the http context.
+// When set, candidate configs are staged there so `nginx -t` actually parses
+// them BEFORE the vhost is enabled.
+const STAGING_DIR = process.env.HOSTING_NGINX_STAGING_DIR || '';
+// Fixed command argv — env vars must never be parsed into shell commands.
+const NGINX_TEST_ARGV = ['nginx', '-t'];
+const NGINX_RELOAD_ARGV = ['nginx', '-s', 'reload'];
 
-type SyncVhostOptions = {
-  primaryDomain: string;
-  customDomains?: string[];
-  documentRoot: string;
-};
-
-type SyncVhostResult =
-  | { skipped: true }
-  | {
-      skipped: false;
-      domains: string[];
-      configPath: string;
-      symlinkPath: string;
-    };
-
-type RemoveVhostResult =
-  | { skipped: true }
-  | {
-      skipped: false;
-      configPath: string;
-      symlinkPath: string;
-    };
-
-function shellSplit(command: string): { bin: string; args: string[] } {
-  const parts = command.trim().split(/\s+/);
-  const [bin, ...args] = parts;
-  return { bin, args };
+/**
+ * Error annotated with an HTTP status and a safe-to-expose flag so the
+ * controller layer can map infrastructure failures without leaking internals.
+ */
+function vhostError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  error.expose = true;
+  return error;
 }
 
-function isValidDomain(domain: unknown): domain is string {
+function isValidDomain(domain) {
   return typeof domain === 'string' && DOMAIN_REGEX.test(domain);
 }
 
-function getConfigFileName(primaryDomain: string): string {
+function getConfigFileName(primaryDomain) {
   return `${primaryDomain.toLowerCase()}.conf`;
 }
 
-function normalizeDomains(primaryDomain: string, customDomains: string[] = []): string[] {
+function normalizeDomains(primaryDomain, customDomains = []) {
   const all = [primaryDomain, ...customDomains]
     .filter(Boolean)
     .map((domain) => domain.toLowerCase().trim())
@@ -59,13 +48,13 @@ function normalizeDomains(primaryDomain: string, customDomains: string[] = []): 
     .filter(isValidDomain);
 
   if (all.length === 0) {
-    throw new Error('Cannot generate vhost config: no valid domains');
+    throw vhostError(400, 'Cannot generate vhost config: no valid domains');
   }
 
   return all;
 }
 
-function buildVhostConfig(domains: string[], documentRoot: string): string {
+function buildVhostConfig(domains, documentRoot) {
   const serverNames = domains.join(' ');
 
   return `server {
@@ -88,16 +77,20 @@ function buildVhostConfig(domains: string[], documentRoot: string): string {
 `;
 }
 
-async function ensureSymlink(targetPath: string, linkPath: string): Promise<void> {
+async function ensureSymlink(targetPath, linkPath) {
   try {
-    const current = await fs.readlink(linkPath);
-    if (current === targetPath) {
-      return;
+    const stat = await fs.lstat(linkPath);
+    if (stat.isSymbolicLink()) {
+      const current = await fs.readlink(linkPath);
+      if (current === targetPath) {
+        return;
+      }
     }
+    // Remove whatever occupies the link path — stale symlink, regular file,
+    // or anything else — before creating the new symlink.
     await fs.unlink(linkPath);
   } catch (error) {
-    const { code } = (error as NodeJS.ErrnoException);
-    if (code !== 'ENOENT' && code !== 'EINVAL') {
+    if (error.code !== 'ENOENT') {
       throw error;
     }
   }
@@ -106,18 +99,18 @@ async function ensureSymlink(targetPath: string, linkPath: string): Promise<void
 }
 
 class VhostService {
-  static async syncAccountVhost({ primaryDomain, customDomains = [], documentRoot }: SyncVhostOptions): Promise<SyncVhostResult> {
+  static async syncAccountVhost({ primaryDomain, customDomains = [], documentRoot }) {
     if (!NGINX_ENABLED) {
       logger.info('Vhost sync skipped: HOSTING_NGINX_ENABLED=false', { primaryDomain });
       return { skipped: true };
     }
 
     if (!isValidDomain(primaryDomain)) {
-      throw new Error('Cannot sync vhost: invalid primary domain');
+      throw vhostError(400, 'Cannot sync vhost: invalid primary domain');
     }
 
     if (!path.isAbsolute(documentRoot)) {
-      throw new Error('Cannot sync vhost: documentRoot must be an absolute path');
+      throw vhostError(400, 'Cannot sync vhost: documentRoot must be an absolute path');
     }
 
     const domains = normalizeDomains(primaryDomain, customDomains);
@@ -129,10 +122,103 @@ class VhostService {
     await fs.mkdir(SITES_ENABLED_DIR, { recursive: true });
 
     const config = buildVhostConfig(domains, documentRoot);
-    await fs.writeFile(availablePath, config, { encoding: 'utf8' });
-    await ensureSymlink(availablePath, enabledPath);
 
-    await VhostService.testAndReload();
+    // Preserve the previous state so a failed sync can roll back to the last
+    // known-good config instead of leaving a broken vhost enabled.
+    let previousConfig = null;
+    try {
+      previousConfig = await fs.readFile(availablePath, 'utf8');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    let hadEnabled = false;
+    try {
+      await fs.lstat(enabledPath);
+      hadEnabled = true;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+
+    let stagingPath = null;
+    try {
+      // Write the candidate config WITHOUT enabling it yet.
+      await fs.writeFile(availablePath, config, { encoding: 'utf8', mode: 0o644 });
+
+      if (STAGING_DIR) {
+        // The staging dir is included by nginx.conf, so `nginx -t` parses the
+        // candidate before it is enabled.
+        await fs.mkdir(STAGING_DIR, { recursive: true });
+        stagingPath = path.join(STAGING_DIR, confName);
+        await fs.writeFile(stagingPath, config, { encoding: 'utf8', mode: 0o644 });
+        await VhostService.testConfig();
+        await fs.unlink(stagingPath);
+        stagingPath = null;
+      }
+
+      // Enable only after validation, then test + reload. When STAGING_DIR is
+      // unset this is also the first real parse of the candidate — a failure
+      // triggers the rollback below, so a broken config never stays enabled.
+      await ensureSymlink(availablePath, enabledPath);
+      await VhostService.testAndReload();
+    } catch (error) {
+      // Roll back: drop the staging copy, disable the vhost and restore or
+      // remove the config file.
+      if (stagingPath) {
+        try {
+          await fs.unlink(stagingPath);
+        } catch (stagingError) {
+          logger.warn('Failed to remove staged vhost during rollback', {
+            stagingPath,
+            message: stagingError.message,
+          });
+        }
+      }
+      try {
+        await fs.unlink(enabledPath);
+      } catch (unlinkError) {
+        if (unlinkError.code !== 'ENOENT') {
+          logger.error('Failed to disable broken vhost during rollback', {
+            enabledPath,
+            message: unlinkError.message,
+          });
+        }
+      }
+      try {
+        if (previousConfig === null) {
+          try {
+            await fs.unlink(availablePath);
+          } catch (unlinkError) {
+            if (unlinkError.code !== 'ENOENT') throw unlinkError;
+          }
+        } else {
+          await fs.writeFile(availablePath, previousConfig, { encoding: 'utf8', mode: 0o644 });
+          if (hadEnabled) {
+            await ensureSymlink(availablePath, enabledPath);
+          }
+        }
+      } catch (restoreError) {
+        logger.error('Failed to restore previous vhost config during rollback', {
+          availablePath,
+          message: restoreError.message,
+        });
+      }
+      // Re-verify/reload so nginx returns to the last known-good state.
+      try {
+        await VhostService.testAndReload();
+      } catch (verifyError) {
+        logger.error('Nginx still unhealthy after vhost rollback', {
+          primaryDomain,
+          message: verifyError.message,
+        });
+      }
+      logger.error('Vhost sync failed, rolled back', {
+        primaryDomain,
+        availablePath,
+        enabledPath,
+        message: error.message,
+      });
+      throw error;
+    }
 
     logger.info('Vhost synced', {
       primaryDomain,
@@ -149,14 +235,14 @@ class VhostService {
     };
   }
 
-  static async removeAccountVhost(primaryDomain: string): Promise<RemoveVhostResult> {
+  static async removeAccountVhost(primaryDomain) {
     if (!NGINX_ENABLED) {
       logger.info('Vhost removal skipped: HOSTING_NGINX_ENABLED=false', { primaryDomain });
       return { skipped: true };
     }
 
     if (!isValidDomain(primaryDomain)) {
-      throw new Error('Cannot remove vhost: invalid primary domain');
+      throw vhostError(400, 'Cannot remove vhost: invalid primary domain');
     }
 
     const confName = getConfigFileName(primaryDomain);
@@ -166,13 +252,13 @@ class VhostService {
     try {
       await fs.unlink(enabledPath);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (error.code !== 'ENOENT') throw error;
     }
 
     try {
       await fs.unlink(availablePath);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (error.code !== 'ENOENT') throw error;
     }
 
     await VhostService.testAndReload();
@@ -186,23 +272,32 @@ class VhostService {
     };
   }
 
-  static async testAndReload(): Promise<void> {
-    const testCommand = shellSplit(NGINX_TEST_COMMAND);
-    const reloadCommand = shellSplit(NGINX_RELOAD_COMMAND);
-
+  static async testConfig() {
     try {
-      await execFileAsync(testCommand.bin, testCommand.args);
-      await execFileAsync(reloadCommand.bin, reloadCommand.args);
+      await execFileAsync(NGINX_TEST_ARGV[0], NGINX_TEST_ARGV.slice(1), { timeout: EXEC_TIMEOUT_MS });
     } catch (error) {
-      const execError = error as { message?: string; stderr?: string; stdout?: string };
-      logger.error('Nginx test/reload failed', {
-        message: execError.message,
-        stderr: execError.stderr,
-        stdout: execError.stdout,
+      logger.error('Nginx config test failed', {
+        message: error.message,
+        stderr: error.stderr,
+        stdout: error.stdout,
       });
-      throw new Error('Nginx reload failed after vhost update');
+      throw vhostError(502, 'Nginx configuration test failed');
+    }
+  }
+
+  static async testAndReload() {
+    await VhostService.testConfig();
+    try {
+      await execFileAsync(NGINX_RELOAD_ARGV[0], NGINX_RELOAD_ARGV.slice(1), { timeout: EXEC_TIMEOUT_MS });
+    } catch (error) {
+      logger.error('Nginx reload failed', {
+        message: error.message,
+        stderr: error.stderr,
+        stdout: error.stdout,
+      });
+      throw vhostError(502, 'Nginx reload failed after vhost update');
     }
   }
 }
 
-export = VhostService;
+module.exports = VhostService;

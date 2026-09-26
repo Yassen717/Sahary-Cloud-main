@@ -3,6 +3,7 @@ import config from '../config';
 import { prisma } from '../config/database';
 import JWTUtils from '../utils/jwt';
 import ValidationHelpers from '../utils/validation.helpers';
+
 import type {
   AuthActionMetadata,
   AuthResult,
@@ -16,6 +17,21 @@ import type {
   RegisterInput,
   VerificationResult,
 } from '../types/auth';
+
+const emailService = require('./emailService');
+const redisService = require('./redisService');
+
+// Compared against the supplied password when no account exists so login
+// response timing does not reveal whether the email is registered.
+const DUMMY_PASSWORD_HASH = '$2a$12$R7.HeZ6s8yK.De9M4CxjueIULWtGaEAbbCAY7A1gHC9K.FVp7NgjK';
+
+const getRedisClient = (): any => {
+  try {
+    return redisService.isReady() ? redisService.getClient() : null;
+  } catch {
+    return null;
+  }
+};
 
 type PrismaUserRecord = {
   id: string;
@@ -98,6 +114,11 @@ class AuthService {
         },
       });
 
+      // Fire-and-forget: a failed email must not fail the registration.
+      void emailService
+        .sendVerificationEmail(user.email, emailVerificationToken, user.firstName)
+        .catch((error: unknown) => console.error('Failed to send verification email:', error));
+
       const tokenPayload: AuthTokenPayload = {
         userId: user.id,
         email: user.email,
@@ -121,6 +142,12 @@ class AuthService {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
+      // Concurrent registrations can pass the existence check and then hit the
+      // unique constraint (P2002) — surface it as a conflict, not a 500.
+      const prismaCode = (error as { code?: string }).code;
+      if (prismaCode === 'P2002' || message.includes('Unique constraint')) {
+        throw new Error('Registration failed: User with this email already exists');
+      }
       throw new Error(`Registration failed: ${message}`);
     }
   }
@@ -147,18 +174,29 @@ class AuthService {
         },
       }) as PrismaUserRecord | null;
 
-      if (!user) {
+      // Always run a bcrypt comparison — against the real hash or a dummy —
+      // so response timing does not reveal whether the account exists.
+      const isPasswordValid = await ValidationHelpers.comparePassword(
+        password,
+        user?.password || DUMMY_PASSWORD_HASH,
+      );
+
+      if (!user || !isPasswordValid) {
+        if (user) {
+          await this.logAuditEvent(user.id, 'LOGIN_FAILED', 'user', user.id, {
+            reason: 'Invalid password',
+            ipAddress,
+            userAgent,
+          });
+        }
         throw new Error('Invalid email or password');
       }
 
+      // Generic message on purpose — distinct errors would allow enumeration
+      // of deactivated accounts. The real reason is recorded server-side.
       if (!user.isActive) {
-        throw new Error('Account is deactivated. Please contact support.');
-      }
-
-      const isPasswordValid = await ValidationHelpers.comparePassword(password, user.password || '');
-      if (!isPasswordValid) {
         await this.logAuditEvent(user.id, 'LOGIN_FAILED', 'user', user.id, {
-          reason: 'Invalid password',
+          reason: 'Account deactivated',
           ipAddress,
           userAgent,
         });
@@ -203,7 +241,9 @@ class AuthService {
 
   static async refreshToken(refreshToken: string): Promise<AuthTokens> {
     try {
-      const decoded = await JWTUtils.verifyRefreshToken(refreshToken) as AuthTokenPayload;
+      const redis = getRedisClient();
+      // Passing the client makes verifyRefreshToken reject blacklisted tokens.
+      const decoded = await JWTUtils.verifyRefreshToken(refreshToken, { redis }) as AuthTokenPayload;
 
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId },
@@ -227,6 +267,9 @@ class AuthService {
 
       const tokens = JWTUtils.generateTokenPair(tokenPayload) as AuthTokens;
 
+      // Rotate: revoke the consumed refresh token so it cannot be replayed.
+      await JWTUtils.blacklistToken(refreshToken, redis);
+
       await this.logAuditEvent(user.id, 'TOKEN_REFRESHED', 'user', user.id);
 
       return tokens;
@@ -236,7 +279,11 @@ class AuthService {
     }
   }
 
-  static async logout(accessToken: string | null | undefined, redis: any = null): Promise<void> {
+  static async logout(
+    accessToken: string | null | undefined,
+    redis: any = null,
+    refreshToken: string | null = null,
+  ): Promise<void> {
     try {
       if (!accessToken) {
         throw new Error('Access token is required');
@@ -247,9 +294,12 @@ class AuthService {
 
       if (redis) {
         await JWTUtils.blacklistToken(accessToken, redis);
+        if (refreshToken) {
+          await JWTUtils.blacklistToken(refreshToken, redis);
+        }
       }
 
-      await this.removeSession(accessToken);
+      await this.removeSession(accessToken, userId);
 
       if (userId) {
         await this.logAuditEvent(userId, 'USER_LOGOUT', 'user', userId);
@@ -319,13 +369,16 @@ class AuthService {
         },
       });
 
+      // Fire-and-forget: a failed email must not fail the response.
+      void emailService
+        .sendPasswordResetEmail(user.email, resetToken, user.firstName)
+        .catch((error: unknown) => console.error('Failed to send password reset email:', error));
+
       await this.logAuditEvent(user.id, 'PASSWORD_RESET_REQUESTED', 'user', user.id);
 
-      return {
-        message: 'Password reset link has been sent to your email',
-        resetToken,
-        expiresAt: resetExpires,
-      };
+      // Same message whether or not the account exists (no enumeration),
+      // and the token is never returned — it is only delivered by email.
+      return { message: 'If the email exists, a reset link has been sent' };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Password reset request failed: ${message}`);
@@ -336,20 +389,6 @@ class AuthService {
     try {
       const decoded = await JWTUtils.verifyPasswordResetToken(resetToken) as AuthTokenPayload;
 
-      const user = await prisma.user.findFirst({
-        where: {
-          id: decoded.userId,
-          passwordResetToken: resetToken,
-          passwordResetExpires: {
-            gt: new Date(),
-          },
-        },
-      }) as { id: string } | null;
-
-      if (!user) {
-        throw new Error('Invalid or expired reset token');
-      }
-
       const passwordValidation = ValidationHelpers.validatePasswordStrength(newPassword);
       if (!passwordValidation.isValid) {
         throw new Error(`Password validation failed: ${passwordValidation.feedback.join(', ')}`);
@@ -357,8 +396,16 @@ class AuthService {
 
       const hashedPassword = await ValidationHelpers.hashPassword(newPassword, config.security.bcryptRounds);
 
-      await prisma.user.update({
-        where: { id: user.id },
+      // Atomic verify-and-consume: a single conditional update guarantees the
+      // token cannot be replayed even under concurrent requests.
+      const consumed = await prisma.user.updateMany({
+        where: {
+          id: decoded.userId,
+          passwordResetToken: resetToken,
+          passwordResetExpires: {
+            gt: new Date(),
+          },
+        },
         data: {
           password: hashedPassword,
           passwordResetToken: null,
@@ -366,7 +413,21 @@ class AuthService {
         },
       });
 
-      await this.logAuditEvent(user.id, 'PASSWORD_RESET_COMPLETED', 'user', user.id);
+      if (consumed.count !== 1) {
+        throw new Error('Invalid or expired reset token');
+      }
+
+      // Belt-and-braces revocation of the consumed token plus every stored
+      // session, so existing sessions die with the old password.
+      const redis = getRedisClient();
+      await JWTUtils.blacklistToken(resetToken, redis);
+      try {
+        await prisma.session.deleteMany({ where: { userId: decoded.userId } });
+      } catch (sessionError) {
+        console.error('Failed to clear sessions after password reset:', sessionError);
+      }
+
+      await this.logAuditEvent(decoded.userId, 'PASSWORD_RESET_COMPLETED', 'user', decoded.userId);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Password reset failed: ${message}`);
@@ -375,6 +436,8 @@ class AuthService {
 
   static async verifyEmail(verificationToken: string): Promise<VerificationResult> {
     try {
+      // Verify signature/expiry first, then bind the token to a user via the
+      // stored emailVerificationToken — the DB lookup is the authoritative check.
       await JWTUtils.verifyEmailVerificationToken(verificationToken);
 
       const user = await prisma.user.findFirst({
@@ -419,22 +482,20 @@ class AuthService {
   }
 
   static async resendEmailVerification(email: string): Promise<PasswordResetResult> {
+    const uniformMessage = 'If the email exists and is unverified, a verification link has been sent';
+
     try {
       const user = await prisma.user.findUnique({
         where: { email: email.toLowerCase() },
         select: {
-          id: true, email: true, isVerified: true, isActive: true,
+          id: true, email: true, firstName: true, isVerified: true, isActive: true,
         },
-      }) as { id: string; email: string; isVerified: boolean; isActive: boolean } | null;
+      }) as { id: string; email: string; firstName: string; isVerified: boolean; isActive: boolean } | null;
 
-      if (!user || !user.isActive) {
-        return {
-          message: 'If the email exists and is unverified, a verification link has been sent',
-        } as PasswordResetResult;
-      }
-
-      if (user.isVerified) {
-        throw new Error('Email is already verified');
+      // Uniform response whether the account is missing, inactive or already
+      // verified — distinct outcomes would allow email enumeration.
+      if (!user || !user.isActive || user.isVerified) {
+        return { message: uniformMessage } as PasswordResetResult;
       }
 
       const verificationToken = JWTUtils.generateEmailVerificationToken(user.id, user.email);
@@ -448,13 +509,15 @@ class AuthService {
         },
       });
 
+      // Fire-and-forget: a failed email must not fail the response.
+      void emailService
+        .sendVerificationEmail(user.email, verificationToken, user.firstName)
+        .catch((error: unknown) => console.error('Failed to send verification email:', error));
+
       await this.logAuditEvent(user.id, 'EMAIL_VERIFICATION_RESENT', 'user', user.id);
 
-      return {
-        message: 'Verification email has been resent',
-        verificationToken,
-        expiresAt: verificationExpires,
-      } as PasswordResetResult;
+      // Token is only delivered by email, never in the response.
+      return { message: uniformMessage } as PasswordResetResult;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Resend verification failed: ${message}`);
@@ -483,28 +546,26 @@ class AuthService {
     }
   }
 
-  static async removeSession(accessToken: string): Promise<void> {
+  static async removeSession(accessToken: string, userId: string | null = null): Promise<void> {
     try {
+      // Bound the query: scope to the owning user (when known) and let the
+      // database filter on the token embedded in the JSON data blob rather
+      // than scanning the whole sessions table.
       const sessions = await prisma.session.findMany({
         where: {
-          userId: { not: null },
+          userId: userId || { not: null },
+          data: {
+            contains: accessToken,
+          },
         },
-      }) as SessionRecord[];
-
-      const sessionsToDelete = sessions.filter((session) => {
-        try {
-          const data = typeof session.data === 'string' ? JSON.parse(session.data) : session.data;
-          return data.accessToken === accessToken;
-        } catch {
-          return false;
-        }
+        select: { id: true },
       });
 
-      if (sessionsToDelete.length > 0) {
+      if (sessions.length > 0) {
         await prisma.session.deleteMany({
           where: {
             id: {
-              in: sessionsToDelete.map((session) => session.id),
+              in: sessions.map((session: { id: string }) => session.id),
             },
           },
         });
@@ -573,7 +634,8 @@ class AuthService {
           ...(firstName && { firstName }),
           ...(lastName && { lastName }),
           ...(phone !== undefined && { phone }),
-          ...(avatar && { avatar }),
+          // !== undefined so an explicit null/'' clears the avatar.
+          ...(avatar !== undefined && { avatar: avatar || null }),
         },
         select: {
           id: true,

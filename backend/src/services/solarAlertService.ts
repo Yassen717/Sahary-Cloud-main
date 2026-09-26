@@ -1,89 +1,20 @@
-import type { EmergencyLog, SolarAlert, VirtualMachine } from '@prisma/client';
-import { prisma } from '../config/database';
-
+// @ts-nocheck
+const { prisma } = require('../config/database');
 const emailService = require('./emailService');
-
-type EmergencyState = 'NORMAL' | 'WARNING' | 'CRITICAL' | 'EMERGENCY';
-
-type EmergencySeverity = 'WARNING' | 'CRITICAL';
-
-type AlertThresholds = {
-  lowProduction: number;
-  criticalProduction: number;
-  lowBattery: number;
-  criticalBattery: number;
-  highConsumption: number;
-};
-
-type EnergyData = {
-  production: number;
-  consumption: number;
-  batteryLevel: number;
-  capacity: number;
-};
-
-type AlertInput = {
-  type: string;
-  severity: string;
-  message: string;
-  data?: unknown;
-};
-
-// In-memory fallback alert used when the database write fails
-type InMemoryAlert = {
-  id: string;
-  type: string;
-  severity: string;
-  message: string;
-  data: unknown;
-  resolved: boolean;
-  createdAt: Date;
-};
-
-type ActiveAlert = SolarAlert | InMemoryAlert;
-
-type MonitoringResult = {
-  state: string;
-  alerts: ActiveAlert[];
-  timestamp: Date;
-};
-
-type ActionResult = {
-  success: boolean;
-  message?: string;
-  timestamp?: Date;
-  vmCount?: number;
-  error?: string;
-};
-
-type EmergencyLogOptions = {
-  limit?: number;
-  severity?: string;
-};
-
-const getErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
  * Solar Alert and Emergency Management Service
  * Handles monitoring, alerts, and emergency procedures for solar energy system
  */
 class SolarAlertService {
-  thresholds: AlertThresholds;
-
-  emergencyStates: Record<EmergencyState, EmergencyState>;
-
-  currentState: EmergencyState;
-
-  activeAlerts: Map<string, ActiveAlert>;
-
   constructor() {
     // Alert thresholds (configurable via environment)
     this.thresholds = {
-      lowProduction: parseFloat(process.env.LOW_PRODUCTION_THRESHOLD || '') || 20, // %
-      criticalProduction: parseFloat(process.env.CRITICAL_PRODUCTION_THRESHOLD || '') || 10, // %
-      lowBattery: parseFloat(process.env.LOW_BATTERY_THRESHOLD || '') || 30, // %
-      criticalBattery: parseFloat(process.env.CRITICAL_BATTERY_THRESHOLD || '') || 15, // %
-      highConsumption: parseFloat(process.env.HIGH_CONSUMPTION_THRESHOLD || '') || 90, // %
+      lowProduction: parseFloat(process.env.LOW_PRODUCTION_THRESHOLD) || 20, // %
+      criticalProduction: parseFloat(process.env.CRITICAL_PRODUCTION_THRESHOLD) || 10, // %
+      lowBattery: parseFloat(process.env.LOW_BATTERY_THRESHOLD) || 30, // %
+      criticalBattery: parseFloat(process.env.CRITICAL_BATTERY_THRESHOLD) || 15, // %
+      highConsumption: parseFloat(process.env.HIGH_CONSUMPTION_THRESHOLD) || 90, // %
     };
 
     // Emergency states
@@ -96,6 +27,45 @@ class SolarAlertService {
 
     this.currentState = this.emergencyStates.NORMAL;
     this.activeAlerts = new Map();
+
+    // Repopulate the in-memory dedupe map from persisted unresolved alerts so
+    // a restart doesn't pile up duplicate rows per breach
+    this.loadUnresolvedAlerts();
+  }
+
+  /**
+   * Whether solar production is expected right now. Mirrors the day/night
+   * window in solarService.getSimulatedProduction (sun up 06:00-18:00).
+   * @returns {boolean} True when production should be monitored
+   */
+  isSunExpected() {
+    const hour = new Date().getHours();
+    return hour >= 6 && hour <= 18;
+  }
+
+  /**
+   * Load unresolved alerts from the database into the in-memory map
+   */
+  async loadUnresolvedAlerts() {
+    try {
+      const unresolved = await prisma.solarAlert.findMany({
+        where: { resolved: false },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      for (const alert of unresolved) {
+        // Keep the most recent alert per type
+        if (!this.activeAlerts.has(alert.type)) {
+          this.activeAlerts.set(alert.type, alert);
+        }
+      }
+
+      if (unresolved.length > 0) {
+        console.log(`Loaded ${unresolved.length} unresolved solar alert(s) into memory`);
+      }
+    } catch (error) {
+      console.error('Failed to load unresolved alerts:', error);
+    }
   }
 
   /**
@@ -103,30 +73,46 @@ class SolarAlertService {
    * @param {Object} energyData - Current energy data
    * @returns {Promise<Object>} Monitoring result with alerts
    */
-  async monitorEnergyLevels(energyData: EnergyData): Promise<MonitoringResult> {
+  async monitorEnergyLevels(energyData) {
     const {
       production, consumption, batteryLevel, capacity,
     } = energyData;
 
-    const alerts: ActiveAlert[] = [];
-    const productionPercentage = capacity ? (production / capacity) * 100 : 0;
-    const consumptionPercentage = capacity ? (consumption / capacity) * 100 : 0;
+    const alerts = [];
+    // capacity is the rated per-interval yield in kWh (the expected production
+    // of a sunny interval), NOT total storage capacity — the percentage is the
+    // share of expected yield actually produced this tick.
+    const productionPercentage = capacity ? (production / capacity) * 100 : null;
+    const consumptionPercentage = capacity ? (consumption / capacity) * 100 : null;
 
-    // Check production levels
-    if (productionPercentage < this.thresholds.criticalProduction) {
-      alerts.push(await this.createAlert({
-        type: 'CRITICAL_LOW_PRODUCTION',
-        severity: 'CRITICAL',
-        message: `إنتاج الطاقة الشمسية منخفض جداً: ${productionPercentage.toFixed(1)}%`,
-        data: { production, productionPercentage },
-      }));
-    } else if (productionPercentage < this.thresholds.lowProduction) {
-      alerts.push(await this.createAlert({
-        type: 'LOW_PRODUCTION',
-        severity: 'WARNING',
-        message: `إنتاج الطاقة الشمسية منخفض: ${productionPercentage.toFixed(1)}%`,
-        data: { production, productionPercentage },
-      }));
+    // Check production levels — only while the sun is expected (06:00-18:00,
+    // mirroring getSimulatedProduction) and a rated yield is configured.
+    // Zero production at night is by design and must not alert; any stale
+    // production alerts are resolved when the check doesn't apply or passes.
+    if (capacity && this.isSunExpected()) {
+      if (productionPercentage < this.thresholds.criticalProduction) {
+        alerts.push(await this.createAlert({
+          type: 'CRITICAL_LOW_PRODUCTION',
+          severity: 'CRITICAL',
+          message: `إنتاج الطاقة الشمسية منخفض جداً: ${productionPercentage.toFixed(1)}%`,
+          data: { production, productionPercentage },
+        }));
+        await this.resolveAlertByType('LOW_PRODUCTION');
+      } else if (productionPercentage < this.thresholds.lowProduction) {
+        alerts.push(await this.createAlert({
+          type: 'LOW_PRODUCTION',
+          severity: 'WARNING',
+          message: `إنتاج الطاقة الشمسية منخفض: ${productionPercentage.toFixed(1)}%`,
+          data: { production, productionPercentage },
+        }));
+        await this.resolveAlertByType('CRITICAL_LOW_PRODUCTION');
+      } else {
+        await this.resolveAlertByType('CRITICAL_LOW_PRODUCTION');
+        await this.resolveAlertByType('LOW_PRODUCTION');
+      }
+    } else {
+      await this.resolveAlertByType('CRITICAL_LOW_PRODUCTION');
+      await this.resolveAlertByType('LOW_PRODUCTION');
     }
 
     // Check battery levels
@@ -137,6 +123,7 @@ class SolarAlertService {
         message: `مستوى البطارية منخفض جداً: ${batteryLevel}%`,
         data: { batteryLevel },
       }));
+      await this.resolveAlertByType('LOW_BATTERY');
     } else if (batteryLevel < this.thresholds.lowBattery) {
       alerts.push(await this.createAlert({
         type: 'LOW_BATTERY',
@@ -144,16 +131,22 @@ class SolarAlertService {
         message: `مستوى البطارية منخفض: ${batteryLevel}%`,
         data: { batteryLevel },
       }));
+      await this.resolveAlertByType('CRITICAL_LOW_BATTERY');
+    } else {
+      await this.resolveAlertByType('CRITICAL_LOW_BATTERY');
+      await this.resolveAlertByType('LOW_BATTERY');
     }
 
-    // Check consumption levels
-    if (consumptionPercentage > this.thresholds.highConsumption) {
+    // Check consumption levels (skipped when no rated yield is configured)
+    if (consumptionPercentage !== null && consumptionPercentage > this.thresholds.highConsumption) {
       alerts.push(await this.createAlert({
         type: 'HIGH_CONSUMPTION',
         severity: 'WARNING',
         message: `استهلاك الطاقة مرتفع: ${consumptionPercentage.toFixed(1)}%`,
         data: { consumption, consumptionPercentage },
       }));
+    } else {
+      await this.resolveAlertByType('HIGH_CONSUMPTION');
     }
 
     // Update system state based on alerts
@@ -171,7 +164,7 @@ class SolarAlertService {
    * @param {Object} alertData - Alert information
    * @returns {Promise<Object>} Created alert
    */
-  async createAlert(alertData: AlertInput): Promise<ActiveAlert> {
+  async createAlert(alertData) {
     const {
       type, severity, message, data,
     } = alertData;
@@ -182,8 +175,24 @@ class SolarAlertService {
       return existingAlert;
     }
 
+    // Fallback dedupe against the DB in case the in-memory map missed an
+    // unresolved row (e.g. the startup load failed or it was created elsewhere)
     try {
-      const alert = await prisma.solarAlert.create({
+      const persisted = await prisma.solarAlert.findFirst({
+        where: { type, resolved: false },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (persisted) {
+        this.activeAlerts.set(type, persisted);
+        return persisted;
+      }
+    } catch (error) {
+      console.error('Error checking for existing alert:', error);
+    }
+
+    let alert;
+    try {
+      alert = await prisma.solarAlert.create({
         data: {
           type,
           severity,
@@ -195,18 +204,11 @@ class SolarAlertService {
       });
 
       this.activeAlerts.set(type, alert);
-
-      // Send notifications for critical alerts
-      if (severity === 'CRITICAL') {
-        await this.sendCriticalAlertNotifications(alert);
-      }
-
       console.log(`⚠️  Solar Alert Created: ${type} - ${message}`);
-      return alert;
     } catch (error) {
       console.error('Error creating alert:', error);
       // Return in-memory alert if database fails
-      const alert: InMemoryAlert = {
+      alert = {
         id: `temp-${Date.now()}`,
         type,
         severity,
@@ -216,7 +218,50 @@ class SolarAlertService {
         createdAt: new Date(),
       };
       this.activeAlerts.set(type, alert);
+    }
+
+    // Notify for critical alerts regardless of persistence outcome — a DB
+    // outage must not silently swallow a CRITICAL alert
+    if (severity === 'CRITICAL') {
+      await this.sendCriticalAlertNotifications(alert);
+    }
+
+    return alert;
+  }
+
+  /**
+   * Resolve an active alert by type when its condition has cleared
+   * @param {string} type - Alert type to resolve
+   * @returns {Promise<Object|null>} Resolved alert or null if none was active
+   */
+  async resolveAlertByType(type) {
+    const activeAlert = this.activeAlerts.get(type);
+    if (!activeAlert || activeAlert.resolved) {
+      return null;
+    }
+
+    // Remove from the map first so a later tick doesn't double-resolve
+    this.activeAlerts.delete(type);
+
+    // In-memory-only alerts (DB was down) have no row to update
+    if (typeof activeAlert.id === 'string' && activeAlert.id.startsWith('temp-')) {
+      console.log(`✅ Solar Alert Resolved (in-memory): ${type}`);
+      return activeAlert;
+    }
+
+    try {
+      const alert = await prisma.solarAlert.update({
+        where: { id: activeAlert.id },
+        data: {
+          resolved: true,
+          resolvedAt: new Date(),
+        },
+      });
+      console.log(`✅ Solar Alert Resolved: ${type}`);
       return alert;
+    } catch (error) {
+      console.error(`Error auto-resolving alert ${type}:`, error);
+      return null;
     }
   }
 
@@ -225,7 +270,7 @@ class SolarAlertService {
    * @param {string} alertId - Alert ID
    * @returns {Promise<Object>} Updated alert
    */
-  async resolveAlert(alertId: string): Promise<SolarAlert> {
+  async resolveAlert(alertId) {
     try {
       const alert = await prisma.solarAlert.update({
         where: { id: alertId },
@@ -247,6 +292,12 @@ class SolarAlertService {
       return alert;
     } catch (error) {
       console.error('Error resolving alert:', error);
+      // Prisma "record not found" — surface a 404 to the API layer
+      if (error.code === 'P2025') {
+        const notFound = new Error('Alert not found');
+        notFound.statusCode = 404;
+        throw notFound;
+      }
       throw new Error('Failed to resolve alert');
     }
   }
@@ -255,7 +306,7 @@ class SolarAlertService {
    * Get all active alerts
    * @returns {Promise<Array>} Active alerts
    */
-  async getActiveAlerts(): Promise<ActiveAlert[]> {
+  async getActiveAlerts() {
     try {
       const alerts = await prisma.solarAlert.findMany({
         where: { resolved: false },
@@ -273,7 +324,7 @@ class SolarAlertService {
    * Update system state based on alerts
    * @param {Array} alerts - Current alerts
    */
-  async updateSystemState(alerts: ActiveAlert[]): Promise<void> {
+  async updateSystemState(alerts) {
     const criticalAlerts = alerts.filter((a) => a.severity === 'CRITICAL');
     const warningAlerts = alerts.filter((a) => a.severity === 'WARNING');
 
@@ -281,16 +332,20 @@ class SolarAlertService {
 
     if (criticalAlerts.length > 0) {
       newState = this.emergencyStates.CRITICAL;
-      await this.activateEmergencyPlan('CRITICAL');
     } else if (warningAlerts.length > 0) {
       newState = this.emergencyStates.WARNING;
-      await this.activateEmergencyPlan('WARNING');
     }
 
+    // Only run the emergency plan on an actual state transition — unresolved
+    // alerts persist across ticks and must not re-trigger it every cycle
     if (this.currentState !== newState) {
       console.log(`🔄 System state changed: ${this.currentState} → ${newState}`);
       this.currentState = newState;
       await this.notifyStateChange(newState);
+
+      if (newState === this.emergencyStates.CRITICAL || newState === this.emergencyStates.WARNING) {
+        await this.activateEmergencyPlan(newState);
+      }
     }
   }
 
@@ -298,7 +353,7 @@ class SolarAlertService {
    * Activate emergency plan based on severity
    * @param {string} severity - Emergency severity level
    */
-  async activateEmergencyPlan(severity: EmergencySeverity): Promise<void> {
+  async activateEmergencyPlan(severity) {
     console.log(`🚨 Activating emergency plan: ${severity}`);
 
     try {
@@ -330,7 +385,7 @@ class SolarAlertService {
    * Switch to backup power source
    * @returns {Promise<Object>} Switch result
    */
-  async switchToBackupPower(): Promise<ActionResult> {
+  async switchToBackupPower() {
     console.log('🔌 Switching to backup power...');
 
     try {
@@ -360,7 +415,7 @@ class SolarAlertService {
    * Prepare backup power system
    * @returns {Promise<Object>} Preparation result
    */
-  async prepareBackupPower(): Promise<ActionResult> {
+  async prepareBackupPower() {
     console.log('⚡ Preparing backup power system...');
 
     try {
@@ -379,7 +434,7 @@ class SolarAlertService {
       };
     } catch (error) {
       console.error('Error preparing backup power:', error);
-      return { success: false, error: getErrorMessage(error) };
+      return { success: false, error: error.message };
     }
   }
 
@@ -387,7 +442,7 @@ class SolarAlertService {
    * Reduce non-essential load to conserve power
    * @returns {Promise<Object>} Load reduction result
    */
-  async reduceNonEssentialLoad(): Promise<ActionResult> {
+  async reduceNonEssentialLoad() {
     console.log('📉 Reducing non-essential load...');
 
     try {
@@ -397,10 +452,9 @@ class SolarAlertService {
         include: { user: true },
       });
 
-      // In a real system, you'd have priority levels
-      // For now, we'll just log the action
-      const nonEssentialVMs = (vms as Array<VirtualMachine & { priority?: string | null }>)
-        .filter((vm) => !vm.priority || vm.priority === 'LOW');
+      // The schema has no VM priority field, so all running VMs are treated
+      // as load-reduction candidates — this only logs, it doesn't suspend
+      const nonEssentialVMs = vms;
 
       console.log(`Found ${nonEssentialVMs.length} non-essential VMs to potentially suspend`);
 
@@ -421,7 +475,7 @@ class SolarAlertService {
       };
     } catch (error) {
       console.error('Error reducing load:', error);
-      return { success: false, error: getErrorMessage(error) };
+      return { success: false, error: error.message };
     }
   }
 
@@ -429,7 +483,7 @@ class SolarAlertService {
    * Send critical alert notifications to admins
    * @param {Object} alert - Alert object
    */
-  async sendCriticalAlertNotifications(alert: SolarAlert): Promise<void> {
+  async sendCriticalAlertNotifications(alert) {
     try {
       // Get all admin users
       const admins = await prisma.user.findMany({
@@ -439,22 +493,26 @@ class SolarAlertService {
         },
       });
 
-      // Send email to each admin
-      for (const admin of admins) {
-        await emailService.sendEmail({
-          to: admin.email,
-          subject: `🚨 تنبيه حرج: ${alert.type}`,
-          html: `
-            <div dir="rtl">
-              <h2>تنبيه طاقة شمسية حرج</h2>
-              <p><strong>النوع:</strong> ${alert.type}</p>
-              <p><strong>الرسالة:</strong> ${alert.message}</p>
-              <p><strong>الوقت:</strong> ${alert.createdAt}</p>
-              <p>يرجى اتخاذ الإجراءات اللازمة فوراً.</p>
-            </div>
-          `,
-        }).catch((err: unknown) => console.error(`Failed to send email to ${admin.email}:`, err));
-      }
+      // Send email to each admin in parallel; log per-recipient failures
+      const results = await Promise.allSettled(admins.map((admin) => emailService.sendEmail({
+        to: admin.email,
+        subject: `🚨 تنبيه حرج: ${alert.type}`,
+        html: `
+          <div dir="rtl">
+            <h2>تنبيه طاقة شمسية حرج</h2>
+            <p><strong>النوع:</strong> ${alert.type}</p>
+            <p><strong>الرسالة:</strong> ${alert.message}</p>
+            <p><strong>الوقت:</strong> ${alert.createdAt}</p>
+            <p>يرجى اتخاذ الإجراءات اللازمة فوراً.</p>
+          </div>
+        `,
+      })));
+
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`Failed to send email to ${admins[index].email}:`, result.reason);
+        }
+      });
 
       console.log(`📧 Critical alert notifications sent to ${admins.length} admins`);
     } catch (error) {
@@ -466,7 +524,7 @@ class SolarAlertService {
    * Notify admins about system state change
    * @param {string} newState - New system state
    */
-  async notifyStateChange(newState: string): Promise<void> {
+  async notifyStateChange(newState) {
     try {
       const admins = await prisma.user.findMany({
         where: {
@@ -475,27 +533,31 @@ class SolarAlertService {
         },
       });
 
-      const stateMessages: Record<string, string> = {
+      const stateMessages = {
         NORMAL: 'النظام يعمل بشكل طبيعي',
         WARNING: 'النظام في حالة تحذير',
         CRITICAL: 'النظام في حالة حرجة',
         EMERGENCY: 'النظام في حالة طوارئ',
       };
 
-      for (const admin of admins) {
-        await emailService.sendEmail({
-          to: admin.email,
-          subject: `تغيير حالة النظام: ${newState}`,
-          html: `
-            <div dir="rtl">
-              <h2>تغيير حالة نظام الطاقة الشمسية</h2>
-              <p><strong>الحالة الجديدة:</strong> ${newState}</p>
-              <p><strong>الوصف:</strong> ${stateMessages[newState]}</p>
-              <p><strong>الوقت:</strong> ${new Date().toLocaleString('ar-EG')}</p>
-            </div>
-          `,
-        }).catch((err: unknown) => console.error(`Failed to send email to ${admin.email}:`, err));
-      }
+      const results = await Promise.allSettled(admins.map((admin) => emailService.sendEmail({
+        to: admin.email,
+        subject: `تغيير حالة النظام: ${newState}`,
+        html: `
+          <div dir="rtl">
+            <h2>تغيير حالة نظام الطاقة الشمسية</h2>
+            <p><strong>الحالة الجديدة:</strong> ${newState}</p>
+            <p><strong>الوصف:</strong> ${stateMessages[newState]}</p>
+            <p><strong>الوقت:</strong> ${new Date().toLocaleString('ar-EG')}</p>
+          </div>
+        `,
+      })));
+
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`Failed to send email to ${admins[index].email}:`, result.reason);
+        }
+      });
     } catch (error) {
       console.error('Error notifying state change:', error);
     }
@@ -505,7 +567,7 @@ class SolarAlertService {
    * Notify all admins about emergency
    * @param {string} severity - Emergency severity
    */
-  async notifyAllAdmins(severity: EmergencySeverity): Promise<void> {
+  async notifyAllAdmins(severity) {
     try {
       const admins = await prisma.user.findMany({
         where: {
@@ -514,26 +576,30 @@ class SolarAlertService {
         },
       });
 
-      const severityMessages: Record<string, string> = {
+      const severityMessages = {
         WARNING: 'تحذير: مستويات الطاقة منخفضة',
         CRITICAL: 'حرج: مستويات الطاقة حرجة - تم تفعيل خطة الطوارئ',
       };
 
-      for (const admin of admins) {
-        await emailService.sendEmail({
-          to: admin.email,
-          subject: `🚨 ${severityMessages[severity]}`,
-          html: `
-            <div dir="rtl">
-              <h2>إشعار طوارئ - نظام الطاقة الشمسية</h2>
-              <p><strong>المستوى:</strong> ${severity}</p>
-              <p><strong>الرسالة:</strong> ${severityMessages[severity]}</p>
-              <p><strong>الوقت:</strong> ${new Date().toLocaleString('ar-EG')}</p>
-              <p>يرجى مراجعة لوحة التحكم للحصول على مزيد من التفاصيل.</p>
-            </div>
-          `,
-        }).catch((err: unknown) => console.error(`Failed to send email to ${admin.email}:`, err));
-      }
+      const results = await Promise.allSettled(admins.map((admin) => emailService.sendEmail({
+        to: admin.email,
+        subject: `🚨 ${severityMessages[severity]}`,
+        html: `
+          <div dir="rtl">
+            <h2>إشعار طوارئ - نظام الطاقة الشمسية</h2>
+            <p><strong>المستوى:</strong> ${severity}</p>
+            <p><strong>الرسالة:</strong> ${severityMessages[severity]}</p>
+            <p><strong>الوقت:</strong> ${new Date().toLocaleString('ar-EG')}</p>
+            <p>يرجى مراجعة لوحة التحكم للحصول على مزيد من التفاصيل.</p>
+          </div>
+        `,
+      })));
+
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`Failed to send email to ${admins[index].email}:`, result.reason);
+        }
+      });
 
       console.log(`📧 Emergency notifications sent to ${admins.length} admins`);
     } catch (error) {
@@ -546,7 +612,7 @@ class SolarAlertService {
    * @param {Object} options - Query options
    * @returns {Promise<Array>} Emergency logs
    */
-  async getEmergencyLogs(options: EmergencyLogOptions = {}): Promise<EmergencyLog[]> {
+  async getEmergencyLogs(options = {}) {
     const { limit = 50, severity } = options;
 
     try {
@@ -567,7 +633,7 @@ class SolarAlertService {
    * Get current system state
    * @returns {string} Current state
    */
-  getCurrentState(): string {
+  getCurrentState() {
     return this.currentState;
   }
 
@@ -575,7 +641,7 @@ class SolarAlertService {
    * Reset system to normal state (manual override)
    * @returns {Promise<Object>} Reset result
    */
-  async resetToNormalState(): Promise<ActionResult> {
+  async resetToNormalState() {
     console.log('🔄 Resetting system to normal state...');
 
     this.currentState = this.emergencyStates.NORMAL;
@@ -611,6 +677,4 @@ class SolarAlertService {
   }
 }
 
-const solarAlertService = new SolarAlertService();
-
-export = solarAlertService;
+module.exports = new SolarAlertService();

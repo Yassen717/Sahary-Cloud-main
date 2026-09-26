@@ -1,4 +1,5 @@
-import { z } from 'zod';
+// @ts-nocheck
+const { z } = require('zod');
 
 // VM creation validation
 const createVMSchema = z.object({
@@ -51,6 +52,11 @@ const createVMSchema = z.object({
       .string()
       .min(1, 'Docker image cannot be empty')
       .max(200, 'Docker image name must not exceed 200 characters')
+      .regex(/^[a-zA-Z0-9][a-zA-Z0-9._/-]*(:[a-zA-Z0-9._-]+)?$/, 'Invalid Docker image format')
+      .refine(
+        (img) => /^(ubuntu|debian|alpine)(:[a-zA-Z0-9._-]+)?$/i.test(img),
+        'Only ubuntu, debian, or alpine images are allowed',
+      )
       .optional(),
   }),
 });
@@ -97,6 +103,17 @@ const updateVMSchema = z.object({
       .min(100, 'Bandwidth must be at least 100 GB')
       .max(10000, 'Bandwidth must not exceed 10 TB')
       .optional(),
+  }).refine(
+    (data) => Object.values(data).some((value) => value !== undefined),
+    { message: 'At least one field must be provided for update' },
+  ),
+
+  params: z.object({
+    id: z
+      .string({
+        required_error: 'VM ID is required',
+      })
+      .cuid('Invalid VM ID format'),
   }),
 });
 
@@ -392,7 +409,7 @@ const vmSuspendSchema = z.object({
 });
 
 // VM resource validation helper
-const validateVMResources = (data: { cpu: number; ram: number; storage: number }): boolean => {
+const validateVMResources = (data) => {
   const { cpu, ram, storage } = data;
 
   // Check if resource combination is valid

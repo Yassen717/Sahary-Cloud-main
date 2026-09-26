@@ -2,6 +2,10 @@ export interface AuthTokenPayload {
   userId: string;
   email: string;
   role: string;
+  /** Present only on impersonation tokens — ID of the admin who started the impersonation */
+  impersonatedBy?: string;
+  /** Present only on impersonation tokens */
+  isImpersonating?: boolean;
 }
 
 export interface AuthTokens {
@@ -36,7 +40,7 @@ export interface ProfileUpdateInput {
   firstName?: string;
   lastName?: string;
   phone?: string | null;
-  avatar?: string;
+  avatar?: string | null;
 }
 
 export interface AuthActionMetadata {

@@ -1,4 +1,5 @@
-import { z } from 'zod';
+// @ts-nocheck
+const { z } = require('zod');
 
 // Process payment validation
 const processPaymentSchema = z.object({
@@ -71,12 +72,20 @@ const refundPaymentSchema = z.object({
       .positive('Refund amount must be positive')
       .optional(), // If not provided, full refund
 
+    // Stripe refunds only accept a fixed enum of reasons — free-text
+    // justification goes through `notes` and is forwarded via metadata.
     reason: z
-      .string({
+      .enum(['duplicate', 'fraudulent', 'requested_by_customer', 'expired_uncaptured_charge'], {
         required_error: 'Refund reason is required',
-      })
-      .min(10, 'Refund reason must be at least 10 characters')
-      .max(500, 'Refund reason must not exceed 500 characters'),
+        invalid_type_error:
+                    'Refund reason must be one of: duplicate, fraudulent, requested_by_customer, expired_uncaptured_charge',
+      }),
+
+    notes: z
+      .string()
+      .min(10, 'Refund notes must be at least 10 characters')
+      .max(500, 'Refund notes must not exceed 500 characters')
+      .optional(),
   }),
 
   params: z.object({

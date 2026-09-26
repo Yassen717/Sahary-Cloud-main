@@ -1,4 +1,5 @@
-import { z } from 'zod';
+// @ts-nocheck
+const { z } = require('zod');
 
 // Solar data query validation
 const solarDataQuerySchema = z.object({
@@ -14,7 +15,7 @@ const solarDataQuerySchema = z.object({
       .optional(),
 
     period: z
-      .enum(['hour', 'day', 'week', 'month'])
+      .enum(['day', 'week', 'month'])
       .optional()
       .default('day'),
 
@@ -137,7 +138,7 @@ const environmentalImpactQuerySchema = z.object({
       .optional(),
 
     period: z
-      .enum(['day', 'week', 'month', 'year'])
+      .enum(['day', 'week', 'month'])
       .optional()
       .default('month'),
 
@@ -150,7 +151,7 @@ const environmentalImpactQuerySchema = z.object({
       .string()
       .transform((val) => val === 'true')
       .optional()
-      .default(false as any),
+      .default('false'),
   }).refine((data) => {
     if (data.startDate && data.endDate) {
       return new Date(data.startDate) <= new Date(data.endDate);
@@ -212,7 +213,7 @@ const efficiencyAnalysisSchema = z.object({
       .string()
       .transform((val) => val === 'true')
       .optional()
-      .default(false as any),
+      .default('false'),
 
     granularity: z
       .enum(['hour', 'day', 'week'])
@@ -222,7 +223,7 @@ const efficiencyAnalysisSchema = z.object({
     if (data.startDate && data.endDate) {
       const start = new Date(data.startDate);
       const end = new Date(data.endDate);
-      const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+      const diffDays = (end - start) / (1000 * 60 * 60 * 24);
 
       // Limit analysis period to 1 year
       return diffDays <= 365;
@@ -230,6 +231,14 @@ const efficiencyAnalysisSchema = z.object({
     return true;
   }, {
     message: 'Analysis period cannot exceed 1 year',
+    path: ['endDate'],
+  }).refine((data) => {
+    if (data.startDate && data.endDate) {
+      return new Date(data.startDate) <= new Date(data.endDate);
+    }
+    return true;
+  }, {
+    message: 'Start date must be before or equal to end date',
     path: ['endDate'],
   }),
 });
@@ -249,7 +258,7 @@ const solarForecastSchema = z.object({
       .string()
       .transform((val) => val === 'true')
       .optional()
-      .default(true as any),
+      .default('true'),
 
     granularity: z
       .enum(['hour', 'day'])

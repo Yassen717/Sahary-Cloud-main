@@ -1,82 +1,34 @@
-import axios from 'axios';
-import type { SolarData } from '@prisma/client';
-import { prisma } from '../config/database';
-
-type ProductionData = {
-  production: number;
-  timestamp: Date;
-};
-
-type ConsumptionData = {
-  consumption: number;
-  vmCount: number;
-  timestamp: Date;
-};
-
-type EnvironmentalImpact = {
-  co2Saved: number;
-  treesEquivalent: number;
-  solarEnergyUsed: number;
-};
-
-type SolarStatistics = {
-  totalProduction: number;
-  totalConsumption: number;
-  averageEfficiency: number;
-  environmentalImpact: EnvironmentalImpact;
-  dataPoints: number;
-  period?: string;
-};
-
-type SolarSystemStatus = {
-  status: string;
-  production?: number;
-  consumption?: number;
-  efficiency?: number;
-  batteryLevel?: number;
-  activeVMs?: number;
-  message?: string;
-  timestamp: Date;
-};
-
-type SolarDataInput = {
-  production: number | string;
-  consumption: number | string;
-};
-
-type EnergyLevelsInput = {
-  production: number;
-  consumption: number;
-  batteryLevel: number;
-  capacity: number;
-};
-
-type SolarAlertServiceLike = {
-  monitorEnergyLevels(energyData: EnergyLevelsInput): Promise<unknown>;
-};
+// @ts-nocheck
+const axios = require('axios');
+const { prisma } = require('../config/database');
+const solarAlertService = require('./solarAlertService');
 
 /**
  * Solar Energy Monitoring Service
  * Handles interaction with solar monitoring devices and data collection
  */
 class SolarService {
-  solarApiUrl: string;
-
-  solarApiKey: string | undefined;
-
-  solarAlertService: SolarAlertServiceLike | null;
-
   constructor() {
     this.solarApiUrl = process.env.SOLAR_API_URL || 'http://localhost:8080';
     this.solarApiKey = process.env.SOLAR_API_KEY;
-    this.solarAlertService = null; // Will be set to avoid circular dependency
+    // Timeout for outbound device API calls so a hung device can't stall the cron job
+    this.apiTimeoutMs = parseInt(process.env.SOLAR_API_TIMEOUT_MS, 10) || 10000;
+    // Re-entry guard: prevents overlapping collection runs when a tick takes too long
+    this.isCollecting = false;
+    // Rated per-interval solar yield (kWh per collection tick) used as the
+    // denominator for productionPercentage in solarAlertService. The simulated
+    // device produces 0-20 kWh per interval, so 20 kWh is the expected peak.
+    this.ratedIntervalYield = parseFloat(process.env.SOLAR_RATED_INTERVAL_KWH) || 20;
+    // solarAlertService does not depend on this module, so requiring it here is
+    // circular-safe; setAlertService remains for explicit override in bootstrap.
+    this.solarAlertService = solarAlertService;
   }
 
   /**
    * Set alert service (to avoid circular dependency)
    * @param {Object} alertService - Solar alert service instance
    */
-  setAlertService(alertService: SolarAlertServiceLike): void {
+  setAlertService(alertService) {
     this.solarAlertService = alertService;
   }
 
@@ -84,10 +36,11 @@ class SolarService {
    * Fetch current solar energy production data from monitoring device
    * @returns {Promise<Object>} Current production data
    */
-  async getCurrentProduction(): Promise<ProductionData> {
+  async getCurrentProduction() {
     try {
       // In production, this would call actual solar monitoring API
       const response = await axios.get(`${this.solarApiUrl}/api/production`, {
+        timeout: this.apiTimeoutMs,
         headers: {
           Authorization: `Bearer ${this.solarApiKey}`,
         },
@@ -108,20 +61,11 @@ class SolarService {
    * Fetch current energy consumption data
    * @returns {Promise<Object>} Current consumption data
    */
-  async getCurrentConsumption(): Promise<ConsumptionData> {
+  async getCurrentConsumption() {
     try {
       // Calculate total consumption from all active VMs
       const activeVMs = await prisma.virtualMachine.findMany({
         where: { status: 'RUNNING' },
-        include: {
-          usageRecords: {
-            where: {
-              timestamp: {
-                gte: new Date(Date.now() - 60 * 60 * 1000), // Last hour
-              },
-            },
-          },
-        },
       });
 
       // Estimate power consumption based on VM resources
@@ -150,7 +94,7 @@ class SolarService {
    * @param {number} consumption - Energy consumed (kWh)
    * @returns {number} Efficiency percentage
    */
-  calculateEfficiency(production: number, consumption: number): number {
+  calculateEfficiency(production, consumption) {
     if (production === 0) return 0;
     const efficiency = (consumption / production) * 100;
     return Math.min(efficiency, 100); // Cap at 100%
@@ -159,15 +103,18 @@ class SolarService {
   /**
    * Calculate environmental impact (CO2 savings)
    * @param {number} solarEnergy - Solar energy used (kWh)
+   * @param {number} periodDays - Number of days the energy figure covers (default 1)
    * @returns {Object} Environmental impact data
    */
-  calculateEnvironmentalImpact(solarEnergy: number): EnvironmentalImpact {
+  calculateEnvironmentalImpact(solarEnergy, periodDays = 1) {
     // Average CO2 emission: 0.5 kg per kWh (grid electricity)
     const co2PerKwh = 0.5;
     const co2Saved = solarEnergy * co2PerKwh;
 
-    // Equivalent trees planted (1 tree absorbs ~21 kg CO2/year)
-    const treesEquivalent = (co2Saved * 365) / 21;
+    // Equivalent trees planted: 1 tree absorbs ~21 kg CO2/year, so the saved
+    // amount is annualized by the actual number of days it was collected over.
+    const days = periodDays > 0 ? periodDays : 1;
+    const treesEquivalent = (co2Saved * (365 / days)) / 21;
 
     return {
       co2Saved: parseFloat(co2Saved.toFixed(2)), // kg
@@ -181,16 +128,28 @@ class SolarService {
    * @param {Object} data - Solar data to record
    * @returns {Promise<Object>} Created solar data record
    */
-  async recordSolarData(data: SolarDataInput): Promise<SolarData> {
+  async recordSolarData(data) {
     try {
       const { production, consumption } = data;
-      const efficiency = this.calculateEfficiency(Number(production), Number(consumption));
+      const productionValue = parseFloat(production);
+      const consumptionValue = parseFloat(consumption);
+
+      // Guard against non-numeric input — caller still runs the monitor
+      if (!Number.isFinite(productionValue) || !Number.isFinite(consumptionValue)) {
+        console.warn('Skipping solar data record: non-numeric production/consumption', data);
+        return null;
+      }
+
+      const efficiency = this.calculateEfficiency(productionValue, consumptionValue);
+      const { co2Saved } = this.calculateEnvironmentalImpact(productionValue);
 
       const solarData = await prisma.solarData.create({
         data: {
-          production: parseFloat(String(production)),
-          consumption: parseFloat(String(consumption)),
+          production: productionValue,
+          consumption: consumptionValue,
           efficiency: parseFloat(efficiency.toFixed(2)),
+          co2Saved,
+          systemStatus: this.solarAlertService ? this.solarAlertService.getCurrentState() : 'NORMAL',
           timestamp: new Date(),
         },
       });
@@ -206,9 +165,11 @@ class SolarService {
    * Get solar data for a specific time period
    * @param {Date} startDate - Start date
    * @param {Date} endDate - End date
+   * @param {number} [limit] - Max records to return; omit for no cap
+   *   (internal aggregation passes nothing, API callers pass a clamped value)
    * @returns {Promise<Array>} Solar data records
    */
-  async getSolarDataByPeriod(startDate: Date, endDate: Date): Promise<SolarData[]> {
+  async getSolarDataByPeriod(startDate, endDate, limit) {
     try {
       const solarData = await prisma.solarData.findMany({
         where: {
@@ -220,6 +181,7 @@ class SolarService {
         orderBy: {
           timestamp: 'desc',
         },
+        take: limit,
       });
 
       return solarData;
@@ -234,10 +196,11 @@ class SolarService {
    * @param {string} period - Period type ('day', 'week', 'month')
    * @returns {Promise<Object>} Aggregated statistics
    */
-  async getSolarStatistics(period: string = 'day'): Promise<SolarStatistics> {
+  async getSolarStatistics(period = 'day') {
     try {
       const now = new Date();
-      let startDate: Date;
+      const endDate = new Date();
+      let startDate;
 
       switch (period) {
         case 'day':
@@ -246,34 +209,45 @@ class SolarService {
         case 'week':
           startDate = new Date(now.setDate(now.getDate() - 7));
           break;
-        case 'month':
-          startDate = new Date(now.setMonth(now.getMonth() - 1));
+        case 'month': {
+          // setMonth overflows into the next month when the target month has
+          // fewer days (e.g. Mar 31 -> Mar 3); clamp back to its last day.
+          const monthAgo = new Date(now);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          if (monthAgo.getDate() !== now.getDate()) {
+            monthAgo.setDate(0);
+          }
+          startDate = monthAgo;
           break;
+        }
         default:
-          startDate = new Date(now.setHours(0, 0, 0, 0));
+          throw new Error(`Invalid period: ${period}. Must be day, week, or month`);
       }
 
-      const solarData = await this.getSolarDataByPeriod(startDate, new Date());
+      const solarData = await this.getSolarDataByPeriod(startDate, endDate);
+
+      // Actual number of days covered, used to annualize the trees equivalent
+      const periodDays = Math.max((endDate - startDate) / (24 * 60 * 60 * 1000), 1);
 
       if (solarData.length === 0) {
         return {
           totalProduction: 0,
           totalConsumption: 0,
           averageEfficiency: 0,
-          environmentalImpact: this.calculateEnvironmentalImpact(0),
+          environmentalImpact: this.calculateEnvironmentalImpact(0, periodDays),
           dataPoints: 0,
         };
       }
 
-      const totalProduction = solarData.reduce((sum, record) => sum + Number(record.production), 0);
-      const totalConsumption = solarData.reduce((sum, record) => sum + Number(record.consumption), 0);
-      const averageEfficiency = solarData.reduce((sum, record) => sum + Number(record.efficiency), 0) / solarData.length;
+      const totalProduction = solarData.reduce((sum, record) => sum + parseFloat(record.production), 0);
+      const totalConsumption = solarData.reduce((sum, record) => sum + parseFloat(record.consumption), 0);
+      const averageEfficiency = solarData.reduce((sum, record) => sum + parseFloat(record.efficiency), 0) / solarData.length;
 
       return {
         totalProduction: parseFloat(totalProduction.toFixed(2)),
         totalConsumption: parseFloat(totalConsumption.toFixed(2)),
         averageEfficiency: parseFloat(averageEfficiency.toFixed(2)),
-        environmentalImpact: this.calculateEnvironmentalImpact(totalProduction),
+        environmentalImpact: this.calculateEnvironmentalImpact(totalProduction, periodDays),
         dataPoints: solarData.length,
         period,
       };
@@ -287,7 +261,7 @@ class SolarService {
    * Get current solar system status
    * @returns {Promise<Object>} Current system status
    */
-  async getSystemStatus(): Promise<SolarSystemStatus> {
+  async getSystemStatus() {
     try {
       const production = await this.getCurrentProduction();
       const consumption = await this.getCurrentConsumption();
@@ -308,11 +282,9 @@ class SolarService {
       };
     } catch (error) {
       console.error('Error getting system status:', error);
-      return {
-        status: 'error',
-        message: 'Unable to retrieve system status',
-        timestamp: new Date(),
-      };
+      const err = new Error('Unable to retrieve system status');
+      err.statusCode = 503;
+      throw err;
     }
   }
 
@@ -320,9 +292,10 @@ class SolarService {
    * Get battery level (for backup power)
    * @returns {Promise<number>} Battery level percentage
    */
-  async getBatteryLevel(): Promise<number> {
+  async getBatteryLevel() {
     try {
       const response = await axios.get(`${this.solarApiUrl}/api/battery`, {
+        timeout: this.apiTimeoutMs,
         headers: {
           Authorization: `Bearer ${this.solarApiKey}`,
         },
@@ -339,24 +312,39 @@ class SolarService {
    * Collect and record solar data (for scheduled jobs)
    * @returns {Promise<Object>} Recorded data
    */
-  async collectAndRecordData(): Promise<SolarData> {
+  async collectAndRecordData() {
+    // Re-entry guard: a slow tick (e.g. hung device API) must not overlap runs,
+    // which would duplicate SolarData rows and race the alert monitor.
+    if (this.isCollecting) {
+      console.warn('Solar data collection already in progress, skipping this tick');
+      return null;
+    }
+
+    this.isCollecting = true;
     try {
       const production = await this.getCurrentProduction();
       const consumption = await this.getCurrentConsumption();
       const batteryLevel = await this.getBatteryLevel();
 
-      const recordedData = await this.recordSolarData({
-        production: production.production,
-        consumption: consumption.consumption,
-      });
+      // Record first, but never let a failed/skipped insert suppress monitoring
+      let recordedData = null;
+      try {
+        recordedData = await this.recordSolarData({
+          production: production.production,
+          consumption: consumption.consumption,
+        });
+      } catch (recordError) {
+        console.error('Error recording solar data (monitoring continues):', recordError);
+      }
 
-      // Check energy levels and trigger alerts if needed
+      // Check energy levels and trigger alerts if needed.
+      // capacity is the rated per-interval yield in kWh (see constructor).
       if (this.solarAlertService) {
         await this.solarAlertService.monitorEnergyLevels({
           production: production.production,
           consumption: consumption.consumption,
           batteryLevel,
-          capacity: 100, // Assuming 100 kWh capacity, should be configurable
+          capacity: this.ratedIntervalYield,
         });
       }
 
@@ -365,6 +353,8 @@ class SolarService {
     } catch (error) {
       console.error('Error collecting solar data:', error);
       throw error;
+    } finally {
+      this.isCollecting = false;
     }
   }
 
@@ -372,7 +362,7 @@ class SolarService {
    * Get simulated production data (for development/testing)
    * @returns {Object} Simulated production data
    */
-  getSimulatedProduction(): ProductionData {
+  getSimulatedProduction() {
     const hour = new Date().getHours();
     let production = 0;
 
@@ -393,6 +383,4 @@ class SolarService {
   }
 }
 
-const solarService = new SolarService();
-
-export = solarService;
+module.exports = new SolarService();

@@ -35,13 +35,34 @@ type ValidationErrorResult = {
   domain?: string;
 };
 
+// Free-text fields preserved verbatim — stripping markup chars from these
+// silently corrupts legitimate input (e.g. VM exec `command` arrays).
+const PRESERVED_TEXT_FIELDS = new Set([
+  'command',
+  'commands',
+  'args',
+  'description',
+  'reason',
+  'content',
+  'comment',
+  'notes',
+  'message',
+  'text',
+  'title',
+]);
+
+const isPreservedTextValue = (value: unknown): boolean => typeof value === 'string'
+  || (Array.isArray(value) && value.every((item) => typeof item === 'string'));
+
 const sanitizeInput = (data: unknown): unknown => {
   if (typeof data === 'string') {
     return data
       .trim()
       .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/javascript:/gi, '')
-      .replace(/on\w+\s*=/gi, '');
+      .replace(/javascript\s*:/gi, '')
+      // Strip HTML-like tags only — `on*=` outside tags (`done=true`) and
+      // bare `<`/`>` (`x > y`) are legitimate input.
+      .replace(/<\/?[a-zA-Z][^<>]*>/g, '');
   }
 
   if (Array.isArray(data)) {
@@ -51,7 +72,7 @@ const sanitizeInput = (data: unknown): unknown => {
   if (typeof data === 'object' && data !== null) {
     const sanitized: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data)) {
-      sanitized[key] = sanitizeInput(value);
+      sanitized[key] = PRESERVED_TEXT_FIELDS.has(key) && isPreservedTextValue(value) ? value : sanitizeInput(value);
     }
     return sanitized;
   }
@@ -68,6 +89,8 @@ const validate = (schema: z.ZodTypeAny): ValidationMiddleware => async (req, res
     });
 
     req.body = validatedData.body || req.body;
+    // req.query is a plain writable property on Express 4 — assignment is
+    // intentional (verified; not a getter-only property like Express 5).
     req.query = validatedData.query || req.query;
     req.params = validatedData.params || req.params;
 
@@ -242,7 +265,7 @@ const customValidators = {
     endDate: string | Date,
     options: { maxDays?: number; allowFuture?: boolean; allowPast?: boolean } = {},
   ): ValidationErrorResult => {
-    const { maxDays = 365 } = options;
+    const { maxDays = 365, allowFuture = false, allowPast = true } = options;
 
     const errors: string[] = [];
     const start = new Date(startDate);
@@ -265,8 +288,12 @@ const customValidators = {
       errors.push('Start date must be before or equal to end date');
     }
 
-    if (end > now) {
+    if (!allowFuture && end > now) {
       errors.push('End date cannot be in the future');
+    }
+
+    if (!allowPast && start < now) {
+      errors.push('Start date cannot be in the past');
     }
 
     const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
@@ -296,6 +323,8 @@ const createValidator = (schema: z.ZodTypeAny, options: ValidationOptions = {}):
       );
 
       req.body = validatedData.body || req.body;
+      // req.query is a plain writable property on Express 4 — assignment is
+      // intentional (verified; not a getter-only property like Express 5).
       req.query = validatedData.query || req.query;
       req.params = validatedData.params || req.params;
       req.validationPassed = true;

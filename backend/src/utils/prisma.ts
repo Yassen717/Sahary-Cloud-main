@@ -12,17 +12,11 @@ type QueryModel = {
     where?: Record<string, unknown>;
     orderBy?: Record<string, unknown>;
     include?: Record<string, unknown>;
+    select?: Record<string, unknown>;
     skip?: number;
     take?: number;
   }): Promise<unknown[]>;
   count(args?: { where?: Record<string, unknown> }): Promise<number>;
-};
-
-type UpdateModel<T = Record<string, unknown>> = {
-  update(args: {
-    where: { id: string };
-    data: Record<string, unknown>;
-  }): Promise<T>;
 };
 
 type CreateManyModel = {
@@ -51,13 +45,28 @@ const getErrorMessage = (error: unknown): string => {
   return 'Unknown error';
 };
 
+const MAX_PAGE_LIMIT = 100;
+
+const normalizePagination = (
+  page: number | string | undefined,
+  limit: number | string | undefined,
+  maxLimit = MAX_PAGE_LIMIT,
+): { page: number; limit: number } => {
+  const normalizedPage = Math.max(1, Number.parseInt(String(page ?? 1), 10) || 1);
+  const normalizedLimit = Math.min(
+    maxLimit,
+    Math.max(1, Number.parseInt(String(limit ?? 10), 10) || 10),
+  );
+
+  return { page: normalizedPage, limit: normalizedLimit };
+};
+
 const getPagination = ({ page = 1, limit = 10 }: PaginationOptions): { skip: number; take: number } => {
-  const normalizedPage = Number.parseInt(String(page), 10) || 1;
-  const normalizedLimit = Number.parseInt(String(limit), 10) || 10;
+  const normalized = normalizePagination(page, limit);
 
   return {
-    skip: (normalizedPage - 1) * normalizedLimit,
-    take: normalizedLimit,
+    skip: (normalized.page - 1) * normalized.limit,
+    take: normalized.limit,
   };
 };
 
@@ -69,6 +78,7 @@ const getPaginatedResults = async <T = Record<string, unknown>>(
     where?: Record<string, unknown>;
     orderBy?: Record<string, unknown>;
     include?: Record<string, unknown>;
+    select?: Record<string, unknown>;
   } = {},
 ): Promise<{
   data: T[];
@@ -82,23 +92,29 @@ const getPaginatedResults = async <T = Record<string, unknown>>(
   };
 }> => {
   const {
-    page = 1, limit = 10, where = {}, orderBy = {}, include = {},
+    where = {}, orderBy = {}, include, select,
   } = options;
 
-  const pagination = getPagination({ page, limit });
+  const { page: normalizedPage, limit: normalizedLimit } = normalizePagination(
+    options.page,
+    options.limit,
+  );
+  const pagination = getPagination({ page: normalizedPage, limit: normalizedLimit });
+
+  // Prisma rejects queries that pass both `select` and `include` — `select`
+  // wins when the caller supplies both.
+  const projection = select ? { select } : { include };
 
   const [data, total] = await Promise.all([
     model.findMany({
       where,
       orderBy,
-      include,
+      ...projection,
       ...pagination,
     }),
     model.count({ where }),
   ]);
 
-  const normalizedPage = Number.parseInt(String(page), 10) || 1;
-  const normalizedLimit = Number.parseInt(String(limit), 10) || 10;
   const totalPages = Math.ceil(total / normalizedLimit);
 
   return {
@@ -114,13 +130,9 @@ const getPaginatedResults = async <T = Record<string, unknown>>(
   };
 };
 
-const softDelete = async <T = Record<string, unknown>>(model: UpdateModel<T>, id: string): Promise<T> => model.update({
-  where: { id },
-  data: {
-    deletedAt: new Date(),
-    isActive: false,
-  },
-});
+// NB: a generic `softDelete` helper was removed — it wrote `deletedAt`, which
+// does not exist anywhere in the Prisma schema, so every call would throw.
+// Set `isActive: false` directly on models that have that field instead.
 
 const bulkCreate = async (model: CreateManyModel, data: Array<Record<string, unknown>>): Promise<Record<string, unknown>> => model.createMany({
   data,
@@ -159,10 +171,21 @@ const searchRecords = async <T = Record<string, unknown>>(
     },
   }));
 
-  const searchWhere = {
-    ...where,
-    OR: searchConditions,
-  };
+  // Merge with a caller-supplied OR/AND instead of overwriting it: both the
+  // caller's clauses and the search OR must hold → wrap them in AND.
+  const { OR: existingOr, AND: existingAnd, ...restWhere } = where;
+
+  let searchWhere: Record<string, unknown>;
+  if (existingOr === undefined && existingAnd === undefined) {
+    searchWhere = { ...restWhere, OR: searchConditions };
+  } else {
+    const andClauses: unknown[] = [
+      ...(Array.isArray(existingAnd) ? existingAnd : existingAnd ? [existingAnd] : []),
+      ...(existingOr ? [{ OR: existingOr }] : []),
+      { OR: searchConditions },
+    ];
+    searchWhere = { ...restWhere, AND: andClauses };
+  }
 
   return getPaginatedResults(model, {
     page,
@@ -259,7 +282,6 @@ export {
   prisma,
   getPagination,
   getPaginatedResults,
-  softDelete,
   bulkCreate,
   searchRecords,
   executeTransaction,
@@ -275,7 +297,6 @@ export default {
   prisma,
   getPagination,
   getPaginatedResults,
-  softDelete,
   bulkCreate,
   searchRecords,
   executeTransaction,

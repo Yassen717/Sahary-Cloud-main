@@ -15,6 +15,12 @@ type HostingRequest = Request & {
   };
 };
 
+type MappedError = {
+  status?: unknown;
+  expose?: unknown;
+  code?: unknown;
+};
+
 function isValidDomain(domain: unknown): domain is string {
   return typeof domain === 'string' && domain.length <= 253 && DOMAIN_REGEX.test(domain);
 }
@@ -53,7 +59,7 @@ class HostingController {
       });
     } catch (error) {
       const status = HostingController._errorStatus(error);
-      const message = error instanceof Error ? error.message : 'Failed to create hosting account';
+      const message = HostingController._errorMessage(error, 'Failed to create hosting account');
       res.status(status).json({ success: false, message });
     }
   }
@@ -63,8 +69,8 @@ class HostingController {
       const account = await HostingService.getAccountByUser(req.user.userId);
       res.status(200).json({ success: true, data: account });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      const status = message === 'No hosting account found' ? 404 : 500;
+      const status = HostingController._errorStatus(error);
+      const message = HostingController._errorMessage(error, 'Failed to retrieve hosting account');
       res.status(status).json({ success: false, message });
     }
   }
@@ -76,7 +82,7 @@ class HostingController {
       res.status(200).json({ success: true, message: 'Hosting account terminated', data: account });
     } catch (error) {
       const status = HostingController._errorStatus(error);
-      const message = error instanceof Error ? error.message : 'Failed to terminate hosting account';
+      const message = HostingController._errorMessage(error, 'Failed to terminate hosting account');
       res.status(status).json({ success: false, message });
     }
   }
@@ -87,7 +93,7 @@ class HostingController {
       res.status(200).json({ success: true, data: domains });
     } catch (error) {
       const status = HostingController._errorStatus(error);
-      const message = error instanceof Error ? error.message : 'Failed to list domains';
+      const message = HostingController._errorMessage(error, 'Failed to list domains');
       res.status(status).json({ success: false, message });
     }
   }
@@ -115,7 +121,7 @@ class HostingController {
       });
     } catch (error) {
       const status = HostingController._errorStatus(error);
-      const message = error instanceof Error ? error.message : 'Failed to add domain';
+      const message = HostingController._errorMessage(error, 'Failed to add domain');
       res.status(status).json({ success: false, message });
     }
   }
@@ -127,7 +133,7 @@ class HostingController {
       res.status(200).json({ success: true, message: 'Domain removed' });
     } catch (error) {
       const status = HostingController._errorStatus(error);
-      const message = error instanceof Error ? error.message : 'Failed to remove domain';
+      const message = HostingController._errorMessage(error, 'Failed to remove domain');
       res.status(status).json({ success: false, message });
     }
   }
@@ -144,18 +150,56 @@ class HostingController {
       });
     } catch (error) {
       const status = HostingController._errorStatus(error);
-      const message = error instanceof Error ? error.message : 'Failed to verify domain';
+      const message = HostingController._errorMessage(error, 'Failed to verify domain');
       res.status(status).json({ success: false, message });
     }
   }
 
+  /**
+   * Map an error to an HTTP status by its annotated fields/codes — never by
+   * substring matching. Service errors carry `status` + `expose`; Prisma
+   * known-request errors carry `code`; anything else is a 500.
+   */
   static _errorStatus(error: unknown): number {
-    const message = error instanceof Error ? error.message : String(error);
+    const candidate = error as MappedError | null;
 
-    if (message === 'Forbidden') return 403;
-    if (message.includes('not found') || message.includes('No ')) return 404;
-    if (message.includes('already') || message.includes('limit')) return 409;
-    return 400;
+    if (candidate && typeof candidate.status === 'number' && candidate.status >= 400 && candidate.status < 600) {
+      return candidate.status;
+    }
+
+    // Prisma known-request errors (unique violation / record not found)
+    if (candidate && candidate.code === 'P2002') return 409;
+    if (candidate && candidate.code === 'P2025') return 404;
+
+    return 500;
+  }
+
+  /**
+   * Only echo messages explicitly marked safe-to-expose by the service layer;
+   * everything else gets a generic status-appropriate message so internals
+   * (Prisma details, paths, stack data) never leak to clients.
+   */
+  static _errorMessage(error: unknown, fallback: string): string {
+    const candidate = error as MappedError | null;
+
+    if (error instanceof Error && candidate?.expose === true) {
+      return error.message;
+    }
+
+    switch (HostingController._errorStatus(error)) {
+      case 400:
+        return 'Bad request';
+      case 403:
+        return 'Forbidden';
+      case 404:
+        return 'Resource not found';
+      case 409:
+        return 'Resource conflict';
+      case 502:
+        return 'Upstream service failure';
+      default:
+        return fallback;
+    }
   }
 }
 

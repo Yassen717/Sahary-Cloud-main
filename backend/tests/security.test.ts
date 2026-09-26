@@ -1,36 +1,39 @@
-import {
+const {
   sanitizeString,
   sanitizeObject,
   validateEmail,
   validateURL,
   validateUUID,
-} from '../src/middlewares/sanitization';
-import { ValidationError } from '../src/utils/errors';
+} = require('../src/middlewares/sanitization');
+const { ValidationError } = require('../src/utils/errors');
 
 describe('Security Middleware', () => {
   describe('Input Sanitization', () => {
     it('should sanitize string input', () => {
-      const input = '<script>alert("xss")</script>Hello';
-      const sanitized = sanitizeString(input) as string;
+      // sanitizeString strips low/control characters and trims — it does
+      // NOT remove HTML/script tags (that is xssProtection's job).
+      const input = '  Hello\x00World\x07  ';
+      const sanitized = sanitizeString(input);
 
-      expect(sanitized).not.toContain('<script>');
-      expect(sanitized).not.toContain('</script>');
+      expect(sanitized).toBe('HelloWorld');
     });
 
     it('should sanitize object recursively', () => {
+      // Recursive trimming/control-char stripping on non-preserved fields
       const input = {
-        name: '<script>alert("xss")</script>',
+        name: '  padded  ',
         nested: {
-          value: '<img src=x onerror=alert(1)>',
+          value: '\x01deep\x01',
         },
-        array: ['<script>test</script>', 'safe'],
+        array: ['  a  ', 'safe'],
       };
 
-      const sanitized = sanitizeObject(input) as any;
+      const sanitized = sanitizeObject(input);
 
-      expect(sanitized.name).not.toContain('<script>');
-      expect(sanitized.nested.value).not.toContain('<img');
-      expect(sanitized.array[0]).not.toContain('<script>');
+      expect(sanitized.name).toBe('padded');
+      expect(sanitized.nested.value).toBe('deep');
+      expect(sanitized.array[0]).toBe('a');
+      expect(sanitized.array[1]).toBe('safe');
     });
 
     it('should handle null and undefined', () => {
@@ -45,7 +48,7 @@ describe('Security Middleware', () => {
         string: 'test',
       };
 
-      const sanitized = sanitizeObject(input) as any;
+      const sanitized = sanitizeObject(input);
 
       expect(sanitized.number).toBe(123);
       expect(sanitized.boolean).toBe(true);

@@ -93,7 +93,8 @@ const getErrorStats = async (req: Request, res: Response, next: NextFunction): P
 const getErrorTrends = async (req: MonitoringRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { period = 'day' } = req.query;
-    const trends = await errorTrackingService.getErrorTrends(period);
+    const safePeriod = ['hour', 'day', 'week', 'month'].includes(String(period)) ? period : 'day';
+    const trends = await errorTrackingService.getErrorTrends(safePeriod);
 
     res.status(200).json({
       success: true,
@@ -107,7 +108,8 @@ const getErrorTrends = async (req: MonitoringRequest, res: Response, next: NextF
 const getCommonErrors = async (req: MonitoringRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { limit = 10 } = req.query;
-    const errors = errorTrackingService.getMostCommonErrors(Number.parseInt(String(limit), 10));
+    const parsedLimit = Math.min(100, Math.max(1, Number.parseInt(String(limit), 10) || 10));
+    const errors = errorTrackingService.getMostCommonErrors(parsedLimit);
 
     res.status(200).json({
       success: true,

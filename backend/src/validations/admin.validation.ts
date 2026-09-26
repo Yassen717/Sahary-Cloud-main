@@ -1,4 +1,5 @@
-import { z } from 'zod';
+// @ts-nocheck
+const { z } = require('zod');
 
 // Admin user management validation
 const updateUserStatusSchema = z.object({

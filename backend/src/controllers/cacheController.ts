@@ -15,6 +15,18 @@ type CacheControllerRequest = Request & {
 
 type WarmupFunction = () => Promise<unknown>;
 
+// Cache management must stay inside the `cache:*` namespace — an arbitrary
+// pattern like `*` would let an admin delete session/blacklist/ddos keys.
+const resolveCachePattern = (pattern: unknown): string | null => {
+  if (pattern === undefined || pattern === null || pattern === '' || pattern === '*') {
+    return 'cache:*';
+  }
+  if (typeof pattern !== 'string' || !pattern.startsWith('cache:')) {
+    return null;
+  }
+  return pattern;
+};
+
 const getStats = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const stats = cacheMonitorService.getStats();
@@ -43,7 +55,14 @@ const getHealth = async (_req: Request, res: Response, next: NextFunction): Prom
 
 const getSize = async (req: CacheControllerRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { pattern = 'cache:*' } = req.query;
+    const pattern = resolveCachePattern(req.query.pattern);
+    if (pattern === null) {
+      res.status(400).json({
+        success: false,
+        error: "Invalid pattern: must target the 'cache:*' namespace",
+      });
+      return;
+    }
     const size = await cacheMonitorService.getCacheSize(pattern);
 
     res.status(200).json({
@@ -58,7 +77,7 @@ const getSize = async (req: CacheControllerRequest, res: Response, next: NextFun
 const getTopKeys = async (req: CacheControllerRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { limit = 10 } = req.query;
-    const parsedLimit = Number.parseInt(String(limit), 10);
+    const parsedLimit = Math.min(100, Math.max(1, Number.parseInt(String(limit), 10) || 10));
     const keys = await cacheMonitorService.getTopKeys(parsedLimit);
 
     res.status(200).json({
@@ -86,9 +105,17 @@ const analyzePatterns = async (_req: Request, res: Response, next: NextFunction)
 
 const clearCache = async (req: CacheControllerRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { pattern = 'cache:*' } = req.body;
+    const pattern = resolveCachePattern(req.body.pattern);
+    if (pattern === null) {
+      res.status(400).json({
+        success: false,
+        error: "Invalid pattern: must target the 'cache:*' namespace",
+      });
+      return;
+    }
 
-    const deleted = await redisService.invalidate(pattern);
+    // delPattern propagates Redis errors — invalidate() would swallow them as 0.
+    const deleted = await redisService.delPattern(pattern);
 
     res.status(200).json({
       success: true,

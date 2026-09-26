@@ -1,8 +1,8 @@
 // @ts-nocheck
 const express = require('express');
 const HostingController = require('../controllers/hostingController');
-const { authenticate } = require('../middlewares/auth');
-const { sanitizeInput, xssProtection } = require('../middlewares/security');
+const { authenticate, requireEmailVerification } = require('../middlewares/auth');
+const { sanitizeInput, xssProtection, apiRateLimit } = require('../middlewares/security');
 
 const router = express.Router();
 
@@ -14,13 +14,13 @@ router.get('/plans', HostingController.listPlans);
 
 // ─── Account management (authenticated) ──────────────────────────────────────
 router.get('/accounts/me', authenticate, HostingController.getMyAccount);
-router.post('/accounts', authenticate, HostingController.createAccount);
-router.delete('/accounts/:id', authenticate, HostingController.terminateAccount);
+router.post('/accounts', authenticate, requireEmailVerification, HostingController.createAccount);
+router.delete('/accounts/:id', authenticate, requireEmailVerification, HostingController.terminateAccount);
 
 // ─── Domain management (authenticated) ───────────────────────────────────────
 router.get('/domains', authenticate, HostingController.listDomains);
-router.post('/domains', authenticate, HostingController.addDomain);
-router.post('/domains/:id/verify', authenticate, HostingController.verifyDomain);
-router.delete('/domains/:id', authenticate, HostingController.removeDomain);
+router.post('/domains', authenticate, requireEmailVerification, HostingController.addDomain);
+router.post('/domains/:id/verify', apiRateLimit(), authenticate, requireEmailVerification, HostingController.verifyDomain);
+router.delete('/domains/:id', authenticate, requireEmailVerification, HostingController.removeDomain);
 
 module.exports = router;

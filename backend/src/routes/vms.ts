@@ -166,9 +166,8 @@ router.post(
   VMController.getVMPricingEstimate,
 );
 
-// Health check for VM routes — must be registered before /:id so the
-// literal 'health' path is not shadowed by the parameter route.
-router.get('/health', (_req: unknown, res: { status(code: number): { json(payload: unknown): void } }) => {
+// Health check for VM routes
+router.get('/health', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'VM routes are healthy',

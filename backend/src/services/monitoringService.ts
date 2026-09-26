@@ -1,57 +1,14 @@
-import os from 'os';
-import { prisma } from '../config/database';
-import logger from '../utils/logger';
-
+// @ts-nocheck
+const os = require('os');
+const { prisma } = require('../config/database');
 const redisService = require('./redisService');
-
-type HealthCheckResult = {
-  healthy: boolean;
-  responseTime?: string;
-  error?: string;
-  message: string;
-  [key: string]: unknown;
-};
-
-type HealthCheckName = 'database' | 'redis' | 'memory' | 'cpu' | 'disk';
-
-type HealthCheckSummary = {
-  name: HealthCheckName;
-  status: 'healthy' | 'unhealthy';
-} & Record<string, unknown>;
-
-type UptimeInfo = {
-  application: string;
-  system: string;
-};
-
-type RequestMetrics = {
-  total: number;
-  success: number;
-  errors: number;
-};
-
-type PerformanceMetrics = {
-  avgResponseTime: number;
-  maxResponseTime: number;
-  minResponseTime: number;
-};
-
-type Metrics = {
-  requests: RequestMetrics;
-  performance: PerformanceMetrics;
-};
-
-const getErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const logger = require('../utils/logger').default;
 
 /**
  * Monitoring Service
  * Provides system health checks and performance monitoring
  */
 class MonitoringService {
-  startTime: number;
-
-  metrics: Metrics;
-
   constructor() {
     this.startTime = Date.now();
     this.metrics = {
@@ -72,26 +29,21 @@ class MonitoringService {
    * Get system health status
    * @returns {Promise<Object>} Health status
    */
-  async getHealthStatus(): Promise<{
-    status: 'healthy' | 'unhealthy';
-    timestamp: string;
-    uptime: UptimeInfo;
-    checks: HealthCheckSummary[];
-  }> {
+  async getHealthStatus() {
     const checks = await Promise.allSettled([
       this.checkDatabase(),
       this.checkRedis(),
       this.checkMemory(),
       this.checkCPU(),
-      this.checkDisk(),
+      this.checkLoad(),
     ]);
 
-    const results: HealthCheckSummary[] = checks.map((check, index) => {
-      const names: HealthCheckName[] = ['database', 'redis', 'memory', 'cpu', 'disk'];
+    const results = checks.map((check, index) => {
+      const names = ['database', 'redis', 'memory', 'cpu', 'load'];
       return {
         name: names[index],
         status: check.status === 'fulfilled' && check.value.healthy ? 'healthy' : 'unhealthy',
-        ...(check.status === 'fulfilled' ? check.value : {}),
+        ...check.value,
       };
     });
 
@@ -109,7 +61,7 @@ class MonitoringService {
    * Check database health
    * @returns {Promise<Object>} Database health
    */
-  async checkDatabase(): Promise<HealthCheckResult> {
+  async checkDatabase() {
     try {
       const start = Date.now();
       await prisma.$queryRaw`SELECT 1`;
@@ -124,7 +76,7 @@ class MonitoringService {
       logger.error('Database health check failed:', error);
       return {
         healthy: false,
-        error: getErrorMessage(error),
+        error: error.message,
         message: 'Database connection failed',
       };
     }
@@ -134,7 +86,7 @@ class MonitoringService {
    * Check Redis health
    * @returns {Promise<Object>} Redis health
    */
-  async checkRedis(): Promise<HealthCheckResult> {
+  async checkRedis() {
     try {
       if (!redisService.isReady()) {
         return {
@@ -157,7 +109,7 @@ class MonitoringService {
       logger.error('Redis health check failed:', error);
       return {
         healthy: false,
-        error: getErrorMessage(error),
+        error: error.message,
         message: 'Redis connection failed',
       };
     }
@@ -167,7 +119,7 @@ class MonitoringService {
    * Check memory usage
    * @returns {Object} Memory health
    */
-  checkMemory(): HealthCheckResult {
+  checkMemory() {
     const totalMemory = os.totalmem();
     const freeMemory = os.freemem();
     const usedMemory = totalMemory - freeMemory;
@@ -186,45 +138,58 @@ class MonitoringService {
   }
 
   /**
-   * Check CPU usage
-   * @returns {Object} CPU health
+   * Snapshot CPU tick counters (idle + total across all cores)
+   * @returns {Object} { idle, total } tick sums
    */
-  checkCPU(): HealthCheckResult {
-    const cpus = os.cpus();
-    const cpuCount = cpus.length;
+  cpuTimesSnapshot() {
+    let idle = 0;
+    let total = 0;
 
-    // Calculate average CPU usage
-    let totalIdle = 0;
-    let totalTick = 0;
-
-    cpus.forEach((cpu) => {
+    os.cpus().forEach((cpu) => {
       for (const type in cpu.times) {
-        totalTick += cpu.times[type as keyof os.CpuInfo['times']];
+        total += cpu.times[type];
       }
-      totalIdle += cpu.times.idle;
+      idle += cpu.times.idle;
     });
 
-    const idle = totalIdle / cpuCount;
-    const total = totalTick / cpuCount;
-    const usagePercentage = 100 - ~~(100 * idle / total);
+    return { idle, total };
+  }
+
+  /**
+   * Check CPU usage by sampling tick deltas over ~500ms. Averaging raw
+   * os.cpus() times only yields the since-boot average, which hides
+   * live load spikes.
+   * @returns {Promise<Object>} CPU health
+   */
+  async checkCPU() {
+    const cpus = os.cpus();
+    const start = this.cpuTimesSnapshot();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const end = this.cpuTimesSnapshot();
+
+    const idleDiff = end.idle - start.idle;
+    const totalDiff = end.total - start.total;
+    const usagePercentage = totalDiff > 0 ? 100 - (100 * idleDiff / totalDiff) : 0;
 
     const healthy = usagePercentage < 80;
 
     return {
       healthy,
-      cores: cpuCount,
+      cores: cpus.length,
       model: cpus[0].model,
       usagePercentage: parseFloat(usagePercentage.toFixed(2)),
+      sampleWindowMs: 500,
       message: healthy ? 'CPU usage is normal' : 'High CPU usage detected',
     };
   }
 
   /**
-   * Check disk usage
-   * @returns {Object} Disk health
+   * Check system load average. Node has no portable disk-usage API without
+   * extra dependencies, so this honestly reports OS load instead of a
+   * mislabeled "disk" check. Note: os.loadavg() is [0,0,0] on Windows.
+   * @returns {Object} Load health
    */
-  checkDisk(): HealthCheckResult {
-    // Note: This is a simplified check. For production, use a library like 'diskusage'
+  checkLoad() {
     const loadAverage = os.loadavg();
     const healthy = loadAverage[0] < os.cpus().length * 0.7;
 
@@ -239,7 +204,7 @@ class MonitoringService {
    * Get system uptime
    * @returns {Object} Uptime information
    */
-  getUptime(): UptimeInfo {
+  getUptime() {
     const uptimeSeconds = Math.floor((Date.now() - this.startTime) / 1000);
     const systemUptime = os.uptime();
 
@@ -253,16 +218,7 @@ class MonitoringService {
    * Get system information
    * @returns {Object} System information
    */
-  getSystemInfo(): {
-    platform: NodeJS.Platform;
-    arch: string;
-    hostname: string;
-    nodeVersion: string;
-    cpus: number;
-    totalMemory: string;
-    freeMemory: string;
-    uptime: UptimeInfo;
-    } {
+  getSystemInfo() {
     return {
       platform: os.platform(),
       arch: os.arch(),
@@ -280,7 +236,7 @@ class MonitoringService {
    * @param {number} responseTime - Response time in ms
    * @param {boolean} success - Request success status
    */
-  recordRequest(responseTime: number, success: boolean): void {
+  recordRequest(responseTime, success) {
     this.metrics.requests.total++;
 
     if (success) {
@@ -303,12 +259,7 @@ class MonitoringService {
    * Get application metrics
    * @returns {Object} Application metrics
    */
-  getMetrics(): {
-    requests: RequestMetrics & { errorRate: number };
-    performance: PerformanceMetrics;
-    uptime: UptimeInfo;
-    timestamp: string;
-    } {
+  getMetrics() {
     const errorRate = this.metrics.requests.total > 0
       ? (this.metrics.requests.errors / this.metrics.requests.total) * 100
       : 0;
@@ -333,7 +284,7 @@ class MonitoringService {
   /**
    * Reset metrics
    */
-  resetMetrics(): void {
+  resetMetrics() {
     this.metrics = {
       requests: {
         total: 0,
@@ -354,7 +305,7 @@ class MonitoringService {
    * @param {number} bytes - Bytes
    * @returns {string} Formatted string
    */
-  formatBytes(bytes: number): string {
+  formatBytes(bytes) {
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
     if (bytes === 0) return '0 Bytes';
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
@@ -366,13 +317,13 @@ class MonitoringService {
    * @param {number} seconds - Uptime in seconds
    * @returns {string} Formatted string
    */
-  formatUptime(seconds: number): string {
+  formatUptime(seconds) {
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
 
-    const parts: string[] = [];
+    const parts = [];
     if (days > 0) parts.push(`${days}d`);
     if (hours > 0) parts.push(`${hours}h`);
     if (minutes > 0) parts.push(`${minutes}m`);
@@ -385,14 +336,7 @@ class MonitoringService {
    * Get detailed health report
    * @returns {Promise<Object>} Detailed health report
    */
-  async getDetailedHealthReport(): Promise<{
-    status: 'healthy' | 'unhealthy';
-    timestamp: string;
-    uptime: UptimeInfo;
-    checks: HealthCheckSummary[];
-    metrics: ReturnType<MonitoringService['getMetrics']>;
-    system: ReturnType<MonitoringService['getSystemInfo']>;
-  }> {
+  async getDetailedHealthReport() {
     const health = await this.getHealthStatus();
     const metrics = this.getMetrics();
     const systemInfo = this.getSystemInfo();
@@ -405,6 +349,4 @@ class MonitoringService {
   }
 }
 
-const monitoringService = new MonitoringService();
-
-export = monitoringService;
+module.exports = new MonitoringService();

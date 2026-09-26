@@ -1,99 +1,37 @@
-import { prisma } from '../config/database';
-import logger from '../utils/logger';
-
+// @ts-nocheck
+const { prisma } = require('../config/database');
+const logger = require('../utils/logger').default;
 const emailService = require('./emailService');
 
-type SecurityEventRecord = {
-  type: string;
-  severity: string;
-  description?: string;
-  ip?: string;
-  userId?: string;
-  userAgent?: string;
-  metadata: Record<string, unknown>;
-  timestamp: Date;
-};
+const VALID_EVENT_TYPES = new Set([
+  'FAILED_LOGIN',
+  'SUCCESSFUL_LOGIN',
+  'UNAUTHORIZED_ACCESS',
+  'SUSPICIOUS_ACTIVITY',
+  'DATA_BREACH_ATTEMPT',
+  'PRIVILEGE_ESCALATION',
+  'RATE_LIMIT_EXCEEDED',
+  'IP_BLOCKED',
+  'TOKEN_MISUSE',
+  'CUSTOM',
+]);
 
-type SecurityEventInput = {
-  type: string;
-  severity?: string;
-  description?: string;
-  ip?: string;
-  userId?: string;
-  userAgent?: string;
-  metadata?: Record<string, unknown>;
-};
-
-type SecurityLogInput = {
-  ip?: string;
-  userId?: string;
-  userAgent?: string;
-  email?: string;
-  reason?: string;
-  resource?: string;
-  action?: string;
-  description?: string;
-  currentRole?: string;
-  attemptedRole?: string;
-  metadata?: Record<string, unknown>;
-};
-
-type SecurityEventsOptions = {
-  type?: string;
-  severity?: string;
-  limit?: number;
-  startDate?: string | number;
-  endDate?: string | number;
-};
-
-type SecurityStats = {
-  total: number;
-  bySeverity: Record<string, number>;
-  byType: Record<string, number>;
-  recentEvents: SecurityEventRecord[];
-};
-
-type SuspiciousActivity = {
-  identifier: string;
-  eventCount: number;
-  latestEvent: SecurityEventRecord;
-  events: SecurityEventRecord[];
-};
-
-type SecurityHealth = {
-  status: string;
-  issues: string[];
-  recentEvents: number;
-  criticalEvents: number;
-  highSeverityEvents: number;
-  suspiciousActivities: number;
-  timestamp: string;
-};
-
-type SecurityReport = {
-  period: string;
-  totalEvents: number;
-  bySeverity: Record<string, number>;
-  byType: Record<string, number>;
-  topIPs: Record<string, number>;
-  timeline: unknown[];
-};
+const VALID_SEVERITIES = new Set(['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
 
 /**
  * Security Monitoring Service
  * Monitors and tracks security events
  */
 class SecurityMonitorService {
-  securityEvents: SecurityEventRecord[];
-
-  suspiciousActivities: Map<string, SecurityEventRecord[]>;
-
-  maxEventsInMemory: number;
-
   constructor() {
     this.securityEvents = [];
     this.suspiciousActivities = new Map();
+    this.lastAlertedAt = new Map(); // key -> timestamp of last alert sent
     this.maxEventsInMemory = 1000;
+    this.maxActivityKeys = 1000; // bound suspiciousActivities map size
+    this.maxActivitiesPerKey = 100; // keep only recent events per key
+    this.alertThreshold = 5; // events per key before alerting
+    this.alertWindowMs = 60 * 60 * 1000; // re-alert at most once per hour per key
   }
 
   /**
@@ -101,10 +39,17 @@ class SecurityMonitorService {
    * @param {Object} event - Security event
    * @returns {Promise<Object>} Logged event
    */
-  async logSecurityEvent(event: SecurityEventInput): Promise<SecurityEventRecord> {
-    const securityEvent: SecurityEventRecord = {
-      type: event.type,
-      severity: event.severity || 'INFO',
+  async logSecurityEvent(event) {
+    // Whitelist type/severity — the log-event endpoint accepts client input,
+    // so arbitrary values must not land in stats/alerts unfiltered.
+    const type = VALID_EVENT_TYPES.has(event.type) ? event.type : 'CUSTOM';
+    const severity = VALID_SEVERITIES.has(String(event.severity || '').toUpperCase())
+      ? String(event.severity).toUpperCase()
+      : 'INFO';
+
+    const securityEvent = {
+      type,
+      severity,
       description: event.description,
       ip: event.ip,
       userId: event.userId,
@@ -120,7 +65,7 @@ class SecurityMonitorService {
     }
 
     // Log to file
-    logger.logSecurity(event.type, securityEvent);
+    logger.logSecurity(securityEvent.type, securityEvent);
 
     // Store in database (if SecurityEvent model exists)
     // await prisma.securityEvent.create({ data: securityEvent });
@@ -135,22 +80,41 @@ class SecurityMonitorService {
    * Analyze security event
    * @param {Object} event - Security event
    */
-  async analyzeEvent(event: SecurityEventRecord): Promise<void> {
+  async analyzeEvent(event) {
     // Track suspicious activities by IP
     if (event.severity === 'HIGH' || event.severity === 'CRITICAL') {
       const key = event.ip || event.userId;
       if (key) {
         const activities = this.suspiciousActivities.get(key) || [];
         activities.push(event);
+        // Bound per-key history to the most recent events.
+        if (activities.length > this.maxActivitiesPerKey) {
+          activities.splice(0, activities.length - this.maxActivitiesPerKey);
+        }
+        // Refresh recency and bound the map: evict the oldest key when full.
+        this.suspiciousActivities.delete(key);
         this.suspiciousActivities.set(key, activities);
+        if (this.suspiciousActivities.size > this.maxActivityKeys) {
+          const oldest = this.suspiciousActivities.keys().next().value;
+          this.suspiciousActivities.delete(oldest);
+        }
 
-        // Alert if too many suspicious activities
-        if (activities.length >= 5) {
-          await this.alertAdmins('Multiple suspicious activities detected', {
-            key,
-            count: activities.length,
-            events: activities.slice(-5),
-          });
+        // Alert once per key per window — previously every event past the
+        // threshold re-sent the full admin email fan-out.
+        if (activities.length >= this.alertThreshold) {
+          const lastAlerted = this.lastAlertedAt.get(key) || 0;
+          if (Date.now() - lastAlerted >= this.alertWindowMs) {
+            this.lastAlertedAt.set(key, Date.now());
+            if (this.lastAlertedAt.size > this.maxActivityKeys) {
+              const oldestAlert = this.lastAlertedAt.keys().next().value;
+              this.lastAlertedAt.delete(oldestAlert);
+            }
+            await this.alertAdmins('Multiple suspicious activities detected', {
+              key,
+              count: activities.length,
+              events: activities.slice(-5),
+            });
+          }
         }
       }
     }
@@ -160,7 +124,7 @@ class SecurityMonitorService {
    * Log failed login attempt
    * @param {Object} data - Login attempt data
    */
-  async logFailedLogin(data: SecurityLogInput): Promise<void> {
+  async logFailedLogin(data) {
     await this.logSecurityEvent({
       type: 'FAILED_LOGIN',
       severity: 'MEDIUM',
@@ -178,7 +142,7 @@ class SecurityMonitorService {
    * Log successful login
    * @param {Object} data - Login data
    */
-  async logSuccessfulLogin(data: SecurityLogInput): Promise<void> {
+  async logSuccessfulLogin(data) {
     await this.logSecurityEvent({
       type: 'SUCCESSFUL_LOGIN',
       severity: 'INFO',
@@ -193,7 +157,7 @@ class SecurityMonitorService {
    * Log unauthorized access attempt
    * @param {Object} data - Access attempt data
    */
-  async logUnauthorizedAccess(data: SecurityLogInput): Promise<void> {
+  async logUnauthorizedAccess(data) {
     await this.logSecurityEvent({
       type: 'UNAUTHORIZED_ACCESS',
       severity: 'HIGH',
@@ -212,7 +176,7 @@ class SecurityMonitorService {
    * Log suspicious activity
    * @param {Object} data - Activity data
    */
-  async logSuspiciousActivity(data: SecurityLogInput): Promise<void> {
+  async logSuspiciousActivity(data) {
     await this.logSecurityEvent({
       type: 'SUSPICIOUS_ACTIVITY',
       severity: 'HIGH',
@@ -228,7 +192,7 @@ class SecurityMonitorService {
    * Log data breach attempt
    * @param {Object} data - Breach attempt data
    */
-  async logDataBreachAttempt(data: SecurityLogInput): Promise<void> {
+  async logDataBreachAttempt(data) {
     await this.logSecurityEvent({
       type: 'DATA_BREACH_ATTEMPT',
       severity: 'CRITICAL',
@@ -247,7 +211,7 @@ class SecurityMonitorService {
    * Log privilege escalation attempt
    * @param {Object} data - Escalation attempt data
    */
-  async logPrivilegeEscalation(data: SecurityLogInput): Promise<void> {
+  async logPrivilegeEscalation(data) {
     await this.logSecurityEvent({
       type: 'PRIVILEGE_ESCALATION',
       severity: 'CRITICAL',
@@ -267,10 +231,12 @@ class SecurityMonitorService {
    * @param {Object} options - Query options
    * @returns {Array} Security events
    */
-  getSecurityEvents(options: SecurityEventsOptions = {}): SecurityEventRecord[] {
+  getSecurityEvents(options = {}) {
     const {
-      type, severity, limit = 100, startDate, endDate,
+      type, severity, startDate, endDate,
     } = options;
+    // Coerce + clamp limit — a raw string/NaN/huge value would corrupt slice().
+    const limit = Math.min(1000, Math.max(1, parseInt(options.limit, 10) || 100));
 
     let events = [...this.securityEvents];
 
@@ -286,14 +252,14 @@ class SecurityMonitorService {
 
     // Filter by date range
     if (startDate) {
-      events = events.filter((e) => e.timestamp.getTime() >= new Date(startDate).getTime());
+      events = events.filter((e) => e.timestamp >= new Date(startDate));
     }
     if (endDate) {
-      events = events.filter((e) => e.timestamp.getTime() <= new Date(endDate).getTime());
+      events = events.filter((e) => e.timestamp <= new Date(endDate));
     }
 
     // Sort by timestamp (newest first)
-    events.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    events.sort((a, b) => b.timestamp - a.timestamp);
 
     // Limit results
     return events.slice(0, limit);
@@ -303,8 +269,8 @@ class SecurityMonitorService {
    * Get security statistics
    * @returns {Object} Security statistics
    */
-  getSecurityStats(): SecurityStats {
-    const stats: SecurityStats = {
+  getSecurityStats() {
+    const stats = {
       total: this.securityEvents.length,
       bySeverity: {},
       byType: {},
@@ -324,8 +290,8 @@ class SecurityMonitorService {
    * Get suspicious activities
    * @returns {Array} Suspicious activities
    */
-  getSuspiciousActivities(): SuspiciousActivity[] {
-    const activities: SuspiciousActivity[] = [];
+  getSuspiciousActivities() {
+    const activities = [];
 
     for (const [key, events] of this.suspiciousActivities.entries()) {
       activities.push({
@@ -343,7 +309,7 @@ class SecurityMonitorService {
    * Get security health status
    * @returns {Object} Security health
    */
-  getSecurityHealth(): SecurityHealth {
+  getSecurityHealth() {
     const recentEvents = this.securityEvents.filter(
       (e) => Date.now() - e.timestamp.getTime() < 3600000, // Last hour
     );
@@ -352,7 +318,7 @@ class SecurityMonitorService {
     const highCount = recentEvents.filter((e) => e.severity === 'HIGH').length;
 
     let status = 'healthy';
-    const issues: string[] = [];
+    const issues = [];
 
     if (criticalCount > 0) {
       status = 'critical';
@@ -378,7 +344,7 @@ class SecurityMonitorService {
    * @param {string} subject - Alert subject
    * @param {Object} data - Alert data
    */
-  async alertAdmins(subject: string, data: unknown): Promise<void> {
+  async alertAdmins(subject, data) {
     try {
       // Get all admin users
       const admins = await prisma.user.findMany({
@@ -403,7 +369,7 @@ class SecurityMonitorService {
               <p>يرجى مراجعة لوحة التحكم للحصول على مزيد من التفاصيل.</p>
             </div>
           `,
-        }).catch((err: unknown) => logger.error(`Failed to send alert to ${admin.email}:`, err));
+        }).catch((err) => logger.error(`Failed to send alert to ${admin.email}:`, err));
       }
 
       logger.info(`Security alert sent to ${admins.length} admins`);
@@ -416,7 +382,7 @@ class SecurityMonitorService {
    * Clear old events
    * @param {number} olderThan - Clear events older than (ms)
    */
-  clearOldEvents(olderThan: number = 86400000): void {
+  clearOldEvents(olderThan = 86400000) {
     // 24 hours
     const cutoff = Date.now() - olderThan;
     this.securityEvents = this.securityEvents.filter(
@@ -431,10 +397,10 @@ class SecurityMonitorService {
    * @param {Object} options - Report options
    * @returns {Object} Security report
    */
-  generateSecurityReport(options: { period?: string } = {}): SecurityReport {
+  generateSecurityReport(options = {}) {
     const { period = 'day' } = options;
 
-    const periodMs: Record<string, number> = {
+    const periodMs = {
       hour: 3600000,
       day: 86400000,
       week: 604800000,
@@ -446,7 +412,7 @@ class SecurityMonitorService {
       (e) => e.timestamp.getTime() > cutoff,
     );
 
-    const report: SecurityReport = {
+    const report = {
       period,
       totalEvents: events.length,
       bySeverity: {},
@@ -476,12 +442,10 @@ class SecurityMonitorService {
       .reduce((obj, [ip, count]) => {
         obj[ip] = count;
         return obj;
-      }, {} as Record<string, number>);
+      }, {});
 
     return report;
   }
 }
 
-const securityMonitorService = new SecurityMonitorService();
-
-export = securityMonitorService;
+module.exports = new SecurityMonitorService();

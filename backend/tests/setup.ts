@@ -6,6 +6,8 @@ process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-jwt-secret';
 process.env.JWT_REFRESH_SECRET = 'test-refresh-secret';
 process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/sahary_cloud_test';
+process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret';
+process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder';
 
 // Docker Desktop on Windows exposes the daemon over a named pipe rather than
 // the default Unix socket. Honor an explicit DOCKER_HOST if one is set.

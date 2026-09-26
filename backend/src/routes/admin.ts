@@ -1,6 +1,4 @@
 // @ts-nocheck
-import type { Request, Response } from 'express';
-
 const express = require('express');
 const AdminController = require('../controllers/adminController');
 const { authenticate } = require('../middlewares/auth');
@@ -68,7 +66,7 @@ router.put('/users/:id/status', apiRateLimit(), AdminController.updateUserStatus
  * @desc    Update user role
  * @access  Private (Super Admin)
  */
-router.put('/users/:id/role', requirePermission('admin:super'), AdminController.updateUserRole);
+router.put('/users/:id/role', apiRateLimit(), requirePermission('admin:super'), AdminController.updateUserRole);
 
 // ==================== Analytics ====================
 
@@ -96,7 +94,7 @@ router.get('/analytics/users', apiRateLimit(), AdminController.getUserGrowthAnal
 router.get('/audit-logs', apiRateLimit(), AdminController.getAuditLogs);
 
 // Health check
-router.get('/health', (_req: Request, res: Response) => {
+router.get('/health', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'Admin routes are healthy',

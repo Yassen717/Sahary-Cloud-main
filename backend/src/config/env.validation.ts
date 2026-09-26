@@ -2,9 +2,10 @@ import Joi from 'joi';
 
 export const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test', 'staging').default('development'),
-  PORT: Joi.number().integer().min(1).max(65535)
+  PORT: Joi.number().integer().min(0).max(65535)
     .default(3000),
   HOST: Joi.string().default('localhost'),
+  TRUST_PROXY_HOPS: Joi.number().integer().min(0).default(1),
 
   DATABASE_URL: Joi.string().uri({ scheme: ['postgresql', 'postgres'] }).required(),
 
@@ -88,6 +89,8 @@ export const envSchema = Joi.object({
   RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(900000),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().integer().min(1).default(100),
 
+  USAGE_COLLECTION_INTERVAL: Joi.number().integer().min(0).default(300000),
+
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly').default('info'),
   LOG_FILE_PATH: Joi.string().default('./logs'),
 
@@ -112,6 +115,8 @@ export const envSchema = Joi.object({
   ENABLE_SOLAR_MONITORING: Joi.boolean().default(true),
   ENABLE_PAYMENTS: Joi.boolean().default(true),
   ENABLE_EMAIL_NOTIFICATIONS: Joi.boolean().default(true),
+
+  DEV_EXPOSE_TOKENS: Joi.boolean().default(false),
 }).options({
   allowUnknown: true,
   stripUnknown: false,
@@ -187,6 +192,19 @@ export function validateEnv(): Record<string, unknown> {
 
   console.log('✅ Environment variables validated successfully');
 
+  // Joi coerces types and injects defaults (e.g. PORT: 3000, feature flags).
+  // Persist them back onto process.env so downstream `process.env` reads and
+  // parseInt() consumers see the validated values, not raw/missing input.
+  if (value) {
+    const schemaKeys = Object.keys(envSchema.describe().keys);
+    for (const key of schemaKeys) {
+      const validated = (value as Record<string, unknown>)[key];
+      if (validated !== undefined) {
+        process.env[key] = String(validated);
+      }
+    }
+  }
+
   return value as Record<string, unknown>;
 }
 
@@ -197,10 +215,26 @@ export function printEnvSummary(): void {
     return `${value.substring(0, 4)}***${value.substring(value.length - 2)}`;
   };
 
+  // URLs can carry credentials in the userinfo part (redis://user:pass@host)
+  // — mask it instead of printing the raw URL like the rest of the summary.
+  const maskUrlCredentials = (value?: string) => {
+    if (!value) return 'not set';
+    try {
+      const url = new URL(value);
+      if (url.password) {
+        url.password = '***';
+        if (url.username) url.username = '***';
+      }
+      return url.toString();
+    } catch {
+      return maskSecret(value);
+    }
+  };
+
   console.log('\n📋 Environment Configuration Summary:');
   console.log('  ├─ Server:     %s:%s (%s)', env.HOST || 'localhost', env.PORT || 3000, env.NODE_ENV || 'development');
   console.log('  ├─ Database:   %s', env.DATABASE_URL ? maskSecret(env.DATABASE_URL) : '❌ NOT SET');
-  console.log('  ├─ Redis:      %s', env.REDIS_URL || 'redis://localhost:6379');
+  console.log('  ├─ Redis:      %s', env.REDIS_URL ? maskUrlCredentials(env.REDIS_URL) : 'redis://localhost:6379');
   console.log('  ├─ JWT:        %s', env.JWT_SECRET ? maskSecret(env.JWT_SECRET) : '❌ NOT SET');
   console.log('  ├─ SMTP:       %s:%s', env.SMTP_HOST || 'not set', env.SMTP_PORT || 'not set');
   console.log('  ├─ Stripe:     %s', env.STRIPE_SECRET_KEY ? maskSecret(env.STRIPE_SECRET_KEY) : 'not configured');

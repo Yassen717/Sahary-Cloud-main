@@ -3,7 +3,6 @@ const app = require('../src/index');
 const { prisma } = require('../src/config/database');
 const AuthService = require('../src/services/authService').default;
 const JWTUtils = require('../src/utils/jwt').default;
-const dockerService = require('../src/services/dockerService').default;
 
 /**
  * Comprehensive VM API Integration Tests
@@ -11,22 +10,27 @@ const dockerService = require('../src/services/dockerService').default;
  */
 
 describe('VM API Integration Tests', () => {
-  let testUser: any;
-  let testAdmin: any;
-  let userToken: any;
-  let adminToken: any;
-  let testVMId: any;
-  let testBackupId: any;
+  let testUser;
+  let testAdmin;
+  let userToken;
+  let adminToken;
+  let testVMId;
+  let testBackupId;
 
   // Setup test users and authentication
   beforeAll(async () => {
-    // Clean up leftover data owned by this suite's users only — other
-    // test files run in parallel against the same database.
-    await (global as any).cleanupTestUsers(prisma, ['vmintegration@test.com', 'vmadmin@test.com', 'otheruser@test.com', 'unverified@test.com']);
-
-    // Connect to the Docker daemon — the start endpoint creates a real
-    // container, which needs Docker system info for resource validation.
-    await dockerService.connect();
+    // Clean up existing test data
+    await prisma.usageRecord.deleteMany({});
+    await prisma.backup.deleteMany({});
+    await prisma.virtualMachine.deleteMany({});
+    await prisma.auditLog.deleteMany({});
+    await prisma.user.deleteMany({
+      where: {
+        email: {
+          in: ['vmintegration@test.com', 'vmadmin@test.com'],
+        },
+      },
+    });
 
     // Create test user
     const userResult = await AuthService.register({
@@ -70,8 +74,18 @@ describe('VM API Integration Tests', () => {
   });
 
   afterAll(async () => {
-    // Clean up test data — scoped to this suite's users only.
-    await (global as any).cleanupTestUsers(prisma, ['vmintegration@test.com', 'vmadmin@test.com', 'otheruser@test.com', 'unverified@test.com']);
+    // Clean up test data
+    await prisma.usageRecord.deleteMany({});
+    await prisma.backup.deleteMany({});
+    await prisma.virtualMachine.deleteMany({});
+    await prisma.auditLog.deleteMany({});
+    await prisma.user.deleteMany({
+      where: {
+        email: {
+          in: ['vmintegration@test.com', 'vmadmin@test.com'],
+        },
+      },
+    });
     await prisma.$disconnect();
   });
 
@@ -183,7 +197,7 @@ describe('VM API Integration Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      response.body.data.forEach((vm: any) => {
+      response.body.data.forEach((vm) => {
         expect(vm.status).toBe('STOPPED');
       });
     });
@@ -326,10 +340,12 @@ describe('VM API Integration Tests', () => {
         .post('/api/v1/vms/pricing')
         .set('Authorization', `Bearer ${userToken}`)
         .send({
-          cpu: 2,
-          ram: 2048,
-          storage: 40,
-          bandwidth: 1000,
+          resources: {
+            cpu: 2,
+            ram: 2048,
+            storage: 40,
+            bandwidth: 1000,
+          },
           duration: 24,
         });
 
@@ -367,22 +383,12 @@ describe('VM API Integration Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      // startVM completes the start synchronously and returns the final
-      // record (identical in the original JS implementation).
+      // The start endpoint returns the VM after the awaited Docker start —
+      // status is already RUNNING, never the transitional STARTING.
       expect(response.body.data.vm.status).toBe('RUNNING');
-
-      // Wait for VM to start
-      await new Promise((resolve) => setTimeout(resolve, 2500));
     });
 
     it('should reject starting an already running VM', async () => {
-      // Force RUNNING state directly — a real start requires a reachable
-      // Docker daemon, which is not guaranteed in this environment.
-      await prisma.virtualMachine.update({
-        where: { id: testVMId },
-        data: { status: 'RUNNING' },
-      });
-
       const response = await request(app)
         .post(`/api/v1/vms/${testVMId}/start`)
         .set('Authorization', `Bearer ${userToken}`);
@@ -443,11 +449,9 @@ describe('VM API Integration Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      // stopVM completes the stop synchronously and returns the final record
+      // The stop endpoint returns the VM after the awaited Docker stop —
+      // status is already STOPPED, never the transitional STOPPING.
       expect(response.body.data.vm.status).toBe('STOPPED');
-
-      // Wait for VM to stop
-      await new Promise((resolve) => setTimeout(resolve, 2000));
     });
 
     it('should reject stopping an already stopped VM', async () => {
@@ -578,12 +582,12 @@ describe('VM API Integration Tests', () => {
 
   describe('DELETE /api/v1/vms/:id - Delete VM', () => {
     it('should not delete a running VM', async () => {
-      // Force RUNNING state directly — a real start requires a reachable
-      // Docker daemon, which is not guaranteed in this environment.
-      await prisma.virtualMachine.update({
-        where: { id: testVMId },
-        data: { status: 'RUNNING' },
-      });
+      // Start VM first
+      await request(app)
+        .post(`/api/v1/vms/${testVMId}/start`)
+        .set('Authorization', `Bearer ${userToken}`);
+
+      await new Promise((resolve) => setTimeout(resolve, 2500));
 
       const response = await request(app)
         .delete(`/api/v1/vms/${testVMId}`)
@@ -633,14 +637,15 @@ describe('VM API Integration Tests', () => {
           storage: 20,
         });
 
-      if (response.status === 201) {
-        expect(response.body.data.vm.description).not.toContain('<script>');
-      }
+      // Assert the precondition instead of silently skipping: VM creation
+      // is a DB-only operation and should succeed without Docker.
+      expect(response.status).toBe(201);
+      expect(response.body.data.vm.description).not.toContain('<script>');
     });
 
     it('should enforce rate limiting', async () => {
-      // Make enough rapid requests to exceed the 60 req/min API limit
-      const requests = Array(70)
+      // Make multiple rapid requests
+      const requests = Array(15)
         .fill()
         .map(() =>
           request(app)
@@ -649,30 +654,14 @@ describe('VM API Integration Tests', () => {
         );
 
       const responses = await Promise.all(requests);
-      const rateLimited = responses.some((res: any) => res.status === 429);
+      const rateLimited = responses.some((res) => res.status === 429);
 
       // Rate limiting should kick in for excessive requests
       expect(rateLimited).toBe(true);
-
-      // The Redis-backed limiter shares an IP-scoped counter across all
-      // requests, so release it to avoid starving subsequent tests in this
-      // suite and concurrently running suites.
-      const redisService = require('../src/services/redisService');
-      if (redisService.isReady()) {
-        const keys = await redisService.getClient().keys('rl:*');
-        if (keys.length > 0) {
-          await redisService.getClient().del(keys);
-        }
-      }
     });
 
     it('should require email verification for VM creation', async () => {
-      // Remove leftovers from any previous failed run, then create
-      // an unverified user.
-      await prisma.user.deleteMany({
-        where: { email: 'unverified@test.com' },
-      });
-
+      // Create unverified user
       const unverifiedResult = await AuthService.register({
         email: 'unverified@test.com',
         password: 'TestPassword123!',

@@ -77,6 +77,15 @@ const roundTo = (value: NumericLike | null | undefined, digits = 2): number => N
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
+// Allowed invoice status transitions — anything else is rejected
+const INVOICE_STATUS_TRANSITIONS: Record<string, InvoiceStatus[]> = {
+  PENDING: ['PAID', 'OVERDUE', 'CANCELLED'],
+  OVERDUE: ['PAID', 'CANCELLED'],
+  PAID: ['REFUNDED'],
+  CANCELLED: [],
+  REFUNDED: [],
+};
+
 /**
  * Billing Service
  * Handles usage tracking, cost calculation, invoice generation, and payment operations
@@ -149,8 +158,9 @@ class BillingService {
 
     const baseHourlyRate = parseFloat(String(vm.hourlyRate));
     const cpuUtilization = parseFloat(String(cpuUsage)) / 100;
-    const ramUtilization = parseFloat(String(ramUsage)) / vm.ram;
-    const storageUtilization = parseFloat(String(storageUsage)) / vm.storage;
+    // Guard against zero-capacity VMs — dividing by 0 yields NaN/Infinity costs
+    const ramUtilization = vm.ram > 0 ? parseFloat(String(ramUsage)) / vm.ram : 0;
+    const storageUtilization = vm.storage > 0 ? parseFloat(String(storageUsage)) / vm.storage : 0;
 
     const bandwidthCostPerGB = 0.01;
     const bandwidthCost = (parseFloat(String(bandwidthUsage)) / 1024) * bandwidthCostPerGB;
@@ -170,7 +180,7 @@ class BillingService {
     return totalCost;
   }
 
-  static async getVMUsage(vmId: string, options: UsageQueryOptions = {}): Promise<{ data: UsageRecord[]; pagination: Record<string, unknown>; statistics: UsageAggregationResult }> {
+  static async getVMUsage(vmId: string, options: UsageQueryOptions = {}, userId: string | null = null): Promise<{ data: UsageRecord[]; pagination: Record<string, unknown>; statistics: UsageAggregationResult }> {
     try {
       const {
         startDate,
@@ -178,6 +188,16 @@ class BillingService {
         page = 1,
         limit = 100,
       } = options;
+
+      // Verify the VM exists and belongs to the requester (null userId = privileged caller)
+      const vm = await prisma.virtualMachine.findUnique({
+        where: { id: vmId },
+        select: { id: true, userId: true },
+      }) as { id: string; userId: string } | null;
+
+      if (!vm || (userId && vm.userId !== userId)) {
+        throw new Error('VM not found');
+      }
 
       const where: Record<string, unknown> = { vmId };
 
@@ -187,13 +207,15 @@ class BillingService {
         if (endDate) (where.timestamp as Record<string, unknown>).lte = new Date(endDate);
       }
 
-      const skip = (parseInt(String(page), 10) - 1) * parseInt(String(limit), 10);
+      const pageNumber = Math.max(parseInt(String(page), 10) || 1, 1);
+      const pageSize = Math.min(Math.max(parseInt(String(limit), 10) || 100, 1), 100);
+      const skip = (pageNumber - 1) * pageSize;
       const [records, total] = await Promise.all([
         prisma.usageRecord.findMany({
           where,
           orderBy: { timestamp: 'desc' },
           skip,
-          take: parseInt(String(limit), 10),
+          take: pageSize,
         }) as Promise<UsageRecord[]>,
         prisma.usageRecord.count({ where }),
       ]);
@@ -203,10 +225,10 @@ class BillingService {
       return {
         data: records,
         pagination: {
-          page: parseInt(String(page), 10),
-          limit: parseInt(String(limit), 10),
+          page: pageNumber,
+          limit: pageSize,
           total,
-          totalPages: Math.ceil(total / parseInt(String(limit), 10)),
+          totalPages: Math.ceil(total / pageSize),
         },
         statistics: stats,
       };
@@ -282,19 +304,9 @@ class BillingService {
         select: { id: true, name: true },
       }) as Array<{ id: string; name: string }>;
 
-      const vmIds = userVMs.map((vm) => vm.id);
-
-      if (vmIds.length === 0) {
-        return {
-          totalCost: 0,
-          totalDuration: 0,
-          totalBandwidth: 0,
-          vmCount: 0,
-          vms: [],
-        } as unknown as UsageSummaryResult;
-      }
-
-      const where: Record<string, unknown> = { vmId: { in: vmIds } };
+      // Filter usage by userId directly — records of deleted VMs keep vmId = null
+      // (onDelete: SetNull) and would otherwise become invisible and unbillable
+      const where: Record<string, unknown> = { userId };
       if (startDate || endDate) {
         where.timestamp = {};
         if (startDate) (where.timestamp as Record<string, unknown>).gte = new Date(startDate);
@@ -408,7 +420,7 @@ class BillingService {
     }
   }
 
-  static async collectCurrentUsage(vmId: string): Promise<{ cpuUsage: number; ramUsage: number; storageUsage: number; bandwidthUsage: number }> {
+  static async collectCurrentUsage(vmId: string): Promise<{ cpuUsage: number; ramUsage: number; storageUsage: number; bandwidthUsage: number } | null> {
     try {
       const vm = await prisma.virtualMachine.findUnique({
         where: { id: vmId },
@@ -427,27 +439,20 @@ class BillingService {
       }
 
       if (vm.status !== 'RUNNING' || !vm.dockerContainerId) {
-        return {
-          cpuUsage: 0,
-          ramUsage: 0,
-          storageUsage: 0,
-          bandwidthUsage: 0,
-        };
+        return null;
       }
 
       const dockerService = require('./dockerService').default;
       const containerStats = await dockerService.getContainerStats(vm.dockerContainerId);
 
-      const ramUsage = containerStats.memory_stats?.usage || 0;
-
-      const cpuPercent = this.calculateCPUPercent(containerStats);
-      const ramMB = ramUsage / (1024 * 1024);
-      const storageUsage = vm.storage * 0.5;
-      const networkStats = containerStats.networks || {};
-      const bandwidthUsage = Object.values(networkStats).reduce(
-        (total: number, net: any) => total + (net.rx_bytes || 0) + (net.tx_bytes || 0),
-        0,
-      ) / (1024 * 1024);
+      // getContainerStats returns a transformed shape:
+      // { cpu: { usage }, memory: { used, limit, percentage }, network: { rxBytes, txBytes, totalBytes } }
+      const cpuPercent = containerStats.cpu?.usage || 0;
+      const ramMB = (containerStats.memory?.used || 0) / (1024 * 1024);
+      // Container stats do not expose disk usage — report 0 instead of a fabricated value
+      const storageUsage = 0;
+      // Cumulative MB since container start — callers must bill only the delta vs prior records
+      const bandwidthUsage = (containerStats.network?.totalBytes || 0) / (1024 * 1024);
 
       return {
         cpuUsage: parseFloat(cpuPercent.toFixed(2)),
@@ -457,12 +462,8 @@ class BillingService {
       };
     } catch (error) {
       console.error('Error collecting usage:', error);
-      return {
-        cpuUsage: 0,
-        ramUsage: 0,
-        storageUsage: 0,
-        bandwidthUsage: 0,
-      };
+      // Signal failure instead of writing bogus zero records that corrupt billing
+      return null;
     }
   }
 
@@ -482,7 +483,7 @@ class BillingService {
     }
   }
 
-  static async collectAllRunningVMsUsage(): Promise<{ success: number; failed: number; total: number; errors: Array<Record<string, unknown>> }> {
+  static async collectAllRunningVMsUsage(options: { intervalMs?: number } = {}): Promise<{ success: number; failed: number; total: number; errors: Array<Record<string, unknown>> }> {
     try {
       const runningVMs = await prisma.virtualMachine.findMany({
         where: { status: 'RUNNING' },
@@ -496,13 +497,49 @@ class BillingService {
         errors: [],
       };
 
+      // The configured collection interval drives the fallback billing duration
+      const intervalMs = options.intervalMs || parseInt(process.env.USAGE_COLLECTION_INTERVAL || '', 10) || 5 * 60 * 1000;
+      const intervalMinutes = Math.max(1, Math.round(intervalMs / 60000));
+      const maxDurationMinutes = Math.max(intervalMinutes * 2, 60);
+
       for (const vm of runningVMs) {
         try {
           const currentUsage = await this.collectCurrentUsage(vm.id);
 
+          if (!currentUsage) {
+            throw new Error('Failed to collect current usage');
+          }
+
+          const [lastRecord, billedBandwidth] = await Promise.all([
+            prisma.usageRecord.findFirst({
+              where: { vmId: vm.id },
+              orderBy: { timestamp: 'desc' },
+              select: { timestamp: true },
+            }),
+            prisma.usageRecord.aggregate({
+              where: { vmId: vm.id },
+              _sum: { bandwidthUsage: true },
+            }),
+          ]);
+
+          // Network counters are cumulative since container start — bill only the
+          // delta vs already-recorded usage, otherwise every cycle rebills history.
+          // If the counter reset (e.g. container restart), bill the current reading.
+          const previouslyBilled = billedBandwidth._sum.bandwidthUsage || 0;
+          const bandwidthDelta = currentUsage.bandwidthUsage - previouslyBilled;
+          const bandwidthUsage = bandwidthDelta >= 0 ? bandwidthDelta : currentUsage.bandwidthUsage;
+
+          // Bill the elapsed time since the previous record instead of a hardcoded duration
+          let duration = intervalMinutes;
+          if (lastRecord) {
+            const elapsedMinutes = Math.round((Date.now() - new Date(lastRecord.timestamp).getTime()) / 60000);
+            duration = Math.min(Math.max(elapsedMinutes, 1), maxDurationMinutes);
+          }
+
           await this.recordUsage(vm.id, {
             ...currentUsage,
-            duration: 5,
+            bandwidthUsage,
+            duration,
           });
 
           results.success++;
@@ -525,13 +562,16 @@ class BillingService {
 
   static async getUsageSummary(userId: string, options: UsageQueryOptions = {}): Promise<UsageSummaryResult> {
     try {
-      const { startDate, endDate, groupBy = 'day' } = options;
+      const {
+        startDate, endDate, groupBy = 'day', limit,
+      } = options;
 
       const usage = await this.getUserUsage(userId, { startDate, endDate });
       const breakdown = await this.getUsageBreakdown(userId, {
         startDate,
         endDate,
         groupBy,
+        limit,
       });
 
       return {
@@ -552,29 +592,24 @@ class BillingService {
 
   static async getUsageBreakdown(userId: string, options: UsageQueryOptions = {}): Promise<Array<Record<string, unknown>>> {
     try {
-      const { startDate, endDate, groupBy = 'day' } = options;
+      const {
+        startDate, endDate, groupBy = 'day', limit,
+      } = options;
 
-      const userVMs = await prisma.virtualMachine.findMany({
-        where: { userId },
-        select: { id: true },
-      }) as Array<{ id: string }>;
-
-      const vmIds = userVMs.map((vm) => vm.id);
-
-      if (vmIds.length === 0) {
-        return [];
-      }
-
-      const where: Record<string, unknown> = { vmId: { in: vmIds } };
+      // Filter usage by userId directly so records of deleted VMs (vmId = null) are included
+      const where: Record<string, unknown> = { userId };
       if (startDate || endDate) {
         where.timestamp = {};
         if (startDate) (where.timestamp as Record<string, unknown>).gte = new Date(startDate);
         if (endDate) (where.timestamp as Record<string, unknown>).lte = new Date(endDate);
       }
 
+      // Bound the result set — an unbounded findMany can exhaust memory on large histories
+      const maxRecords = Math.min(Math.max(parseInt(String(limit), 10) || 10000, 1), 10000);
       const records = await prisma.usageRecord.findMany({
         where,
         orderBy: { timestamp: 'asc' },
+        take: maxRecords,
       }) as UsageRecord[];
 
       return this.groupUsageByPeriod(records, groupBy);
@@ -640,19 +675,21 @@ class BillingService {
     try {
       const { month, year, dueInDays = 15 } = options;
 
+      // Build the billing period in UTC so boundaries match the stored timestamps
       const now = new Date();
-      const invoiceMonth = month !== undefined ? month : now.getMonth() - 1;
-      const invoiceYear = year || (invoiceMonth < 0 ? now.getFullYear() - 1 : now.getFullYear());
+      const invoiceMonth = month !== undefined ? month : now.getUTCMonth() - 1;
+      const invoiceYear = year || (invoiceMonth < 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear());
       const adjustedMonth = invoiceMonth < 0 ? 11 : invoiceMonth;
 
-      const startDate = new Date(invoiceYear, adjustedMonth, 1);
-      const endDate = new Date(invoiceYear, adjustedMonth + 1, 0, 23, 59, 59);
+      const startDate = new Date(Date.UTC(invoiceYear, adjustedMonth, 1));
+      const endDate = new Date(Date.UTC(invoiceYear, adjustedMonth + 1, 0, 23, 59, 59, 999));
 
+      // Reject when any existing invoice overlaps this period
       const existingInvoice = await prisma.invoice.findFirst({
         where: {
           userId,
-          billingPeriodStart: startDate,
-          billingPeriodEnd: endDate,
+          billingPeriodStart: { lt: endDate },
+          billingPeriodEnd: { gt: startDate },
         },
       }) as InvoiceRecord | null;
 
@@ -669,6 +706,18 @@ class BillingService {
         throw new Error('No usage found for this billing period');
       }
 
+      // Usage recorded against deleted VMs (vmId null) still rolls into the
+      // totals — itemize it so the invoice lines add up to the subtotal
+      const orphanUsage = await prisma.usageRecord.aggregate({
+        where: {
+          userId,
+          vmId: null,
+          timestamp: { gte: startDate, lte: endDate },
+        },
+        _sum: { cost: true },
+      });
+      const orphanCost = roundTo(orphanUsage._sum.cost || 0);
+
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + dueInDays);
 
@@ -677,82 +726,100 @@ class BillingService {
       const taxAmount = subtotal * taxRate;
       const total = subtotal + taxAmount;
 
-      // Invoice numbers are derived from a count query, so concurrent
-      // generation can race and produce the same number — retry on the
-      // unique constraint with a freshly generated number.
-      let invoice: InvoiceRecord | undefined;
-      for (let attempt = 0; attempt < 5 && !invoice; attempt++) {
-        try {
-          invoice = await prisma.invoice.create({
-            data: {
-              userId,
-              invoiceNumber: await this.generateInvoiceNumber(),
-              billingPeriodStart: startDate,
-              billingPeriodEnd: endDate,
-              subtotal: roundTo(subtotal),
-              tax: roundTo(taxAmount),
-              discount: 0,
-              amount: roundTo(total),
-              status: 'PENDING',
-              dueDate,
-              currency: 'USD',
-            },
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  email: true,
-                  firstName: true,
-                  lastName: true,
-                },
+      // Invoice + items + audit are created atomically — a failure anywhere rolls
+      // the whole invoice back so retries never hit a partially-written invoice
+      const createInvoice = async () => prisma.$transaction(async (tx) => {
+        const createdInvoice = await tx.invoice.create({
+          data: {
+            userId,
+            invoiceNumber: await this.generateInvoiceNumber(),
+            billingPeriodStart: startDate,
+            billingPeriodEnd: endDate,
+            subtotal: roundTo(subtotal),
+            tax: roundTo(taxAmount),
+            discount: 0,
+            amount: roundTo(total),
+            status: 'PENDING',
+            dueDate,
+            currency: 'USD',
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
               },
             },
-          }) as InvoiceRecord;
-        } catch (error: any) {
-          if (error?.code !== 'P2002' || attempt === 4) {
+          },
+        }) as InvoiceRecord;
+
+        const itemInputs: Array<{ description: string; totalPrice: number; resourceId: string | null }> = (usage as any).vms.map((vm: any) => ({
+          description: `VM: ${vm.vmName}`,
+          totalPrice: roundTo(vm.totalCost),
+          resourceId: vm.vmId as string | null,
+        }));
+
+        if (orphanCost > 0) {
+          itemInputs.push({
+            description: 'Usage from deleted VMs',
+            totalPrice: orphanCost,
+            resourceId: null,
+          });
+        }
+
+        const invoiceItems = await Promise.all(
+          itemInputs.map(async (item) => tx.invoiceItem.create({
+            data: {
+              invoiceId: createdInvoice.id,
+              description: item.description,
+              quantity: 1,
+              unitPrice: item.totalPrice,
+              totalPrice: item.totalPrice,
+              resourceType: 'VM',
+              resourceId: item.resourceId,
+              usageStart: startDate,
+              usageEnd: endDate,
+            },
+          })),
+        );
+
+        await tx.auditLog.create({
+          data: {
+            userId,
+            action: 'INVOICE_GENERATED',
+            resource: 'invoice',
+            resourceId: createdInvoice.id,
+            newValues: JSON.stringify({
+              invoiceNumber: createdInvoice.invoiceNumber,
+              amount: createdInvoice.amount,
+              billingPeriod: `${adjustedMonth + 1}/${invoiceYear}`,
+            }),
+          },
+        });
+
+        return {
+          ...createdInvoice,
+          items: invoiceItems,
+        };
+      });
+
+      // Concurrent generation can race on the sequential invoice number — retry
+      // on the unique-constraint violation so a fresh number is picked each attempt
+      const maxAttempts = 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          return await createInvoice();
+        } catch (error) {
+          const isUniqueViolation = (error as { code?: string })?.code === 'P2002';
+          if (!isUniqueViolation || attempt === maxAttempts) {
             throw error;
           }
         }
       }
 
-      if (!invoice) {
-        throw new Error('Failed to allocate a unique invoice number');
-      }
-
-      const invoiceItems = await Promise.all(
-        (usage as any).vms.map(async (vm: any) => prisma.invoiceItem.create({
-          data: {
-            invoiceId: invoice.id,
-            description: `VM: ${vm.vmName}`,
-            quantity: 1,
-            unitPrice: roundTo(vm.totalCost),
-            totalPrice: roundTo(vm.totalCost),
-            resourceType: 'VM',
-            resourceId: vm.vmId,
-            usageStart: startDate,
-            usageEnd: endDate,
-          },
-        })),
-      );
-
-      await prisma.auditLog.create({
-        data: {
-          userId,
-          action: 'INVOICE_GENERATED',
-          resource: 'invoice',
-          resourceId: invoice.id,
-          newValues: JSON.stringify({
-            invoiceNumber: invoice.invoiceNumber,
-            amount: invoice.amount,
-            billingPeriod: `${adjustedMonth + 1}/${invoiceYear}`,
-          }),
-        },
-      });
-
-      return {
-        ...invoice,
-        items: invoiceItems,
-      };
+      throw new Error('Failed to generate invoice');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to generate invoice: ${message}`);
@@ -761,11 +828,11 @@ class BillingService {
 
   static async generateInvoiceNumber(): Promise<string> {
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getUTCFullYear();
+    const month = String(now.getUTCMonth() + 1).padStart(2, '0');
 
-    const startOfMonth = new Date(year, now.getMonth(), 1);
-    const endOfMonth = new Date(year, now.getMonth() + 1, 0);
+    const startOfMonth = new Date(Date.UTC(year, now.getUTCMonth(), 1));
+    const endOfMonth = new Date(Date.UTC(year, now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
 
     const count = await prisma.invoice.count({
       where: {
@@ -844,13 +911,27 @@ class BillingService {
         if (endDate) (where.createdAt as Record<string, unknown>).lte = new Date(endDate);
       }
 
-      const skip = (parseInt(String(page), 10) - 1) * parseInt(String(limit), 10);
+      // Whitelist sortable columns — arbitrary input must not reach orderBy
+      // ('total' is kept as an alias for the Invoice.amount column)
+      const sortFieldMap: Record<string, string> = {
+        createdAt: 'createdAt',
+        amount: 'amount',
+        total: 'amount',
+        dueDate: 'dueDate',
+        status: 'status',
+      };
+      const sortField = sortFieldMap[String(sortBy)] || 'createdAt';
+      const order = sortOrder === 'asc' ? 'asc' : 'desc';
+
+      const pageNumber = Math.max(parseInt(String(page), 10) || 1, 1);
+      const pageSize = Math.min(Math.max(parseInt(String(limit), 10) || 10, 1), 100);
+      const skip = (pageNumber - 1) * pageSize;
       const [invoices, total] = await Promise.all([
         prisma.invoice.findMany({
           where,
-          orderBy: { [sortBy]: sortOrder },
+          orderBy: { [sortField]: order },
           skip,
-          take: parseInt(String(limit), 10),
+          take: pageSize,
           include: {
             items: true,
             payments: {
@@ -865,10 +946,10 @@ class BillingService {
       return {
         data: invoices,
         pagination: {
-          page: parseInt(String(page), 10),
-          limit: parseInt(String(limit), 10),
+          page: pageNumber,
+          limit: pageSize,
           total,
-          totalPages: Math.ceil(total / parseInt(String(limit), 10)),
+          totalPages: Math.ceil(total / pageSize),
         },
       };
     } catch (error) {
@@ -898,15 +979,18 @@ class BillingService {
       let finalDiscountAmount = 0;
       const invoiceSubtotal = Number(invoice.subtotal);
 
-      if (discountAmount) {
+      if (discountAmount !== undefined && discountAmount !== null) {
         finalDiscountAmount = parseFloat(String(discountAmount));
-      } else if (discountPercentage) {
+      } else if (discountPercentage !== undefined && discountPercentage !== null) {
         finalDiscountAmount = invoiceSubtotal * (parseFloat(String(discountPercentage)) / 100);
       }
 
-      if (finalDiscountAmount > invoiceSubtotal) {
-        throw new Error('Discount amount cannot exceed subtotal');
+      if (!Number.isFinite(finalDiscountAmount)) {
+        finalDiscountAmount = 0;
       }
+
+      // Clamp the discount into a sane range — never negative, never above the subtotal
+      finalDiscountAmount = Math.min(Math.max(finalDiscountAmount, 0), invoiceSubtotal);
 
       const currentTax = Number(invoice.tax);
       const taxRate = invoiceSubtotal > 0
@@ -949,12 +1033,6 @@ class BillingService {
 
   static async updateInvoiceStatus(invoiceId: string, status: InvoiceStatus, metadata: InvoiceStatusUpdateMetadata = {}): Promise<InvoiceRecord> {
     try {
-      const validStatuses = ['PENDING', 'PAID', 'OVERDUE', 'CANCELLED', 'REFUNDED'];
-
-      if (!validStatuses.includes(status)) {
-        throw new Error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
-      }
-
       const invoice = await prisma.invoice.findUnique({
         where: { id: invoiceId },
       }) as InvoiceRecord | null;
@@ -963,24 +1041,31 @@ class BillingService {
         throw new Error('Invoice not found');
       }
 
-      const updateData: Record<string, unknown> = { status };
-
-      if (status === 'PAID') {
-        updateData.paidAt = new Date();
+      // Already in the requested state — idempotent no-op (also avoids re-stamping paidAt)
+      if (invoice.status === status) {
+        return invoice;
       }
+
+      const allowedTransitions = INVOICE_STATUS_TRANSITIONS[invoice.status] || [];
+      if (!allowedTransitions.includes(status)) {
+        throw new Error(`Cannot transition invoice from ${invoice.status} to ${status}`);
+      }
+
+      const paidAt = metadata.paidAt instanceof Date ? metadata.paidAt : new Date();
 
       const updatedInvoice = await prisma.invoice.update({
         where: { id: invoiceId },
-        data: updateData,
-        include: {
-          user: true,
-          items: true,
+        data: {
+          status,
+          ...(status === 'PAID' && { paidAt }),
         },
       }) as InvoiceRecord;
 
+      // Attribute the audit entry to the real actor when provided; otherwise use
+      // a system marker (null userId) instead of misattributing it to the invoice owner
       const actorUserId = typeof metadata.userId === 'string'
         ? metadata.userId
-        : updatedInvoice.userId;
+        : null;
 
       await prisma.auditLog.create({
         data: {
@@ -988,8 +1073,11 @@ class BillingService {
           action: 'INVOICE_STATUS_UPDATED',
           resource: 'invoice',
           resourceId: invoiceId,
-          oldValues: JSON.stringify({ status: invoice.status }),
-          newValues: JSON.stringify({ status, ...metadata }),
+          newValues: JSON.stringify({
+            status,
+            ...metadata,
+            actor: actorUserId || 'system',
+          }),
         },
       });
 
@@ -1000,52 +1088,33 @@ class BillingService {
     }
   }
 
-  static async generateAllMonthlyInvoices(options: InvoiceBatchOptions = {}): Promise<{ success: number; failed: number; skipped: number; total: number; errors: Array<Record<string, unknown>>; invoices: Array<Record<string, unknown>> }> {
+  static async generateAllMonthlyInvoices(options: InvoiceBatchOptions = {}): Promise<{ success: number; failed: number; total: number; errors: Array<Record<string, unknown>> }> {
     try {
       const { month, year } = options;
 
       const users = await prisma.user.findMany({
-        where: {
-          isActive: true,
-          virtualMachines: {
-            some: {},
-          },
-        },
-        select: { id: true, email: true, firstName: true, lastName: true },
-      }) as Array<{ id: string; email: string; firstName: string; lastName: string }>;
+        where: { isActive: true },
+        select: { id: true, email: true },
+      }) as Array<{ id: string; email: string }>;
 
-      const results: { success: number; failed: number; skipped: number; total: number; errors: Array<Record<string, unknown>>; invoices: Array<Record<string, unknown>> } = {
+      const results: { success: number; failed: number; total: number; errors: Array<Record<string, unknown>> } = {
         success: 0,
         failed: 0,
-        skipped: 0,
         total: users.length,
         errors: [],
-        invoices: [],
       };
 
       for (const user of users) {
         try {
-          const invoice = await this.generateMonthlyInvoice(user.id, { month, year });
+          await this.generateMonthlyInvoice(user.id, { month, year });
           results.success++;
-          results.invoices.push({
+        } catch (error) {
+          results.failed++;
+          results.errors.push({
             userId: user.id,
             userEmail: user.email,
-            invoiceId: invoice.id,
-            invoiceNumber: invoice.invoiceNumber,
-            total: invoice.amount,
+            error: error instanceof Error ? error.message : String(error),
           });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          if (message.includes('already exists') || message.includes('No usage found')) {
-            results.skipped++;
-          } else {
-            results.failed++;
-            results.errors.push({
-              userId: user.id,
-              userEmail: user.email,
-              error: message,
-            });
-          }
         }
       }
 
@@ -1056,24 +1125,40 @@ class BillingService {
     }
   }
 
-  static async markOverdueInvoices(): Promise<{ updated: number; timestamp: string }> {
+  static async markOverdueInvoices(): Promise<{ success: number; failed: number; total: number; errors: Array<Record<string, unknown>> }> {
     try {
-      const result = await prisma.invoice.updateMany({
+      const overdueInvoices = await prisma.invoice.findMany({
         where: {
           status: 'PENDING',
           dueDate: {
             lt: new Date(),
           },
         },
-        data: {
-          status: 'OVERDUE',
-        },
-      });
+      }) as InvoiceRecord[];
 
-      return {
-        updated: result.count,
-        timestamp: new Date().toISOString(),
+      const results: { success: number; failed: number; total: number; errors: Array<Record<string, unknown>> } = {
+        success: 0,
+        failed: 0,
+        total: overdueInvoices.length,
+        errors: [],
       };
+
+      for (const invoice of overdueInvoices) {
+        try {
+          await this.updateInvoiceStatus(invoice.id, 'OVERDUE', {
+            markedAt: new Date(),
+          });
+          results.success++;
+        } catch (error) {
+          results.failed++;
+          results.errors.push({
+            invoiceId: invoice.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      return results;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to mark overdue invoices: ${message}`);
@@ -1094,12 +1179,9 @@ class BillingService {
       ]);
 
       const aggregation = await prisma.invoice.aggregate({
-        where,
+        where: { ...where, status: 'PAID' },
         _sum: {
           amount: true,
-          subtotal: true,
-          tax: true,
-          discount: true,
         },
       });
 
@@ -1113,16 +1195,89 @@ class BillingService {
           refunded,
         },
         amounts: {
-          totalRevenue: roundTo(aggregation._sum?.amount || 0),
-          totalSubtotal: roundTo(aggregation._sum?.subtotal || 0),
-          totalTax: roundTo(aggregation._sum?.tax || 0),
-          totalDiscounts: roundTo(aggregation._sum?.discount || 0),
+          totalProcessed: roundTo(aggregation._sum?.amount || 0),
         },
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to get invoice statistics: ${message}`);
     }
+  }
+
+  /**
+   * NOTE: webhook event dedup is in-memory only — it resets on restart and is
+   * scoped to this process. Replace with a persistent store (DB/Redis) before
+   * running multiple instances.
+   */
+  private static processedWebhookEventIds = new Set<string>();
+
+  static parseGatewayResponse(raw: string | null | undefined): Record<string, any> {
+    try {
+      const parsed = JSON.parse(raw || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Idempotency guard: finds the newest PENDING payment row for an invoice
+   * whose Stripe PaymentIntent is still live (retrievable and not canceled),
+   * so callers can reuse it instead of creating a duplicate intent + row.
+   * Stale rows (canceled/missing intents) are marked FAILED along the way.
+   */
+  static async findReusablePayment(invoiceId: string): Promise<{ payment: PaymentRecord; paymentIntent: any } | null> {
+    const pendingPayments = await prisma.payment.findMany({
+      where: {
+        invoiceId,
+        status: 'PENDING',
+        gatewayId: { not: null },
+      },
+      orderBy: { createdAt: 'desc' },
+    }) as PaymentRecord[];
+
+    for (const pending of pendingPayments) {
+      let intent: any;
+      try {
+        intent = await stripe.paymentIntents.retrieve(pending.gatewayId as string);
+      } catch (retrieveError) {
+        const code = (retrieveError as { code?: string })?.code;
+        if (code === 'resource_missing') {
+          await prisma.payment.update({
+            where: { id: pending.id },
+            data: {
+              status: 'FAILED',
+              gatewayResponse: JSON.stringify({
+                staleGatewayId: pending.gatewayId,
+                reason: 'payment_intent_missing',
+              }),
+            },
+          }).catch(() => {});
+          continue;
+        }
+        // State of the existing intent is unknown — do NOT create a second
+        // one, or the customer could end up charged twice.
+        throw retrieveError;
+      }
+
+      if (intent.status !== 'canceled') {
+        return { payment: pending, paymentIntent: intent };
+      }
+
+      // The intent was canceled: retire the stale row and keep looking.
+      await prisma.payment.update({
+        where: { id: pending.id },
+        data: {
+          status: 'FAILED',
+          gatewayResponse: JSON.stringify({
+            staleGatewayId: pending.gatewayId,
+            paymentIntentStatus: intent.status,
+          }),
+        },
+      }).catch(() => {});
+    }
+
+    return null;
   }
 
   static async createPaymentIntent(invoiceId: string, userId: string): Promise<Record<string, unknown>> {
@@ -1158,18 +1313,54 @@ class BillingService {
         throw new Error('Invoice is cancelled');
       }
 
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(Number(invoice.amount) * 100),
-        currency: invoice.currency.toLowerCase(),
-        metadata: {
-          invoiceId: invoice.id,
-          invoiceNumber: invoice.invoiceNumber,
-          userId: invoice.userId,
-          userEmail: invoice.user?.email,
-        },
-        description: `Payment for invoice ${invoice.invoiceNumber}`,
-        receipt_email: invoice.user?.email,
-      });
+      if (invoice.status === 'REFUNDED') {
+        throw new Error('Invoice is refunded');
+      }
+
+      if (!['PENDING', 'OVERDUE'].includes(invoice.status)) {
+        throw new Error(`Invoice cannot be paid while in ${invoice.status} status`);
+      }
+
+      // Reuse an existing live intent rather than creating a new Stripe
+      // PaymentIntent + Payment row on every call.
+      const reusable = await this.findReusablePayment(invoice.id);
+      if (reusable) {
+        if (reusable.paymentIntent.status === 'succeeded') {
+          // Stripe already collected — reconcile our records before reporting.
+          try {
+            await prisma.$transaction([
+              prisma.payment.update({
+                where: { id: reusable.payment.id },
+                data: { status: 'COMPLETED', processedAt: new Date() },
+              }),
+              prisma.invoice.update({
+                where: { id: invoice.id },
+                data: { status: 'PAID', paidAt: new Date() },
+              }),
+            ]);
+          } catch (reconcileError) {
+            console.error(`Failed to reconcile succeeded payment intent ${reusable.paymentIntent.id}:`, reconcileError);
+          }
+          throw new Error('Invoice is already paid');
+        }
+
+        return {
+          paymentId: reusable.payment.id,
+          clientSecret: reusable.paymentIntent.client_secret,
+          amount: invoice.amount,
+          currency: invoice.currency,
+          status: reusable.paymentIntent.status,
+          invoice: {
+            id: invoice.id,
+            invoiceNumber: invoice.invoiceNumber,
+            total: Number(invoice.amount),
+          },
+        };
+      }
+
+      // Create the PENDING Payment row BEFORE the Stripe intent so a failure
+      // after intent creation can never leave an untracked intent behind.
+      const attempt = (await prisma.payment.count({ where: { invoiceId: invoice.id } })) + 1;
 
       const payment = await prisma.payment.create({
         data: {
@@ -1178,12 +1369,54 @@ class BillingService {
           currency: invoice.currency,
           method: 'STRIPE',
           status: 'PENDING',
+          gatewayResponse: JSON.stringify({ attempt }),
+        },
+      }) as PaymentRecord;
+
+      let paymentIntent: any;
+      try {
+        paymentIntent = await stripe.paymentIntents.create(
+          {
+            amount: Math.round(Number(invoice.amount) * 100),
+            currency: invoice.currency.toLowerCase(),
+            automatic_payment_methods: { enabled: true },
+            metadata: {
+              invoiceId: invoice.id,
+              invoiceNumber: invoice.invoiceNumber,
+              userId: invoice.userId,
+              userEmail: invoice.user?.email,
+              paymentId: payment.id,
+            },
+            description: `Payment for invoice ${invoice.invoiceNumber}`,
+            receipt_email: invoice.user?.email,
+          },
+          { idempotencyKey: `pi:${invoice.id}:${attempt}` },
+        );
+      } catch (intentError) {
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: 'FAILED',
+            gatewayResponse: JSON.stringify({
+              attempt,
+              error: intentError instanceof Error ? intentError.message : String(intentError),
+            }),
+          },
+        }).catch(() => {});
+        throw intentError;
+      }
+
+      // Store the gateway id as soon as it is known.
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: {
           gatewayId: paymentIntent.id,
           gatewayResponse: JSON.stringify({
+            attempt,
             clientSecret: paymentIntent.client_secret,
           }),
         },
-      }) as PaymentRecord;
+      });
 
       await prisma.auditLog.create({
         data: {
@@ -1205,6 +1438,7 @@ class BillingService {
         clientSecret: paymentIntent.client_secret,
         amount: invoice.amount,
         currency: invoice.currency,
+        status: paymentIntent.status,
         invoice: {
           id: invoice.id,
           invoiceNumber: invoice.invoiceNumber,
@@ -1220,6 +1454,10 @@ class BillingService {
   static async processPayment(invoiceId: string, paymentData: PaymentIntentOptions): Promise<Record<string, unknown>> {
     try {
       const { paymentMethodId, savePaymentMethod = false } = paymentData;
+      const { userId, isAdmin = false } = paymentData as PaymentIntentOptions & {
+        userId?: string;
+        isAdmin?: boolean;
+      };
 
       const invoice = await prisma.invoice.findUnique({
         where: { id: invoiceId },
@@ -1237,91 +1475,264 @@ class BillingService {
         throw new Error('Invoice not found');
       }
 
+      // IDOR guard: only the invoice owner (or an admin) may pay it.
+      if (!userId || (invoice.userId !== userId && !isAdmin)) {
+        throw new Error('Unauthorized access to invoice');
+      }
+
       if (invoice.status === 'PAID') {
         throw new Error('Invoice is already paid');
       }
 
+      if (invoice.status === 'CANCELLED') {
+        throw new Error('Invoice is cancelled');
+      }
+
+      if (invoice.status === 'REFUNDED') {
+        throw new Error('Invoice is refunded');
+      }
+
+      if (!['PENDING', 'OVERDUE'].includes(invoice.status)) {
+        throw new Error(`Invoice cannot be paid while in ${invoice.status} status`);
+      }
+
+      // Reuse the Stripe customer for this user instead of creating a
+      // duplicate on every payment. The User model has no stripeCustomerId
+      // column, so the email lookup is the link.
       let customerId: string | undefined;
       if (invoice.user?.email) {
-        const customer = await stripe.customers.create({
+        const existingCustomers = await stripe.customers.list({
           email: invoice.user.email,
-          metadata: {
-            userId: invoice.user.id,
-          },
+          limit: 1,
         });
-        customerId = customer.id;
+        customerId = existingCustomers?.data?.[0]?.id;
+        if (!customerId) {
+          const customer = await stripe.customers.create({
+            email: invoice.user.email,
+            metadata: {
+              userId: invoice.user.id,
+            },
+          });
+          customerId = customer.id;
+        }
       }
 
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(Number(invoice.amount) * 100),
-        currency: invoice.currency.toLowerCase(),
-        ...(customerId ? { customer: customerId } : {}),
-        ...(paymentMethodId ? { payment_method: paymentMethodId } : {}),
-        confirm: true,
-        metadata: {
-          invoiceId: invoice.id,
-          invoiceNumber: invoice.invoiceNumber,
-          userId: invoice.user.id,
-        },
-        description: `Payment for invoice ${invoice.invoiceNumber}`,
-      });
+      // Reuse an existing PENDING payment + live PaymentIntent for this
+      // invoice instead of creating duplicates on retry.
+      let payment: PaymentRecord | null = null;
+      let paymentIntent: any = null;
 
-      if (savePaymentMethod && paymentMethodId && customerId) {
-        await stripe.paymentMethods.attach(paymentMethodId, {
-          customer: customerId,
-        });
+      const reusable = await this.findReusablePayment(invoice.id);
+      if (reusable) {
+        ({ payment, paymentIntent } = reusable);
       }
 
-      const payment = await prisma.payment.create({
-        data: {
-          invoiceId: invoice.id,
-          amount: roundTo(invoice.amount),
-          currency: invoice.currency,
-          method: 'STRIPE',
-          status: paymentIntent.status === 'succeeded' ? 'COMPLETED' : 'PENDING',
-          gatewayId: paymentIntent.id,
-          processedAt: paymentIntent.status === 'succeeded' ? new Date() : null,
-          gatewayResponse: JSON.stringify({
-            paymentIntentStatus: paymentIntent.status,
-            paymentMethodId: paymentMethodId || null,
-            customerId: customerId || null,
-          }),
-        },
-      }) as PaymentRecord;
+      if (!payment || !paymentIntent) {
+        // Create the PENDING Payment row BEFORE charging so a post-charge
+        // failure can never leave a succeeded charge with no local record.
+        const attempt = (await prisma.payment.count({ where: { invoiceId: invoice.id } })) + 1;
 
-      if (paymentIntent.status === 'succeeded') {
-        await prisma.invoice.update({
-          where: { id: invoiceId },
+        payment = await prisma.payment.create({
           data: {
-            status: 'PAID',
-            paidAt: new Date(),
-          },
-        });
-
-        await prisma.auditLog.create({
-          data: {
-            userId: invoice.user.id,
-            action: 'PAYMENT_COMPLETED',
-            resource: 'payment',
-            resourceId: payment.id,
-            newValues: JSON.stringify({
-              invoiceId: invoice.id,
-              invoiceNumber: invoice.invoiceNumber,
-              amount: invoice.amount,
-              paymentIntentId: paymentIntent.id,
+            invoiceId: invoice.id,
+            amount: roundTo(invoice.amount),
+            currency: invoice.currency,
+            method: 'STRIPE',
+            status: 'PENDING',
+            gatewayResponse: JSON.stringify({
+              attempt,
+              stripeCustomerId: customerId || null,
             }),
           },
+        }) as PaymentRecord;
+
+        try {
+          paymentIntent = await stripe.paymentIntents.create(
+            {
+              amount: Math.round(Number(invoice.amount) * 100),
+              currency: invoice.currency.toLowerCase(),
+              ...(customerId ? { customer: customerId } : {}),
+              confirm: false,
+              automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+              metadata: {
+                invoiceId: invoice.id,
+                invoiceNumber: invoice.invoiceNumber,
+                userId: invoice.user.id,
+                paymentId: payment.id,
+              },
+              description: `Payment for invoice ${invoice.invoiceNumber}`,
+            },
+            { idempotencyKey: `pi:${invoice.id}:${attempt}` },
+          );
+        } catch (intentError) {
+          await prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: 'FAILED',
+              gatewayResponse: JSON.stringify({
+                attempt,
+                stripeCustomerId: customerId || null,
+                error: intentError instanceof Error ? intentError.message : String(intentError),
+              }),
+            },
+          }).catch(() => {});
+          throw intentError;
+        }
+
+        // Store the gateway id as soon as it is known.
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: { gatewayId: paymentIntent.id },
         });
+      }
+
+      // Confirm the intent server-side. Intents in requires_action/processing/
+      // succeeded are NOT re-confirmed — the client finishes them via the
+      // returned clientSecret (3DS etc.) or they are already settled.
+      let confirmed = paymentIntent;
+      if (['requires_confirmation', 'requires_payment_method'].includes(paymentIntent.status)) {
+        if (paymentIntent.status === 'requires_payment_method' && !paymentMethodId) {
+          return {
+            success: false,
+            paymentId: payment.id,
+            status: paymentIntent.status,
+            clientSecret: paymentIntent.client_secret,
+            invoice: {
+              id: invoice.id,
+              invoiceNumber: invoice.invoiceNumber,
+              status: invoice.status,
+            },
+          };
+        }
+
+        try {
+          confirmed = await stripe.paymentIntents.confirm(
+            paymentIntent.id,
+            paymentMethodId ? { payment_method: paymentMethodId } : {},
+            { idempotencyKey: `pic:${payment.id}` },
+          );
+        } catch (confirmError) {
+          const stripeError = confirmError as {
+            type?: string;
+            code?: string;
+            message?: string;
+            payment_intent?: any;
+          };
+
+          if (stripeError?.type === 'StripeCardError' || stripeError?.payment_intent) {
+            // Card declined / invalid: keep the row PENDING so the intent can
+            // be retried, record the failure and let the client act on it.
+            const failedIntent = stripeError.payment_intent || paymentIntent;
+            const priorGateway = this.parseGatewayResponse(payment.gatewayResponse);
+            await prisma.payment.update({
+              where: { id: payment.id },
+              data: {
+                gatewayResponse: JSON.stringify({
+                  ...priorGateway,
+                  stripeCustomerId: customerId || priorGateway.stripeCustomerId || null,
+                  lastError: stripeError.message || 'Payment confirmation failed',
+                  paymentIntentStatus: failedIntent.status || paymentIntent.status,
+                }),
+              },
+            }).catch(() => {});
+
+            return {
+              success: false,
+              paymentId: payment.id,
+              status: failedIntent.status || 'requires_payment_method',
+              clientSecret: failedIntent.client_secret || paymentIntent.client_secret,
+              error: stripeError.message || 'Payment confirmation failed',
+              invoice: {
+                id: invoice.id,
+                invoiceNumber: invoice.invoiceNumber,
+                status: invoice.status,
+              },
+            };
+          }
+
+          throw confirmError;
+        }
+      }
+
+      const priorGateway = this.parseGatewayResponse(payment.gatewayResponse);
+      const mergedGatewayResponse = JSON.stringify({
+        ...priorGateway,
+        stripeCustomerId: customerId || priorGateway.stripeCustomerId || null,
+        paymentIntentStatus: confirmed.status,
+        paymentMethodId: paymentMethodId || priorGateway.paymentMethodId || null,
+      });
+
+      if (confirmed.status === 'succeeded') {
+        // Post-charge writes are wrapped so a failure here can NEVER mask the
+        // succeeded charge — log loudly for reconciliation (the
+        // payment_intent.succeeded webhook will also settle the records).
+        try {
+          await prisma.$transaction([
+            prisma.payment.update({
+              where: { id: payment.id },
+              data: {
+                status: 'COMPLETED',
+                processedAt: new Date(),
+                gatewayResponse: mergedGatewayResponse,
+              },
+            }),
+            prisma.invoice.update({
+              where: { id: invoiceId },
+              data: {
+                status: 'PAID',
+                paidAt: new Date(),
+              },
+            }),
+          ]);
+
+          await prisma.auditLog.create({
+            data: {
+              userId: invoice.user.id,
+              action: 'PAYMENT_COMPLETED',
+              resource: 'payment',
+              resourceId: payment.id,
+              newValues: JSON.stringify({
+                invoiceId: invoice.id,
+                invoiceNumber: invoice.invoiceNumber,
+                amount: invoice.amount,
+                paymentIntentId: confirmed.id,
+              }),
+            },
+          });
+        } catch (recordError) {
+          console.error(
+            `CRITICAL: Stripe payment intent ${confirmed.id} succeeded but post-charge DB writes failed; manual reconciliation required`,
+            recordError,
+          );
+        }
+      } else {
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: { gatewayResponse: mergedGatewayResponse },
+        }).catch(() => {});
+      }
+
+      // Save the payment method for reuse only after a successful-ish charge
+      // attempt; attach failures must not fail the payment.
+      if (savePaymentMethod && paymentMethodId && customerId && confirmed.status !== 'requires_payment_method') {
+        try {
+          await stripe.paymentMethods.attach(paymentMethodId, {
+            customer: customerId,
+          });
+        } catch (attachError) {
+          console.warn(`Failed to attach payment method ${paymentMethodId} to customer ${customerId}:`, attachError);
+        }
       }
 
       return {
-        success: paymentIntent.status === 'succeeded',
+        success: confirmed.status === 'succeeded',
         paymentId: payment.id,
-        status: paymentIntent.status,
+        status: confirmed.status,
+        clientSecret: confirmed.client_secret,
         invoice: {
           id: invoice.id,
           invoiceNumber: invoice.invoiceNumber,
-          status: paymentIntent.status === 'succeeded' ? 'PAID' : invoice.status,
+          status: confirmed.status === 'succeeded' ? 'PAID' : invoice.status,
         },
       };
     } catch (error) {
@@ -1332,9 +1743,23 @@ class BillingService {
 
   static async handleWebhook(event: any): Promise<Record<string, unknown>> {
     try {
+      // Event-level dedup: Stripe retries deliveries, so the same event.id can
+      // arrive multiple times and must only be processed once.
+      const eventId = typeof event?.id === 'string' ? event.id : undefined;
+      if (eventId) {
+        if (this.processedWebhookEventIds.has(eventId)) {
+          return { handled: true, duplicate: true, eventId };
+        }
+        this.processedWebhookEventIds.add(eventId);
+        // Bound memory usage once the set grows large.
+        if (this.processedWebhookEventIds.size > 10000) {
+          this.processedWebhookEventIds.clear();
+        }
+      }
+
       switch (event.type) {
         case 'payment_intent.succeeded':
-          return await this.handlePaymentSuccess(event.data.object);
+          return await this.handlePaymentSuccess(event.data.object, eventId);
         case 'payment_intent.payment_failed':
           return await this.handlePaymentFailure(event.data.object);
         case 'charge.refunded':
@@ -1353,11 +1778,11 @@ class BillingService {
     }
   }
 
-  static async handlePaymentSuccess(paymentIntent: any): Promise<Record<string, unknown>> {
+  static async handlePaymentSuccess(paymentIntent: any, eventId?: string): Promise<Record<string, unknown>> {
     try {
-      const { invoiceId } = paymentIntent.metadata;
-      if (!invoiceId) {
-        throw new Error('Invoice ID not found in payment intent metadata');
+      if (!paymentIntent.metadata?.invoiceId) {
+        console.warn(`payment_intent.succeeded ${paymentIntent.id} missing invoiceId metadata`);
+        return { handled: false, reason: 'missing_invoice_metadata', gatewayId: paymentIntent.id };
       }
 
       const payment = await prisma.payment.findFirst({
@@ -1365,55 +1790,126 @@ class BillingService {
         include: {
           invoice: {
             select: {
+              id: true,
               userId: true,
+              amount: true,
+              currency: true,
+              status: true,
             },
           },
         },
-      }) as PaymentRecord | null;
+      }) as (PaymentRecord & {
+        invoice: {
+          id: string;
+          userId: string;
+          amount: NumericLike;
+          currency: string;
+          status: string;
+        } | null;
+      }) | null;
 
       if (!payment) {
-        throw new Error('Payment record not found');
+        // Unknown intent: acknowledge (200) so Stripe does not retry for days.
+        console.warn(`payment_intent.succeeded for unknown gatewayId ${paymentIntent.id}`);
+        return { handled: false, reason: 'payment_record_not_found', gatewayId: paymentIntent.id };
       }
 
-      await prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: 'COMPLETED',
-          processedAt: new Date(),
-          gatewayResponse: JSON.stringify({
-            paymentIntentStatus: paymentIntent.status,
-            webhookProcessedAt: new Date().toISOString(),
-          }),
-        },
-      });
+      const { invoiceId } = payment;
 
-      await prisma.invoice.update({
-        where: { id: invoiceId },
-        data: {
-          status: 'PAID',
-          paidAt: new Date(),
-        },
-      });
+      // Verify the charged amount/currency actually matches the invoice
+      // before marking anything PAID.
+      const expectedAmount = Math.round(Number(payment.invoice?.amount ?? payment.amount) * 100);
+      const expectedCurrency = String(payment.invoice?.currency || payment.currency || '').toLowerCase();
+      const receivedCurrency = String(paymentIntent.currency || '').toLowerCase();
 
-      await prisma.auditLog.create({
-        data: {
-          userId: payment.invoice?.userId,
-          action: 'PAYMENT_WEBHOOK_SUCCESS',
-          resource: 'payment',
-          resourceId: payment.id,
-          newValues: JSON.stringify({
-            invoiceId,
-            paymentIntentId: paymentIntent.id,
-            amount: paymentIntent.amount / 100,
-          }),
-        },
-      });
+      if (
+        paymentIntent.amount !== expectedAmount
+        || (expectedCurrency && receivedCurrency && receivedCurrency !== expectedCurrency)
+      ) {
+        console.error(
+          `Payment intent ${paymentIntent.id} amount/currency mismatch: expected ${expectedAmount} ${expectedCurrency}, received ${paymentIntent.amount} ${receivedCurrency}`,
+        );
+        await prisma.auditLog.create({
+          data: {
+            userId: payment.invoice?.userId,
+            action: 'PAYMENT_AMOUNT_MISMATCH',
+            resource: 'payment',
+            resourceId: payment.id,
+            newValues: JSON.stringify({
+              invoiceId,
+              paymentIntentId: paymentIntent.id,
+              expectedAmount,
+              receivedAmount: paymentIntent.amount,
+              expectedCurrency,
+              receivedCurrency,
+              eventId,
+            }),
+          },
+        }).catch(() => {});
+        return { handled: false, reason: 'amount_mismatch', paymentId: payment.id };
+      }
+
+      // Only PENDING/OVERDUE invoices may transition to PAID — terminal states
+      // (PAID/CANCELLED/REFUNDED) no-op. The payment row is still reconciled
+      // so it reflects the real charge.
+      const invoiceStatus = payment.invoice?.status || '';
+      const invoicePayable = ['PENDING', 'OVERDUE'].includes(invoiceStatus);
+      if (!invoicePayable) {
+        console.warn(
+          `payment_intent.succeeded for invoice ${invoiceId} in terminal status ${invoiceStatus}; leaving invoice unchanged`,
+        );
+      }
+
+      const priorGateway = this.parseGatewayResponse(payment.gatewayResponse);
+
+      await prisma.$transaction([
+        prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: 'COMPLETED',
+            processedAt: new Date(),
+            gatewayResponse: JSON.stringify({
+              ...priorGateway,
+              paymentIntentStatus: paymentIntent.status,
+              webhookProcessedAt: new Date().toISOString(),
+              ...(eventId ? { eventId } : {}),
+            }),
+          },
+        }),
+        ...(invoicePayable
+          ? [
+            prisma.invoice.update({
+              where: { id: invoiceId },
+              data: {
+                status: 'PAID',
+                paidAt: new Date(),
+              },
+            }),
+          ]
+          : []),
+        prisma.auditLog.create({
+          data: {
+            userId: payment.invoice?.userId,
+            action: 'PAYMENT_WEBHOOK_SUCCESS',
+            resource: 'payment',
+            resourceId: payment.id,
+            newValues: JSON.stringify({
+              invoiceId,
+              paymentIntentId: paymentIntent.id,
+              amount: paymentIntent.amount / 100,
+              invoiceUpdated: invoicePayable,
+              eventId,
+            }),
+          },
+        }),
+      ]);
 
       return {
         handled: true,
         paymentId: payment.id,
         invoiceId,
         status: 'COMPLETED',
+        invoiceUpdated: invoicePayable,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -1423,11 +1919,12 @@ class BillingService {
 
   static async handlePaymentFailure(paymentIntent: any): Promise<Record<string, unknown>> {
     try {
-      const { invoiceId } = paymentIntent.metadata;
-
-      if (!invoiceId) {
-        throw new Error('Invoice ID not found in payment intent metadata');
+      if (!paymentIntent.metadata?.invoiceId) {
+        console.warn(`payment_intent.payment_failed ${paymentIntent.id} missing invoiceId metadata`);
+        return { handled: false, reason: 'missing_invoice_metadata', gatewayId: paymentIntent.id };
       }
+
+      const { invoiceId } = paymentIntent.metadata;
 
       const payment = await prisma.payment.findFirst({
         where: { gatewayId: paymentIntent.id },
@@ -1441,7 +1938,9 @@ class BillingService {
       }) as PaymentRecord | null;
 
       if (!payment) {
-        throw new Error('Payment record not found');
+        // Unknown intent: acknowledge (200) so Stripe does not retry for days.
+        console.warn(`payment_intent.payment_failed for unknown gatewayId ${paymentIntent.id}`);
+        return { handled: false, reason: 'payment_record_not_found', gatewayId: paymentIntent.id };
       }
 
       await prisma.payment.update({
@@ -1485,6 +1984,9 @@ class BillingService {
   static async handleRefund(charge: any): Promise<Record<string, unknown>> {
     try {
       const paymentIntentId = charge.payment_intent;
+      if (!paymentIntentId) {
+        return { handled: false, reason: 'missing_payment_intent' };
+      }
 
       const payment = await prisma.payment.findFirst({
         where: { gatewayId: paymentIntentId },
@@ -1498,45 +2000,63 @@ class BillingService {
       }) as PaymentRecord | null;
 
       if (!payment) {
-        throw new Error('Payment record not found');
+        // Unknown intent: acknowledge (200) so Stripe does not retry for days.
+        console.warn(`charge.refunded for unknown payment_intent ${paymentIntentId}`);
+        return { handled: false, reason: 'payment_record_not_found', gatewayId: paymentIntentId };
       }
 
-      await prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: 'REFUNDED',
-          gatewayResponse: JSON.stringify({
-            refundAmount: charge.amount_refunded / 100,
-            webhookProcessedAt: new Date().toISOString(),
-          }),
-        },
-      });
+      // charge.amount_refunded is the CUMULATIVE refunded amount in cents —
+      // partial refunds must not flip payment/invoice to REFUNDED.
+      const refundedTotal = roundTo((charge.amount_refunded || 0) / 100);
+      const paymentAmount = Number(payment.amount);
+      const fullyRefunded = charge.refunded === true || refundedTotal >= paymentAmount - 0.0001;
 
-      await prisma.invoice.update({
-        where: { id: payment.invoiceId },
-        data: {
-          status: 'REFUNDED',
-        },
-      });
+      const priorGateway = this.parseGatewayResponse(payment.gatewayResponse);
 
-      await prisma.auditLog.create({
-        data: {
-          userId: payment.invoice?.userId,
-          action: 'PAYMENT_REFUNDED',
-          resource: 'payment',
-          resourceId: payment.id,
-          newValues: JSON.stringify({
-            invoiceId: payment.invoiceId,
-            refundAmount: charge.amount_refunded / 100,
-          }),
-        },
-      });
+      await prisma.$transaction([
+        prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: fullyRefunded ? 'REFUNDED' : 'COMPLETED',
+            gatewayResponse: JSON.stringify({
+              ...priorGateway,
+              refundedTotal,
+              lastRefundChargeId: charge.id,
+              webhookProcessedAt: new Date().toISOString(),
+            }),
+          },
+        }),
+        ...(fullyRefunded
+          ? [
+            prisma.invoice.update({
+              where: { id: payment.invoiceId },
+              data: {
+                status: 'REFUNDED',
+              },
+            }),
+          ]
+          : []),
+        prisma.auditLog.create({
+          data: {
+            userId: payment.invoice?.userId,
+            action: 'PAYMENT_REFUNDED',
+            resource: 'payment',
+            resourceId: payment.id,
+            newValues: JSON.stringify({
+              invoiceId: payment.invoiceId,
+              refundedTotal,
+              fullyRefunded,
+              chargeId: charge.id,
+            }),
+          },
+        }),
+      ]);
 
       return {
         handled: true,
         paymentId: payment.id,
         invoiceId: payment.invoiceId,
-        status: 'REFUNDED',
+        status: fullyRefunded ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -1666,11 +2186,12 @@ class BillingService {
   static async refundPayment(paymentId: string, refundData: RefundInput): Promise<Record<string, unknown>> {
     try {
       const { amount, reason } = refundData;
+      const { notes } = refundData as RefundInput & { notes?: string };
 
       const payment = await prisma.payment.findUnique({
         where: { id: paymentId },
         include: { invoice: true },
-      }) as any;
+      }) as (PaymentRecord & { invoice: InvoiceRecord }) | null;
 
       if (!payment) {
         throw new Error('Payment not found');
@@ -1684,55 +2205,122 @@ class BillingService {
         throw new Error('Stripe payment intent ID not found');
       }
 
-      const refundAmount = amount ? Math.round(parseFloat(String(amount)) * 100) : undefined;
-      const refund = await stripe.refunds.create({
-        payment_intent: payment.gatewayId,
-        amount: refundAmount,
-        reason: reason || 'requested_by_customer',
-        metadata: {
-          paymentId: payment.id,
-          invoiceId: payment.invoiceId,
-        },
-      });
+      // Track refunded total across partial refunds via gatewayResponse.
+      const priorGateway = this.parseGatewayResponse(payment.gatewayResponse);
+      const priorRefunds: Array<Record<string, any>> = Array.isArray(priorGateway.refunds)
+        ? priorGateway.refunds
+        : [];
+      const alreadyRefunded = roundTo(
+        typeof priorGateway.refundedTotal === 'number'
+          ? priorGateway.refundedTotal
+          : priorRefunds.reduce((sum: number, entry) => sum + Number(entry?.amount || 0), 0),
+      );
 
-      await prisma.payment.update({
-        where: { id: paymentId },
-        data: {
-          status: 'REFUNDED',
-          gatewayResponse: JSON.stringify({
-            refundId: refund.id,
-            refundAmount: refund.amount / 100,
-            refundReason: reason,
-            refundedAt: new Date().toISOString(),
-          }),
-        },
-      });
+      const paymentAmount = roundTo(payment.amount);
+      const refundable = roundTo(paymentAmount - alreadyRefunded);
+      if (refundable <= 0) {
+        throw new Error('Payment has already been fully refunded');
+      }
 
-      await prisma.invoice.update({
-        where: { id: payment.invoiceId },
-        data: {
-          status: 'REFUNDED',
-        },
-      });
+      // Refund amount may never exceed what is left of the original payment.
+      const requestedAmount = amount !== undefined && amount !== null
+        ? roundTo(parseFloat(String(amount)))
+        : refundable;
 
-      await prisma.auditLog.create({
-        data: {
-          userId: payment.invoice.userId,
-          action: 'PAYMENT_REFUND_INITIATED',
-          resource: 'payment',
-          resourceId: paymentId,
-          newValues: JSON.stringify({
-            refundId: refund.id,
-            refundAmount: refund.amount / 100,
-            reason,
-          }),
+      if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+        throw new Error('Refund amount must be positive');
+      }
+
+      if (requestedAmount > refundable) {
+        throw new Error(`Refund amount exceeds refundable balance of ${refundable}`);
+      }
+
+      // Stripe only accepts a fixed enum of refund reasons; any free-text
+      // justification is forwarded via metadata instead.
+      const stripeRefundReasons = ['duplicate', 'fraudulent', 'requested_by_customer', 'expired_uncaptured_charge'];
+      const stripeReason = stripeRefundReasons.includes(String(reason))
+        ? String(reason)
+        : 'requested_by_customer';
+
+      const refund = await stripe.refunds.create(
+        {
+          payment_intent: payment.gatewayId,
+          amount: Math.round(requestedAmount * 100),
+          reason: stripeReason,
+          metadata: {
+            paymentId: payment.id,
+            invoiceId: payment.invoiceId,
+            ...(notes ? { notes: String(notes) } : {}),
+            ...(reason && !stripeRefundReasons.includes(String(reason))
+              ? { reasonText: String(reason) }
+              : {}),
+          },
         },
-      });
+        // Scoped per refund attempt so legitimate partial refunds are not
+        // swallowed while retries of one attempt stay idempotent.
+        { idempotencyKey: `refund:${payment.id}:${priorRefunds.length + 1}` },
+      );
+
+      const refundedTotal = roundTo(alreadyRefunded + refund.amount / 100);
+      const fullyRefunded = refundedTotal >= paymentAmount - 0.0001;
+
+      await prisma.$transaction([
+        prisma.payment.update({
+          where: { id: paymentId },
+          data: {
+            // Only a full refund flips the payment to REFUNDED — partial
+            // refunds keep it COMPLETED (and the invoice PAID).
+            status: fullyRefunded ? 'REFUNDED' : 'COMPLETED',
+            gatewayResponse: JSON.stringify({
+              ...priorGateway,
+              refundedTotal,
+              refunds: [
+                ...priorRefunds,
+                {
+                  refundId: refund.id,
+                  amount: refund.amount / 100,
+                  reason: stripeReason,
+                  notes: notes || null,
+                  refundedAt: new Date().toISOString(),
+                },
+              ],
+            }),
+          },
+        }),
+        ...(fullyRefunded
+          ? [
+            prisma.invoice.update({
+              where: { id: payment.invoiceId },
+              data: {
+                status: 'REFUNDED',
+              },
+            }),
+          ]
+          : []),
+        prisma.auditLog.create({
+          data: {
+            userId: payment.invoice.userId,
+            action: 'PAYMENT_REFUND_INITIATED',
+            resource: 'payment',
+            resourceId: paymentId,
+            newValues: JSON.stringify({
+              refundId: refund.id,
+              refundAmount: refund.amount / 100,
+              refundedTotal,
+              fullyRefunded,
+              reason: stripeReason,
+              notes: notes || null,
+            }),
+          },
+        }),
+      ]);
 
       return {
         success: true,
         refundId: refund.id,
         amount: refund.amount / 100,
+        refundedTotal,
+        fullyRefunded,
         status: refund.status,
       };
     } catch (error) {
@@ -1784,7 +2372,7 @@ class BillingService {
     }
   }
 
-  static verifyWebhookSignature(payload: string, signature: string): any {
+  static verifyWebhookSignature(payload: string | Buffer, signature: string): any {
     try {
       const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
