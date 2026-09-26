@@ -49,8 +49,8 @@ export default function Header() {
       className={cn(
         "fixed top-0 w-full z-50 transition-all duration-300",
         isScrolled
-          ? "bg-white/90 dark:bg-gray-900/90 backdrop-blur-md shadow-md py-2"
-          : "bg-transparent py-4"
+          ? "bg-background/80 backdrop-blur-md border-b border-primary/10 shadow-sm py-2"
+          : "bg-transparent border-b border-transparent py-4"
       )}
       role="banner"
       aria-label="Main navigation"
@@ -141,7 +141,7 @@ export default function Header() {
       {isOpen && (
         <div 
           id="mobile-menu"
-          className="md:hidden absolute top-full left-0 w-full bg-white dark:bg-gray-900 shadow-lg py-4"
+          className="md:hidden absolute top-full left-0 w-full bg-background/95 backdrop-blur-md border-b border-primary/10 shadow-lg py-4"
           role="dialog"
           aria-label="Mobile navigation menu"
         >
