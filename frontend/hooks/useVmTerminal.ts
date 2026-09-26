@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { apiClient } from '@/lib/api';
 
 interface UseVmTerminalOptions {
     vmId: string;
@@ -20,11 +21,14 @@ interface UseVmTerminalReturn {
 
 function getAccessToken(): string | null {
     if (typeof window === 'undefined') return null;
-    // Try localStorage first, then sessionStorage
+    // Canonical source: apiClient's token (in-memory, backed by the
+    // 'accessToken' sessionStorage key written after login/register/refresh),
+    // then legacy storage keys as a fallback
     return (
+        apiClient.getToken() ||
+        sessionStorage.getItem('accessToken') ||
         localStorage.getItem('accessToken') ||
         localStorage.getItem('token') ||
-        sessionStorage.getItem('accessToken') ||
         sessionStorage.getItem('token') ||
         null
     );

@@ -340,7 +340,7 @@ const validateAuthConfig = (): string[] => {
   if (missing.length > 0) {
     const message = `FATAL: Missing required secret environment variables: ${missing.join(', ')}. Set these in your .env file before starting the server.`;
     if (process.env.NODE_ENV === 'test') {
-      console.warn('[test] ' + message);
+      console.warn(`[test] ${message}`);
     } else {
       throw new Error(message);
     }
@@ -359,7 +359,9 @@ const getRateLimitConfig = (type: keyof RateLimitingSettings = 'general'): RateL
   return config.rateLimiting[type] || config.rateLimiting.general;
 };
 
-export { authConfig, getAuthConfig, validateAuthConfig, isFeatureEnabled, getRateLimitConfig };
+export {
+  authConfig, getAuthConfig, validateAuthConfig, isFeatureEnabled, getRateLimitConfig,
+};
 
 export default {
   authConfig,

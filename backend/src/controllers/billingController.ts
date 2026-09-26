@@ -7,7 +7,6 @@ import type {
   InvoiceQueryOptions,
   InvoiceStatus,
   InvoiceStatusUpdateMetadata,
-  PaymentQueryOptions,
   UsageQueryOptions,
 } from '../types/billing';
 
@@ -50,16 +49,8 @@ const getAuthenticatedUser = (req: BillingRequest): BillingUser => {
   return req.user;
 };
 
-const getQueryOptions = (query: BillingQuery): InvoiceQueryOptions & UsageQueryOptions & PaymentQueryOptions => ({
-  page: query.page,
-  limit: query.limit,
-  status: query.status as never,
-  startDate: query.startDate,
-  endDate: query.endDate,
-  sortBy: query.sortBy,
-  sortOrder: query.sortOrder as 'asc' | 'desc' | undefined,
-  groupBy: query.groupBy as never,
-});
+
+
 
 class BillingController {
   static async getUserInvoices(req: BillingRequest, res: BillingResponse): Promise<void> {
@@ -207,7 +198,9 @@ class BillingController {
 
   static async getPricingEstimate(req: BillingRequest, res: BillingResponse): Promise<void> {
     try {
-      const { cpu, ram, storage, bandwidth, duration } = (req.body ?? {}) as PricingEstimateBody;
+      const {
+        cpu, ram, storage, bandwidth, duration,
+      } = (req.body ?? {}) as PricingEstimateBody;
 
       if (
         typeof cpu !== 'number'
@@ -263,7 +256,9 @@ class BillingController {
         success: true,
         message: 'Pricing estimate calculated successfully',
         data: {
-          resources: { cpu, ram, storage, bandwidth: normalizedBandwidth },
+          resources: {
+            cpu, ram, storage, bandwidth: normalizedBandwidth,
+          },
           estimates,
           currency: 'USD',
           warnings: resourceValidation.warnings || [],
@@ -282,7 +277,9 @@ class BillingController {
   static async applyDiscount(req: BillingRequest, res: BillingResponse): Promise<void> {
     try {
       const { id } = req.params ?? {};
-      const { discountCode, discountAmount, discountPercentage, reason } = (req.body ?? {}) as DiscountInput;
+      const {
+        discountCode, discountAmount, discountPercentage, reason,
+      } = (req.body ?? {}) as DiscountInput;
 
       const invoice = await BillingService.applyDiscount(id, {
         discountCode,
@@ -458,4 +455,4 @@ class BillingController {
   }
 }
 
-export default BillingController;
+export = BillingController;

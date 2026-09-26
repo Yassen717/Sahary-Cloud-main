@@ -1,7 +1,8 @@
 import type { Request, Response } from 'express';
+
 const { validationResult } = require('express-validator');
 
-const dockerService = require('../services/dockerService');
+const dockerService = require('../services/dockerService').default;
 
 type DockerQuery = {
   vmId?: string;
@@ -78,6 +79,16 @@ const dockerController = {
   async startContainer(req: DockerRequest, res: Response): Promise<void> {
     try {
       if (requireDocker(res)) return;
+
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: errors.array(),
+        });
+        return;
+      }
 
       const { containerId } = req.params;
       const containerStatus = await dockerService.startContainer(containerId);
@@ -332,7 +343,9 @@ const dockerController = {
   async getContainerLogs(req: DockerRequest, res: Response): Promise<void> {
     try {
       const { containerId } = req.params;
-      const { tail = 100, since, until, timestamps = true } = req.query;
+      const {
+        tail = 100, since, until, timestamps = true,
+      } = req.query;
 
       const logs = await dockerService.getContainerLogs(containerId, {
         tail: Number.parseInt(String(tail), 10),

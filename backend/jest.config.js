@@ -2,12 +2,23 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src', '<rootDir>/tests'],
   testMatch: [
-    '**/__tests__/**/*.js',
-    '**/?(*.)+(spec|test).js'
+    '**/__tests__/**/*.ts',
+    '**/?(*.)+(spec|test).ts'
   ],
+  moduleFileExtensions: ['ts', 'js', 'json', 'node'],
+  transform: {
+    '^.+\\.tsx?$': [
+      'ts-jest',
+      {
+        tsconfig: '<rootDir>/tsconfig.json',
+        // Repo has heavy @ts-nocheck/type noise; transpile only.
+        diagnostics: false
+      }
+    ]
+  },
   collectCoverageFrom: [
-    'src/**/*.js',
-    '!src/index.js',
+    'src/**/*.ts',
+    '!src/index.ts',
     '!**/node_modules/**',
     '!**/coverage/**'
   ],
@@ -17,7 +28,7 @@ module.exports = {
     'lcov',
     'html'
   ],
-  setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
+  setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
   testTimeout: 10000,
   verbose: true,
   forceExit: true,

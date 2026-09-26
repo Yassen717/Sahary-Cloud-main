@@ -174,9 +174,10 @@ class DockerService {
       opts.cert = fs.readFileSync(path.join(dockerConfig.certPath, 'cert.pem'));
       opts.key = fs.readFileSync(path.join(dockerConfig.certPath, 'key.pem'));
     } else {
-      opts.socketPath = dockerConfig.host === 'unix:///var/run/docker.sock'
+      opts.socketPath = (dockerConfig.host === 'unix:///var/run/docker.sock'
         ? '/var/run/docker.sock'
-        : process.env.DOCKER_HOST || '/var/run/docker.sock';
+        : process.env.DOCKER_HOST || '/var/run/docker.sock'
+      ).replace(/^(npipe|unix):\/\//, '');
     }
 
     this.docker = new Docker(opts);
@@ -203,6 +204,11 @@ class DockerService {
       this._connected = false;
       console.warn('⚠️  Docker daemon not available:', getErrorMessage(error));
       console.warn('⚠️  VM management features will be disabled');
+      // In development: resolve so the server still starts.
+      // In production Docker is required: propagate so startup fails hard.
+      if (process.env.NODE_ENV === 'production') {
+        throw error;
+      }
       return false;
     }
   }
@@ -361,7 +367,14 @@ class DockerService {
       const containerConfig = {
         name: `sahary-vm-${vmId}`,
         Image: image,
+        // Keep the container running — the base image's default command
+        // exits immediately.
+        Cmd: ['sleep', 'infinity'],
         HostConfig: {
+          // Run an init process so SIGTERM reaches the workload — as PID 1
+          // a plain process ignores unhandled signals, which would make
+          // every stop wait the full grace period.
+          Init: true,
           NanoCpus: cpu * 1000000000,
           Memory: ram * 1024 * 1024,
           StorageOpt: {
@@ -371,7 +384,8 @@ class DockerService {
           Binds: volumes,
           NetworkMode: networkName,
           RestartPolicy: {
-            Name: 'unless-stopped',
+            // MaximumRetryCount is only valid with 'on-failure'
+            Name: 'on-failure',
             MaximumRetryCount: 3,
           },
           SecurityOpt: ['no-new-privileges:true'],
@@ -411,18 +425,32 @@ class DockerService {
         },
       };
 
-      const container = await this.docker.createContainer(containerConfig);
-      const containerInfo = await container.inspect();
-
-      return {
-        containerId: containerInfo.Id,
-        name: containerInfo.Name,
-        status: containerInfo.State.Status,
-        created: containerInfo.Created,
-        image: containerInfo.Config.Image,
-        ports: this.extractPortMappings(containerInfo.NetworkSettings.Ports),
-        ipAddress: this.extractIPAddress(containerInfo.NetworkSettings),
+      const toInfo = async (container: any): Promise<DockerContainerInfo> => {
+        const containerInfo = await container.inspect();
+        return {
+          containerId: containerInfo.Id,
+          name: containerInfo.Name,
+          status: containerInfo.State.Status,
+          created: containerInfo.Created,
+          image: containerInfo.Config.Image,
+          ports: this.extractPortMappings(containerInfo.NetworkSettings.Ports),
+          ipAddress: this.extractIPAddress(containerInfo.NetworkSettings),
+        };
       };
+
+      try {
+        return await toInfo(await this.docker.createContainer(containerConfig));
+      } catch (createError: any) {
+        // A stale container left behind by a previous failed start holds
+        // the same deterministic name — remove it and retry once.
+        if (createError?.statusCode !== 409) {
+          throw createError;
+        }
+        await this.docker
+          .getContainer(`sahary-vm-${vmId}`)
+          .remove({ force: true });
+        return await toInfo(await this.docker.createContainer(containerConfig));
+      }
     } catch (error) {
       throw new Error(`Failed to create container: ${getErrorMessage(error)}`);
     }
@@ -455,7 +483,14 @@ class DockerService {
     try {
       const container = this.docker.getContainer(containerId);
 
-      await container.stop({ t: timeout });
+      try {
+        await container.stop({ t: timeout });
+      } catch (stopError: any) {
+        // Stopping an already-stopped container is a no-op, not an error.
+        if (stopError?.statusCode !== 304) {
+          throw stopError;
+        }
+      }
 
       const containerInfo = await container.inspect();
 

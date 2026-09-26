@@ -3,7 +3,7 @@ import type { AuthRequest } from './auth';
 
 const rateLimit = require('express-rate-limit');
 const slowDown = require('express-slow-down');
-const { createClient } = require('redis');
+const redisService = require('../services/redisService');
 
 type Middleware = (req: AuthRequest, res: Response, next: NextFunction) => unknown;
 
@@ -30,15 +30,20 @@ type IPFilterOptions = {
   blacklist?: string[];
 };
 
-const getErrorMessage = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message;
-  }
 
-  return 'Unknown error';
-};
 
 const getClientIp = (req: AuthRequest): string => req.ip || req.connection?.remoteAddress || 'unknown';
+
+const SENSITIVE_FIELDS = new Set([
+  'password',
+  'currentPassword',
+  'newPassword',
+  'oldPassword',
+  'confirmPassword',
+  'newPasswordConfirm',
+  'refreshToken',
+  'token',
+]);
 
 export class SecurityMiddleware {
   static createAdvancedRateLimit(options: AdvancedRateLimitOptions = {}): Middleware {
@@ -56,12 +61,14 @@ export class SecurityMiddleware {
     let store;
 
     try {
-      const RedisStore = require('rate-limit-redis');
-      const redisClient = createClient({ url: process.env.REDIS_URL });
+      if (redisService.isReady()) {
+        const { RedisStore } = require('rate-limit-redis');
+        const redisClient = redisService.getClient();
 
-      store = new RedisStore({
-        sendCommand: (...args: string[]) => redisClient.sendCommand(args),
-      });
+        store = new RedisStore({
+          sendCommand: (...args: string[]) => redisClient.sendCommand(args),
+        });
+      }
     } catch (error) {
       console.warn('Redis not available for rate limiting, using memory store');
       store = undefined;
@@ -83,6 +90,7 @@ export class SecurityMiddleware {
       keyGenerator,
       skip,
       store,
+      passOnStoreError: true,
       handler: (req: AuthRequest, res: Response) => {
         console.warn(`Rate limit exceeded for IP: ${req.ip}, Path: ${req.path}`);
         res.status(429).json({
@@ -120,7 +128,7 @@ export class SecurityMiddleware {
       message: 'Too many authentication attempts, please try again later',
       skipSuccessfulRequests: true,
       keyGenerator: (req: AuthRequest) => {
-        const email = typeof req.body?.email === 'string' ? req.body.email : undefined;
+        const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
         return email ? `auth:${email}` : `auth:${getClientIp(req)}`;
       },
     });
@@ -156,8 +164,14 @@ export class SecurityMiddleware {
         windowMs: 60 * 1000,
         max: 200,
         message: 'Too many requests detected, possible DDoS attack blocked',
-        onLimitReached: (req: AuthRequest) => {
+        handler: (req: AuthRequest, res: Response) => {
           console.error(`Possible DDoS attack from IP: ${req.ip}`);
+          res.status(429).json({
+            success: false,
+            error: 'Rate limit exceeded',
+            message: 'Too many requests detected, possible DDoS attack blocked',
+            retryAfter: 60,
+          });
         },
       }),
     ];
@@ -169,8 +183,17 @@ export class SecurityMiddleware {
     const MAX_ATTEMPTS = 5;
 
     return (req, res, next) => {
-      const key = typeof req.body?.email === 'string' ? req.body.email : getClientIp(req);
+      const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+      const key = email || getClientIp(req);
       const now = Date.now();
+
+      if (attempts.size > 10000) {
+        for (const [attemptKey, attemptValue] of attempts) {
+          if (attemptValue.count === 0 && attemptValue.lockoutUntil <= now) {
+            attempts.delete(attemptKey);
+          }
+        }
+      }
 
       if (!attempts.has(key)) {
         attempts.set(key, { count: 0, lockoutUntil: 0 });
@@ -215,7 +238,7 @@ export class SecurityMiddleware {
           response = data as { success?: boolean };
         }
 
-        if (res.statusCode === 401 || (response && !response.success)) {
+        if (res.statusCode === 401 || res.statusCode === 403) {
           attempt.count += 1;
 
           if (attempt.count >= MAX_ATTEMPTS) {
@@ -250,7 +273,7 @@ export class SecurityMiddleware {
         if (typeof obj === 'object' && obj !== null) {
           const sanitized: Record<string, unknown> = {};
           for (const [key, value] of Object.entries(obj)) {
-            sanitized[key] = sanitize(value);
+            sanitized[key] = SENSITIVE_FIELDS.has(key) ? value : sanitize(value);
           }
           return sanitized;
         }
@@ -281,7 +304,10 @@ export class SecurityMiddleware {
     return (req, res, next) => {
       const checkForSQLInjection = (obj: unknown): boolean => {
         if (typeof obj === 'string') {
-          return suspiciousPatterns.some((pattern) => pattern.test(obj));
+          return suspiciousPatterns.some((pattern) => {
+            pattern.lastIndex = 0;
+            return pattern.test(obj);
+          });
         }
 
         if (Array.isArray(obj)) {
@@ -289,16 +315,17 @@ export class SecurityMiddleware {
         }
 
         if (typeof obj === 'object' && obj !== null) {
-          return Object.values(obj).some((value) => checkForSQLInjection(value));
+          return Object.entries(obj).some(
+            ([key, value]) => !SENSITIVE_FIELDS.has(key) && checkForSQLInjection(value),
+          );
         }
 
         return false;
       };
 
-      const hasSuspiciousContent =
-        checkForSQLInjection(req.body) ||
-        checkForSQLInjection(req.query) ||
-        checkForSQLInjection(req.params);
+      const hasSuspiciousContent = checkForSQLInjection(req.body)
+        || checkForSQLInjection(req.query)
+        || checkForSQLInjection(req.params);
 
       if (hasSuspiciousContent) {
         console.warn(`Potential SQL injection attempt from IP: ${req.ip}`);
@@ -327,7 +354,10 @@ export class SecurityMiddleware {
     return (req, res, next) => {
       const checkForXSS = (obj: unknown): boolean => {
         if (typeof obj === 'string') {
-          return xssPatterns.some((pattern) => pattern.test(obj));
+          return xssPatterns.some((pattern) => {
+            pattern.lastIndex = 0;
+            return pattern.test(obj);
+          });
         }
 
         if (Array.isArray(obj)) {
@@ -335,16 +365,17 @@ export class SecurityMiddleware {
         }
 
         if (typeof obj === 'object' && obj !== null) {
-          return Object.values(obj).some((value) => checkForXSS(value));
+          return Object.entries(obj).some(
+            ([key, value]) => !SENSITIVE_FIELDS.has(key) && checkForXSS(value),
+          );
         }
 
         return false;
       };
 
-      const hasXSSContent =
-        checkForXSS(req.body) ||
-        checkForXSS(req.query) ||
-        checkForXSS(req.params);
+      const hasXSSContent = checkForXSS(req.body)
+        || checkForXSS(req.query)
+        || checkForXSS(req.params);
 
       if (hasXSSContent) {
         console.warn(`Potential XSS attempt from IP: ${req.ip}`);
@@ -431,12 +462,11 @@ export class SecurityMiddleware {
       const startTime = Date.now();
 
       const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined;
-      const isSuspicious =
-        req.path.includes('..') ||
-        req.path.includes('admin') ||
-        req.path.includes('config') ||
-        userAgent?.includes('bot') ||
-        userAgent?.includes('crawler');
+      const isSuspicious = req.path.includes('..')
+        || req.path.includes('admin')
+        || req.path.includes('config')
+        || userAgent?.includes('bot')
+        || userAgent?.includes('crawler');
 
       if (isSuspicious) {
         console.warn(`Suspicious request: ${req.method} ${req.path} from ${req.ip}`);
@@ -484,21 +514,21 @@ export class SecurityMiddleware {
   }
 }
 
-export const createAdvancedRateLimit = SecurityMiddleware.createAdvancedRateLimit;
-export const createSlowDown = SecurityMiddleware.createSlowDown;
-export const authRateLimit = SecurityMiddleware.authRateLimit;
-export const apiRateLimit = SecurityMiddleware.apiRateLimit;
-export const uploadRateLimit = SecurityMiddleware.uploadRateLimit;
-export const ddosProtection = SecurityMiddleware.ddosProtection;
-export const bruteForceProtection = SecurityMiddleware.bruteForceProtection;
-export const sanitizeInput = SecurityMiddleware.sanitizeInput;
-export const sqlInjectionProtection = SecurityMiddleware.sqlInjectionProtection;
-export const xssProtection = SecurityMiddleware.xssProtection;
-export const requestSizeLimit = SecurityMiddleware.requestSizeLimit;
-export const ipFilter = SecurityMiddleware.ipFilter;
-export const securityHeaders = SecurityMiddleware.securityHeaders;
-export const securityLogging = SecurityMiddleware.securityLogging;
-export const combineSecurityMiddlewares = SecurityMiddleware.combineSecurityMiddlewares;
+export const { createAdvancedRateLimit } = SecurityMiddleware;
+export const { createSlowDown } = SecurityMiddleware;
+export const { authRateLimit } = SecurityMiddleware;
+export const { apiRateLimit } = SecurityMiddleware;
+export const { uploadRateLimit } = SecurityMiddleware;
+export const { ddosProtection } = SecurityMiddleware;
+export const { bruteForceProtection } = SecurityMiddleware;
+export const { sanitizeInput } = SecurityMiddleware;
+export const { sqlInjectionProtection } = SecurityMiddleware;
+export const { xssProtection } = SecurityMiddleware;
+export const { requestSizeLimit } = SecurityMiddleware;
+export const { ipFilter } = SecurityMiddleware;
+export const { securityHeaders } = SecurityMiddleware;
+export const { securityLogging } = SecurityMiddleware;
+export const { combineSecurityMiddlewares } = SecurityMiddleware;
 
 export default {
   SecurityMiddleware,

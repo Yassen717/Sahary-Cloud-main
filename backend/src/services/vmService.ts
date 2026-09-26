@@ -2,24 +2,17 @@ import { prisma } from '../config/database';
 import ValidationHelpers from '../utils/validation.helpers';
 import dockerService from './dockerService';
 import { getPaginatedResults } from '../utils/prisma';
-import { validateVMResources } from '../validations/vm.validation';
 import type {
   CreateVmInput,
   VmListOptions,
   VmRecord,
-  VmResourceInput,
   VmResourceLimits,
   VmResourceStatsResult,
   VmResourceUsage,
   VmStatisticsOptions,
   VmStatisticsResult,
   UpdateVmInput,
-  VmStatus,
 } from '../types/vm';
-
-type PrismaVmRecord = VmRecord & {
-  hourlyRate: string | number;
-};
 
 /**
  * Virtual Machine Service
@@ -27,7 +20,9 @@ type PrismaVmRecord = VmRecord & {
  */
 class VMService {
   static async createVM(userId: string, vmData: CreateVmInput): Promise<VmRecord> {
-    const { name, description, cpu, ram, storage, bandwidth, dockerImage } = vmData;
+    const {
+      name, description, cpu, ram, storage, bandwidth, dockerImage,
+    } = vmData;
 
     try {
       const resourceValidation = ValidationHelpers.validateVMResources({
@@ -110,7 +105,9 @@ class VMService {
 
       await this.logVMEvent(userId, 'VM_CREATED', vm.id, {
         vmName: vm.name,
-        resources: { cpu, ram, storage, bandwidth },
+        resources: {
+          cpu, ram, storage, bandwidth,
+        },
         hourlyRate,
       });
 
@@ -237,14 +234,16 @@ class VMService {
         throw new Error('Cannot update VM while it is in transitional state');
       }
 
-      const { name, description, cpu, ram, storage, bandwidth } = updateData;
+      const {
+        name, description, cpu, ram, storage, bandwidth,
+      } = updateData;
 
-      if (cpu || ram || storage || bandwidth) {
+      if (cpu !== undefined || ram !== undefined || storage !== undefined || bandwidth !== undefined) {
         const newResources = {
-          cpu: cpu || existingVM.cpu,
-          ram: ram || existingVM.ram,
-          storage: storage || existingVM.storage,
-          bandwidth: bandwidth || existingVM.bandwidth || 1000,
+          cpu: cpu ?? existingVM.cpu,
+          ram: ram ?? existingVM.ram,
+          storage: storage ?? existingVM.storage,
+          bandwidth: bandwidth ?? existingVM.bandwidth ?? 1000,
         };
 
         const resourceValidation = ValidationHelpers.validateVMResources(newResources);
@@ -252,13 +251,13 @@ class VMService {
           throw new Error(`Resource validation failed: ${resourceValidation.errors.join(', ')}`);
         }
 
-        if ((cpu || existingVM.cpu) > existingVM.cpu || (ram || existingVM.ram) > existingVM.ram || (storage || existingVM.storage) > existingVM.storage) {
+        if ((cpu ?? existingVM.cpu) > existingVM.cpu || (ram ?? existingVM.ram) > existingVM.ram || (storage ?? existingVM.storage) > existingVM.storage) {
           const totalResourceUsage = await this.getUserResourceUsage(userId);
           const maxResources = await this.getUserResourceLimits(userId);
 
-          const cpuIncrease = Math.max(0, (cpu || existingVM.cpu) - existingVM.cpu);
-          const ramIncrease = Math.max(0, (ram || existingVM.ram) - existingVM.ram);
-          const storageIncrease = Math.max(0, (storage || existingVM.storage) - existingVM.storage);
+          const cpuIncrease = Math.max(0, (cpu ?? existingVM.cpu) - existingVM.cpu);
+          const ramIncrease = Math.max(0, (ram ?? existingVM.ram) - existingVM.ram);
+          const storageIncrease = Math.max(0, (storage ?? existingVM.storage) - existingVM.storage);
 
           if (totalResourceUsage.cpu + cpuIncrease > maxResources.cpu) {
             throw new Error('Insufficient CPU resources for upgrade');
@@ -289,12 +288,12 @@ class VMService {
       }
 
       let newHourlyRate = Number(existingVM.hourlyRate);
-      if (cpu || ram || storage || bandwidth) {
+      if (cpu !== undefined || ram !== undefined || storage !== undefined || bandwidth !== undefined) {
         newHourlyRate = ValidationHelpers.calculateVMCost({
-          cpu: cpu || existingVM.cpu,
-          ram: ram || existingVM.ram,
-          storage: storage || existingVM.storage,
-          bandwidth: bandwidth || existingVM.bandwidth || 1000,
+          cpu: cpu ?? existingVM.cpu,
+          ram: ram ?? existingVM.ram,
+          storage: storage ?? existingVM.storage,
+          bandwidth: bandwidth ?? existingVM.bandwidth ?? 1000,
         });
       }
 
@@ -303,10 +302,10 @@ class VMService {
         data: {
           ...(name && { name }),
           ...(description !== undefined && { description }),
-          ...(cpu && { cpu }),
-          ...(ram && { ram }),
-          ...(storage && { storage }),
-          ...(bandwidth && { bandwidth }),
+          ...(cpu !== undefined && { cpu }),
+          ...(ram !== undefined && { ram }),
+          ...(storage !== undefined && { storage }),
+          ...(bandwidth !== undefined && { bandwidth }),
           hourlyRate: newHourlyRate,
         },
         include: {
@@ -778,17 +777,20 @@ class VMService {
       ]);
 
       return {
-        totalVMs,
-        runningVMs,
-        stoppedVMs,
-        errorVMs,
-        totalResources: {
-          cpu: totalResources._sum.cpu || 0,
-          ram: totalResources._sum.ram || 0,
-          storage: totalResources._sum.storage || 0,
-          bandwidth: totalResources._sum.bandwidth || 0,
+        vms: {
+          total: totalVMs,
+          running: runningVMs,
+          stopped: stoppedVMs,
+          error: errorVMs,
         },
-        totalCost: totalCost._sum.cost || 0,
+        resources: {
+          totalCPU: totalResources._sum.cpu || 0,
+          totalRAM: totalResources._sum.ram || 0,
+          totalStorage: totalResources._sum.storage || 0,
+          totalBandwidth: totalResources._sum.bandwidth || 0,
+        },
+        totalRevenue: parseFloat(String(totalCost._sum.cost || 0)),
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';

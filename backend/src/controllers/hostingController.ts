@@ -31,7 +31,7 @@ class HostingController {
 
   static async createAccount(req: HostingRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const { planId, domain } = req.body;
 
       if (!planId || typeof planId !== 'string') {

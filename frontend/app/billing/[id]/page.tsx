@@ -27,17 +27,17 @@ interface InvoiceItem {
   description: string;
   quantity: number;
   unitPrice: number;
-  amount: number;
+  totalPrice: number;
 }
 
 interface Invoice {
   id: string;
   invoiceNumber: string;
   amount: number;
-  status: 'paid' | 'pending' | 'overdue';
+  status: 'PAID' | 'PENDING' | 'OVERDUE';
   dueDate: string;
   issueDate: string;
-  paidDate?: string;
+  paidAt?: string;
   items: InvoiceItem[];
   subtotal: number;
   tax: number;
@@ -64,14 +64,14 @@ export default function InvoiceDetailsPage() {
         id: params.id as string,
         invoiceNumber: `INV-${String(params.id).padStart(6, '0')}`,
         amount: 125.50,
-        status: 'pending',
+        status: 'PENDING',
         dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         issueDate: new Date().toISOString(),
         items: [
-          { description: 'VM - Standard Plan', quantity: 2, unitPrice: 10, amount: 20 },
-          { description: 'VM - Premium Plan', quantity: 1, unitPrice: 20, amount: 20 },
-          { description: 'Storage - 100GB', quantity: 1, unitPrice: 5, amount: 5 },
-          { description: 'Bandwidth - 1TB', quantity: 1, unitPrice: 10, amount: 10 },
+          { description: 'VM - Standard Plan', quantity: 2, unitPrice: 10, totalPrice: 20 },
+          { description: 'VM - Premium Plan', quantity: 1, unitPrice: 20, totalPrice: 20 },
+          { description: 'Storage - 100GB', quantity: 1, unitPrice: 5, totalPrice: 5 },
+          { description: 'Bandwidth - 1TB', quantity: 1, unitPrice: 10, totalPrice: 10 },
         ],
         subtotal: 55,
         tax: 5.50,
@@ -94,10 +94,23 @@ export default function InvoiceDetailsPage() {
   const handlePayment = async () => {
     try {
       setPaying(true);
-      await apiClient.payInvoice(params.id as string);
+      const response = await apiClient.payInvoice(params.id as string);
+      const paymentData = response?.data;
+
+      // If the backend returns a hosted checkout URL, hand off to it
+      const checkoutUrl = paymentData?.checkoutUrl || paymentData?.url;
+      if (checkoutUrl) {
+        window.location.href = checkoutUrl;
+        return;
+      }
+
       toast({
         title: 'Success',
-        description: 'Payment processed successfully',
+        description:
+          response?.message ||
+          (paymentData?.clientSecret
+            ? 'Payment initiated. Complete the payment to settle this invoice.'
+            : 'Payment processed successfully'),
       });
       await loadInvoice();
     } catch (error: any) {
@@ -124,21 +137,21 @@ export default function InvoiceDetailsPage() {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'paid':
+      case 'PAID':
         return (
           <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
             <CheckCircle className="h-3 w-3 mr-1" />
             Paid
           </Badge>
         );
-      case 'pending':
+      case 'PENDING':
         return (
           <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
             <Clock className="h-3 w-3 mr-1" />
             Pending
           </Badge>
         );
-      case 'overdue':
+      case 'OVERDUE':
         return (
           <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
             <AlertCircle className="h-3 w-3 mr-1" />
@@ -269,7 +282,7 @@ export default function InvoiceDetailsPage() {
                       <td className="p-3">{item.description}</td>
                       <td className="text-right p-3">{item.quantity}</td>
                       <td className="text-right p-3">${item.unitPrice.toFixed(2)}</td>
-                      <td className="text-right p-3 font-medium">${item.amount.toFixed(2)}</td>
+                      <td className="text-right p-3 font-medium">${item.totalPrice.toFixed(2)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -308,7 +321,7 @@ export default function InvoiceDetailsPage() {
           )}
 
           {/* Payment Button */}
-          {invoice.status !== 'paid' && (
+          {invoice.status !== 'PAID' && (
             <>
               <Separator className="print:hidden" />
               <div className="flex justify-end print:hidden">
@@ -328,14 +341,14 @@ export default function InvoiceDetailsPage() {
             </>
           )}
 
-          {invoice.status === 'paid' && invoice.paidDate && (
+          {invoice.status === 'PAID' && invoice.paidAt && (
             <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
               <div className="flex items-center gap-2 text-green-800 dark:text-green-400">
                 <CheckCircle className="h-5 w-5" />
                 <div>
                   <p className="font-semibold">Payment Received</p>
                   <p className="text-sm">
-                    Paid on {new Date(invoice.paidDate).toLocaleDateString()}
+                    Paid on {new Date(invoice.paidAt).toLocaleDateString()}
                   </p>
                 </div>
               </div>

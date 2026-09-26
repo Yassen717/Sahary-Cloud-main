@@ -1,5 +1,4 @@
 import { prisma } from '../config/database';
-import ValidationHelpers from '../utils/validation.helpers';
 import type {
   BillingGroupBy,
   BillingVmSummary,
@@ -11,7 +10,6 @@ import type {
   InvoiceStatusUpdateMetadata,
   PaymentIntentOptions,
   PaymentQueryOptions,
-  PaymentStatus,
   RefundInput,
   UsageAggregationResult,
   UsageQueryOptions,
@@ -86,7 +84,9 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 class BillingService {
   static async recordUsage(vmId: string, usageData: UsageRecordInput): Promise<UsageRecord> {
     try {
-      const { cpuUsage, ramUsage, storageUsage, bandwidthUsage, duration } = usageData;
+      const {
+        cpuUsage, ramUsage, storageUsage, bandwidthUsage, duration,
+      } = usageData;
 
       const vm = await prisma.virtualMachine.findUnique({
         where: { id: vmId },
@@ -143,7 +143,9 @@ class BillingService {
     bandwidthUsage: number | string;
     duration: number | string;
   }): number {
-    const { vm, cpuUsage, ramUsage, storageUsage, bandwidthUsage, duration } = params;
+    const {
+      vm, cpuUsage, ramUsage, storageUsage, bandwidthUsage, duration,
+    } = params;
 
     const baseHourlyRate = parseFloat(String(vm.hourlyRate));
     const cpuUtilization = parseFloat(String(cpuUsage)) / 100;
@@ -157,10 +159,9 @@ class BillingService {
     const ramWeight = 0.4;
     const storageWeight = 0.2;
 
-    const utilizationFactor =
-      cpuUtilization * cpuWeight +
-      ramUtilization * ramWeight +
-      storageUtilization * storageWeight;
+    const utilizationFactor = cpuUtilization * cpuWeight
+      + ramUtilization * ramWeight
+      + storageUtilization * storageWeight;
 
     const hourlyUsageCost = baseHourlyRate * utilizationFactor;
     const minuteCost = hourlyUsageCost / 60;
@@ -434,10 +435,9 @@ class BillingService {
         };
       }
 
-      const dockerService = require('./dockerService');
+      const dockerService = require('./dockerService').default;
       const containerStats = await dockerService.getContainerStats(vm.dockerContainerId);
 
-      const cpuUsage = containerStats.cpu_stats?.cpu_usage?.total_usage || 0;
       const ramUsage = containerStats.memory_stats?.usage || 0;
 
       const cpuPercent = this.calculateCPUPercent(containerStats);
@@ -677,31 +677,47 @@ class BillingService {
       const taxAmount = subtotal * taxRate;
       const total = subtotal + taxAmount;
 
-      const invoice = await prisma.invoice.create({
-        data: {
-          userId,
-          invoiceNumber: await this.generateInvoiceNumber(),
-          billingPeriodStart: startDate,
-          billingPeriodEnd: endDate,
-          subtotal: roundTo(subtotal),
-          tax: roundTo(taxAmount),
-          discount: 0,
-          amount: roundTo(total),
-          status: 'PENDING',
-          dueDate,
-          currency: 'USD',
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
+      // Invoice numbers are derived from a count query, so concurrent
+      // generation can race and produce the same number — retry on the
+      // unique constraint with a freshly generated number.
+      let invoice: InvoiceRecord | undefined;
+      for (let attempt = 0; attempt < 5 && !invoice; attempt++) {
+        try {
+          invoice = await prisma.invoice.create({
+            data: {
+              userId,
+              invoiceNumber: await this.generateInvoiceNumber(),
+              billingPeriodStart: startDate,
+              billingPeriodEnd: endDate,
+              subtotal: roundTo(subtotal),
+              tax: roundTo(taxAmount),
+              discount: 0,
+              amount: roundTo(total),
+              status: 'PENDING',
+              dueDate,
+              currency: 'USD',
             },
-          },
-        },
-      }) as InvoiceRecord;
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+          }) as InvoiceRecord;
+        } catch (error: any) {
+          if (error?.code !== 'P2002' || attempt === 4) {
+            throw error;
+          }
+        }
+      }
+
+      if (!invoice) {
+        throw new Error('Failed to allocate a unique invoice number');
+      }
 
       const invoiceItems = await Promise.all(
         (usage as any).vms.map(async (vm: any) => prisma.invoiceItem.create({
@@ -863,7 +879,9 @@ class BillingService {
 
   static async applyDiscount(invoiceId: string, discountData: DiscountInput): Promise<InvoiceRecord> {
     try {
-      const { discountCode, discountAmount, discountPercentage, reason } = discountData;
+      const {
+        discountCode, discountAmount, discountPercentage, reason,
+      } = discountData;
 
       const invoice = await prisma.invoice.findUnique({
         where: { id: invoiceId },
@@ -931,13 +949,32 @@ class BillingService {
 
   static async updateInvoiceStatus(invoiceId: string, status: InvoiceStatus, metadata: InvoiceStatusUpdateMetadata = {}): Promise<InvoiceRecord> {
     try {
-      const paidAt = metadata.paidAt instanceof Date ? metadata.paidAt : new Date();
+      const validStatuses = ['PENDING', 'PAID', 'OVERDUE', 'CANCELLED', 'REFUNDED'];
+
+      if (!validStatuses.includes(status)) {
+        throw new Error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+      }
+
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: invoiceId },
+      }) as InvoiceRecord | null;
+
+      if (!invoice) {
+        throw new Error('Invoice not found');
+      }
+
+      const updateData: Record<string, unknown> = { status };
+
+      if (status === 'PAID') {
+        updateData.paidAt = new Date();
+      }
 
       const updatedInvoice = await prisma.invoice.update({
         where: { id: invoiceId },
-        data: {
-          status,
-          ...(status === 'PAID' && { paidAt }),
+        data: updateData,
+        include: {
+          user: true,
+          items: true,
         },
       }) as InvoiceRecord;
 
@@ -951,6 +988,7 @@ class BillingService {
           action: 'INVOICE_STATUS_UPDATED',
           resource: 'invoice',
           resourceId: invoiceId,
+          oldValues: JSON.stringify({ status: invoice.status }),
           newValues: JSON.stringify({ status, ...metadata }),
         },
       });
@@ -962,33 +1000,52 @@ class BillingService {
     }
   }
 
-  static async generateAllMonthlyInvoices(options: InvoiceBatchOptions = {}): Promise<{ success: number; failed: number; total: number; errors: Array<Record<string, unknown>> }> {
+  static async generateAllMonthlyInvoices(options: InvoiceBatchOptions = {}): Promise<{ success: number; failed: number; skipped: number; total: number; errors: Array<Record<string, unknown>>; invoices: Array<Record<string, unknown>> }> {
     try {
       const { month, year } = options;
 
       const users = await prisma.user.findMany({
-        where: { isActive: true },
-        select: { id: true, email: true },
-      }) as Array<{ id: string; email: string }>;
+        where: {
+          isActive: true,
+          virtualMachines: {
+            some: {},
+          },
+        },
+        select: { id: true, email: true, firstName: true, lastName: true },
+      }) as Array<{ id: string; email: string; firstName: string; lastName: string }>;
 
-      const results: { success: number; failed: number; total: number; errors: Array<Record<string, unknown>> } = {
+      const results: { success: number; failed: number; skipped: number; total: number; errors: Array<Record<string, unknown>>; invoices: Array<Record<string, unknown>> } = {
         success: 0,
         failed: 0,
+        skipped: 0,
         total: users.length,
         errors: [],
+        invoices: [],
       };
 
       for (const user of users) {
         try {
-          await this.generateMonthlyInvoice(user.id, { month, year });
+          const invoice = await this.generateMonthlyInvoice(user.id, { month, year });
           results.success++;
-        } catch (error) {
-          results.failed++;
-          results.errors.push({
+          results.invoices.push({
             userId: user.id,
             userEmail: user.email,
-            error: error instanceof Error ? error.message : String(error),
+            invoiceId: invoice.id,
+            invoiceNumber: invoice.invoiceNumber,
+            total: invoice.amount,
           });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (message.includes('already exists') || message.includes('No usage found')) {
+            results.skipped++;
+          } else {
+            results.failed++;
+            results.errors.push({
+              userId: user.id,
+              userEmail: user.email,
+              error: message,
+            });
+          }
         }
       }
 
@@ -999,40 +1056,24 @@ class BillingService {
     }
   }
 
-  static async markOverdueInvoices(): Promise<{ success: number; failed: number; total: number; errors: Array<Record<string, unknown>> }> {
+  static async markOverdueInvoices(): Promise<{ updated: number; timestamp: string }> {
     try {
-      const overdueInvoices = await prisma.invoice.findMany({
+      const result = await prisma.invoice.updateMany({
         where: {
           status: 'PENDING',
           dueDate: {
             lt: new Date(),
           },
         },
-      }) as InvoiceRecord[];
+        data: {
+          status: 'OVERDUE',
+        },
+      });
 
-      const results: { success: number; failed: number; total: number; errors: Array<Record<string, unknown>> } = {
-        success: 0,
-        failed: 0,
-        total: overdueInvoices.length,
-        errors: [],
+      return {
+        updated: result.count,
+        timestamp: new Date().toISOString(),
       };
-
-      for (const invoice of overdueInvoices) {
-        try {
-          await this.updateInvoiceStatus(invoice.id, 'OVERDUE', {
-            markedAt: new Date(),
-          });
-          results.success++;
-        } catch (error) {
-          results.failed++;
-          results.errors.push({
-            invoiceId: invoice.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
-      return results;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to mark overdue invoices: ${message}`);
@@ -1053,9 +1094,12 @@ class BillingService {
       ]);
 
       const aggregation = await prisma.invoice.aggregate({
-        where: { ...where, status: 'PAID' },
+        where,
         _sum: {
           amount: true,
+          subtotal: true,
+          tax: true,
+          discount: true,
         },
       });
 
@@ -1069,7 +1113,10 @@ class BillingService {
           refunded,
         },
         amounts: {
-          totalProcessed: roundTo(aggregation._sum?.amount || 0),
+          totalRevenue: roundTo(aggregation._sum?.amount || 0),
+          totalSubtotal: roundTo(aggregation._sum?.subtotal || 0),
+          totalTax: roundTo(aggregation._sum?.tax || 0),
+          totalDiscounts: roundTo(aggregation._sum?.discount || 0),
         },
       };
     } catch (error) {
@@ -1308,7 +1355,7 @@ class BillingService {
 
   static async handlePaymentSuccess(paymentIntent: any): Promise<Record<string, unknown>> {
     try {
-      const invoiceId = paymentIntent.metadata.invoiceId;
+      const { invoiceId } = paymentIntent.metadata;
       if (!invoiceId) {
         throw new Error('Invoice ID not found in payment intent metadata');
       }
@@ -1376,7 +1423,7 @@ class BillingService {
 
   static async handlePaymentFailure(paymentIntent: any): Promise<Record<string, unknown>> {
     try {
-      const invoiceId = paymentIntent.metadata.invoiceId;
+      const { invoiceId } = paymentIntent.metadata;
 
       if (!invoiceId) {
         throw new Error('Invoice ID not found in payment intent metadata');

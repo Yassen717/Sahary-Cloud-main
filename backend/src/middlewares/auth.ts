@@ -1,11 +1,11 @@
 import type { NextFunction, Request, Response } from 'express';
 import JWTUtils from '../utils/jwt';
 import AuthService from '../services/authService';
-import redisService from '../services/redisService';
 import { prisma } from '../config/database';
 import { isFeatureEnabled } from '../config/auth';
 
 const rateLimit = require('express-rate-limit');
+const redisService = require('../services/redisService');
 
 export interface AuthenticatedUser {
   id: string;
@@ -364,10 +364,11 @@ class AuthMiddleware {
       const session = await prisma.session.findFirst({
         where: {
           userId: req.user.userId,
+          // Session.data is a JSON-serialized String column, not a Json field —
+          // use a string contains filter (token is embedded in the JSON blob).
           data: {
-            path: ['accessToken'],
-            equals: req.token,
-          } as any,
+            contains: req.token,
+          },
           expiresAt: {
             gt: new Date(),
           },
@@ -436,21 +437,21 @@ export {
   AuthMiddleware as MiddlewareClass,
 };
 
-export const authenticate = AuthMiddleware.authenticate;
-export const optionalAuth = AuthMiddleware.optionalAuth;
-export const requireRole = AuthMiddleware.requireRole;
-export const requireAdmin = AuthMiddleware.requireAdmin;
-export const requireSuperAdmin = AuthMiddleware.requireSuperAdmin;
-export const requireEmailVerification = AuthMiddleware.requireEmailVerification;
-export const requireOwnershipOrAdmin = AuthMiddleware.requireOwnershipOrAdmin;
-export const requireSelfOrAdmin = AuthMiddleware.requireSelfOrAdmin;
-export const createRateLimit = AuthMiddleware.createRateLimit;
-export const authenticateApiKey = AuthMiddleware.authenticateApiKey;
-export const conditional = AuthMiddleware.conditional;
-export const logAuthEvent = AuthMiddleware.logAuthEvent;
-export const validateSession = AuthMiddleware.validateSession;
-export const requireFeature = AuthMiddleware.requireFeature;
-export const combine = AuthMiddleware.combine;
+export const { authenticate } = AuthMiddleware;
+export const { optionalAuth } = AuthMiddleware;
+export const { requireRole } = AuthMiddleware;
+export const { requireAdmin } = AuthMiddleware;
+export const { requireSuperAdmin } = AuthMiddleware;
+export const { requireEmailVerification } = AuthMiddleware;
+export const { requireOwnershipOrAdmin } = AuthMiddleware;
+export const { requireSelfOrAdmin } = AuthMiddleware;
+export const { createRateLimit } = AuthMiddleware;
+export const { authenticateApiKey } = AuthMiddleware;
+export const { conditional } = AuthMiddleware;
+export const { logAuthEvent } = AuthMiddleware;
+export const { validateSession } = AuthMiddleware;
+export const { requireFeature } = AuthMiddleware;
+export const { combine } = AuthMiddleware;
 
 export default {
   AuthMiddleware,

@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { apiClient } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,7 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
-const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9\s])\S+$/;
+const NAME_REGEX = /^[\p{L}][\p{L}\s'-]*$/u;
 
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
@@ -22,7 +22,7 @@ export default function RegisterPage() {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const router = useRouter();
+  const { register } = useAuth();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -34,6 +34,18 @@ export default function RegisterPage() {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (
+      formData.firstName.trim().length < 2 ||
+      formData.lastName.trim().length < 2 ||
+      !NAME_REGEX.test(formData.firstName.trim()) ||
+      !NAME_REGEX.test(formData.lastName.trim())
+    ) {
+      setError(
+        'Names must be at least 2 characters and contain only letters, spaces, hyphens, or apostrophes'
+      );
+      return;
+    }
 
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
@@ -47,7 +59,7 @@ export default function RegisterPage() {
 
     if (!PASSWORD_REGEX.test(formData.password)) {
       setError(
-        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)'
+        'Min 8 characters with uppercase, lowercase, number & special character'
       );
       return;
     }
@@ -55,14 +67,13 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      const response = await apiClient.register({
-        firstName: formData.firstName,
-        lastName: formData.lastName,
+      await register({
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
         email: formData.email,
         password: formData.password,
       });
-      console.log('Registration successful:', response);
-      router.push('/dashboard');
+      // AuthContext handles session refresh and navigation to /dashboard
     } catch (err: any) {
       setError(err.message || 'Registration failed');
     } finally {
@@ -139,7 +150,7 @@ export default function RegisterPage() {
                 disabled={loading}
               />
               <p className="text-xs text-muted-foreground">
-                Min 8 characters with uppercase, lowercase, number &amp; special char (@$!%*?&amp;)
+                Min 8 characters with uppercase, lowercase, number &amp; special character
               </p>
             </div>
 
@@ -191,6 +202,11 @@ export default function RegisterPage() {
               </Link>
             </div>
           </form>
+
+          <p className="mt-4 text-center text-xs text-muted-foreground">
+            After registering, check your email for a verification link to
+            unlock all features.
+          </p>
         </CardContent>
       </Card>
     </div>

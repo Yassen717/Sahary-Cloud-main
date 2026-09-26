@@ -47,15 +47,15 @@ export default function DashboardPage() {
 
       // Load VMs
       const vmsData = await apiClient.getVMs();
-      setVms(vmsData.vms || []);
+      setVms(vmsData.data || []);
 
       // Load Solar Status
       const solarData = await apiClient.getSolarStatus();
-      setSolarStatus(solarData);
+      setSolarStatus(solarData.data);
 
       // Load Usage
       const usageData = await apiClient.getUsage();
-      setUsage(usageData);
+      setUsage(usageData.data);
 
     } catch (err: any) {
       setError(err.message || 'فشل تحميل البيانات');
@@ -91,7 +91,7 @@ export default function DashboardPage() {
     );
   }
 
-  const runningVMs = vms.filter(vm => vm.status === 'running').length;
+  const runningVMs = vms.filter(vm => vm.status === 'RUNNING').length;
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -118,7 +118,7 @@ export default function DashboardPage() {
 
         <StatsCard
           title="Solar Production"
-          value={`${solarStatus?.currentProduction || 0} kW`}
+          value={`${solarStatus?.production || 0} kW`}
           description={`${solarStatus?.efficiency || 0}% efficiency`}
           icon={Zap}
           iconColor="text-yellow-500"
@@ -129,7 +129,7 @@ export default function DashboardPage() {
         <StatsCard
           title="Monthly Usage"
           value={`$${usage?.totalCost?.toFixed(2) || '0.00'}`}
-          description={`${usage?.totalHours || 0} hours`}
+          description={`${usage?.totalHours ?? Math.round((usage?.totalDuration || 0) / 60)} hours`}
           icon={DollarSign}
           iconColor="text-green-500"
           delay={200}
@@ -203,18 +203,18 @@ export default function DashboardPage() {
                       <div>
                         <CardTitle className="text-lg">{vm.name}</CardTitle>
                         <CardDescription className="text-xs mt-1">
-                          {vm.cpu} CPU • {vm.ram}GB RAM • {vm.storage}GB
+                          {vm.cpu} CPU • {vm.ram / 1024}GB RAM • {vm.storage}GB
                         </CardDescription>
                       </div>
                       <span
-                        className={`px-2 py-1 text-xs rounded-full flex items-center gap-1 transition-all-smooth ${vm.status === 'running'
+                        className={`px-2 py-1 text-xs rounded-full flex items-center gap-1 transition-all-smooth ${vm.status === 'RUNNING'
                           ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
                           : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
                           }`}
                         role="status"
                         aria-label={`Status: ${vm.status}`}
                       >
-                        {vm.status === 'running' && (
+                        {vm.status === 'RUNNING' && (
                           <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse-slow" aria-hidden="true" />
                         )}
                         {vm.status}
@@ -225,11 +225,11 @@ export default function DashboardPage() {
                     <div className="flex gap-2">
                       <Button
                         size="sm"
-                        variant={vm.status === 'running' ? 'destructive' : 'default'}
+                        variant={vm.status === 'RUNNING' ? 'destructive' : 'default'}
                         className="flex-1 transition-all-smooth hover:scale-105"
-                        aria-label={vm.status === 'running' ? `Stop ${vm.name}` : `Start ${vm.name}`}
+                        aria-label={vm.status === 'RUNNING' ? `Stop ${vm.name}` : `Start ${vm.name}`}
                       >
-                        {vm.status === 'running' ? (
+                        {vm.status === 'RUNNING' ? (
                           <>
                             <Square className="h-3 w-3 mr-1" aria-hidden="true" />
                             Stop

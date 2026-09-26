@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 
-const VMService = require('../services/vmService');
+const VMService = require('../services/vmService').default;
 const { prisma } = require('../config/database');
 
 type VMUserRequest = Request & {
@@ -21,8 +21,10 @@ type VMUserRequest = Request & {
 class VMController {
   static async createVM(req: VMUserRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
-      const { name, description, cpu, ram, storage, bandwidth, dockerImage } = req.body;
+      const { userId } = req.user;
+      const {
+        name, description, cpu, ram, storage, bandwidth, dockerImage,
+      } = req.body;
 
       const vm = await VMService.createVM(userId, {
         name,
@@ -50,8 +52,10 @@ class VMController {
 
   static async getUserVMs(req: VMUserRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
-      const { page, limit, status, search, sortBy, sortOrder } = req.query;
+      const { userId } = req.user;
+      const {
+        page, limit, status, search, sortBy, sortOrder,
+      } = req.query;
 
       const result = await VMService.getUserVMs(userId, {
         page,
@@ -80,7 +84,7 @@ class VMController {
   static async getVMById(req: VMUserRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
 
       const vm = await VMService.getVMById(id, isAdmin ? null : userId);
@@ -111,9 +115,11 @@ class VMController {
   static async updateVM(req: VMUserRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
-      const { name, description, cpu, ram, storage, bandwidth } = req.body;
+      const {
+        name, description, cpu, ram, storage, bandwidth,
+      } = req.body;
 
       const targetUserId = isAdmin ? null : userId;
 
@@ -143,7 +149,7 @@ class VMController {
   static async deleteVM(req: VMUserRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
 
       const targetUserId = isAdmin ? null : userId;
@@ -166,7 +172,7 @@ class VMController {
   static async startVM(req: VMUserRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
 
       const targetUserId = isAdmin ? null : userId;
@@ -190,7 +196,7 @@ class VMController {
   static async stopVM(req: VMUserRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
 
       const targetUserId = isAdmin ? null : userId;
@@ -214,7 +220,7 @@ class VMController {
   static async restartVM(req: VMUserRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
 
       const targetUserId = isAdmin ? null : userId;
@@ -237,7 +243,7 @@ class VMController {
 
   static async getUserResourceUsage(req: VMUserRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
 
       const [usage, limits] = await Promise.all([
         VMService.getUserResourceUsage(userId),
@@ -278,7 +284,7 @@ class VMController {
   static async getVMStatistics(req: VMUserRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
       const { startDate, endDate, granularity } = req.query;
 
@@ -306,7 +312,9 @@ class VMController {
 
   static async getAllVMs(req: VMUserRequest, res: Response): Promise<void> {
     try {
-      const { page, limit, status, userId, search, sortBy, sortOrder } = req.query;
+      const {
+        page, limit, status, userId, search, sortBy, sortOrder,
+      } = req.query;
 
       const result = await VMService.getAllVMs({
         page,
@@ -438,9 +446,11 @@ class VMController {
 
   static async getVMPricingEstimate(req: VMUserRequest, res: Response): Promise<void> {
     try {
-      const { cpu, ram, storage, bandwidth, duration } = req.body;
+      const {
+        cpu, ram, storage, bandwidth, duration,
+      } = req.body;
 
-      const ValidationHelpers = require('../utils/validation.helpers');
+      const ValidationHelpers = require('../utils/validation.helpers').default;
       const resourceValidation = ValidationHelpers.validateVMResources({
         cpu,
         ram,
@@ -480,7 +490,9 @@ class VMController {
         success: true,
         message: 'Pricing estimate calculated successfully',
         data: {
-          resources: { cpu, ram, storage, bandwidth: bandwidth || 1000 },
+          resources: {
+            cpu, ram, storage, bandwidth: bandwidth || 1000,
+          },
           estimates,
           currency: 'USD',
           warnings: resourceValidation.warnings || [],
@@ -497,7 +509,7 @@ class VMController {
 
   static async getVMContainerStatus(req: VMUserRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const { vmId } = req.params;
 
       const containerStatus = await VMService.getVMContainerStatus(vmId, userId);
@@ -517,9 +529,11 @@ class VMController {
 
   static async getVMContainerLogs(req: VMUserRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const { vmId } = req.params;
-      const { tail = 100, since, until, timestamps = true } = req.query;
+      const {
+        tail = 100, since, until, timestamps = true,
+      } = req.query;
 
       const logs = await VMService.getVMContainerLogs(vmId, userId, {
         tail: Number.parseInt(String(tail), 10),
@@ -543,7 +557,7 @@ class VMController {
 
   static async execInVMContainer(req: VMUserRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const { vmId } = req.params;
       const { command } = req.body;
 
@@ -572,7 +586,7 @@ class VMController {
 
   static async createVMBackup(req: VMUserRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const { vmId } = req.params;
       const { backupName } = req.body;
 
@@ -602,7 +616,7 @@ class VMController {
 
   static async restoreVMFromBackup(req: VMUserRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const { backupId } = req.params;
       const restoreConfig = req.body;
 
@@ -624,7 +638,7 @@ class VMController {
 
   static async getVMResourceStats(req: VMUserRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const { vmId } = req.params;
 
       const stats = await VMService.getVMResourceStats(vmId, userId);

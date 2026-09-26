@@ -38,9 +38,13 @@ const connectDatabase = async (): Promise<boolean> => {
     return true;
   } catch (error) {
     console.error('❌ Database connection failed:', getErrorMessage(error, 'Unknown error'));
-    console.warn('⚠️  Server will start WITHOUT database connection');
-    console.warn('⚠️  Database-dependent features will not work until PostgreSQL is running');
-    console.warn('⚠️  To start PostgreSQL: sudo systemctl start postgresql');
+    // In production the database is required: propagate so startup fails hard.
+    if (process.env.NODE_ENV === 'production') {
+      throw error;
+    }
+    console.error('⚠️  DATABASE IS UNREACHABLE — starting server WITHOUT database connection (non-production only)');
+    console.error('⚠️  Database-dependent endpoints will return 500 until PostgreSQL is running');
+    console.error('⚠️  To start PostgreSQL: npm run db:start  OR  sudo systemctl start postgresql');
     return false;
   }
 };
@@ -104,7 +108,9 @@ process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);
 process.on('beforeExit', gracefulShutdown);
 
-export { prisma, connectDatabase, disconnectDatabase, checkDatabaseHealth, cleanupDatabase, gracefulShutdown };
+export {
+  prisma, connectDatabase, disconnectDatabase, checkDatabaseHealth, cleanupDatabase, gracefulShutdown,
+};
 export type { DatabaseHealth };
 
 export default {

@@ -2,7 +2,8 @@ import Joi from 'joi';
 
 export const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test', 'staging').default('development'),
-  PORT: Joi.number().integer().min(1).max(65535).default(3000),
+  PORT: Joi.number().integer().min(1).max(65535)
+    .default(3000),
   HOST: Joi.string().default('localhost'),
 
   DATABASE_URL: Joi.string().uri({ scheme: ['postgresql', 'postgres'] }).required(),
@@ -100,7 +101,8 @@ export const envSchema = Joi.object({
   DDOS_BLOCK_DURATION: Joi.number().integer().min(1000).default(3600000),
   MAX_CONNECTIONS_PER_IP: Joi.number().integer().min(1).default(10),
 
-  BCRYPT_ROUNDS: Joi.number().integer().min(4).max(20).default(12),
+  BCRYPT_ROUNDS: Joi.number().integer().min(4).max(20)
+    .default(12),
   CORS_ORIGIN: Joi.string().default('http://localhost:3001'),
 
   FRONTEND_URL: Joi.string().uri().default('http://localhost:3001'),
@@ -116,8 +118,20 @@ export const envSchema = Joi.object({
   abortEarly: false,
 });
 
+const REQUIRED_ENV_VARS = new Set(['DATABASE_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'SESSION_SECRET']);
+
 export function validateEnv(): Record<string, unknown> {
-  const { error, value } = envSchema.validate(process.env);
+  // Treat present-but-empty env vars as unset: optional vars then fall back to
+  // their defaults instead of emitting "is not allowed to be empty" warnings,
+  // and empty required vars are reported as missing (any.required).
+  const envInput: Record<string, string | undefined> = {};
+  for (const [key, envValue] of Object.entries(process.env)) {
+    if (envValue !== '') {
+      envInput[key] = envValue;
+    }
+  }
+
+  const { error, value } = envSchema.validate(envInput);
 
   if (error) {
     const requiredErrors: Array<{ key: string; message: string }> = [];
@@ -127,17 +141,21 @@ export function validateEnv(): Record<string, unknown> {
       const key = detail.context?.key || detail.path.join('.');
       const message = detail.message.replace(/"/g, '');
 
-      if (detail.type === 'any.required' || detail.type === 'string.min') {
+      if (detail.type === 'any.required' || REQUIRED_ENV_VARS.has(key)) {
         requiredErrors.push({ key, message });
       } else {
         warnings.push({ key, message });
       }
     });
 
-    if (requiredErrors.length > 0 || warnings.length > 0) {
+    if (requiredErrors.length > 0) {
       console.error('\n╔══════════════════════════════════════════════════════════════╗');
       console.error('║           ⚠️  ENVIRONMENT VARIABLE VALIDATION FAILED        ║');
       console.error('╚══════════════════════════════════════════════════════════════╝\n');
+    } else if (warnings.length > 0) {
+      console.warn('\n╔══════════════════════════════════════════════════════════════╗');
+      console.warn('║               ⚠️  ENVIRONMENT VARIABLE WARNINGS              ║');
+      console.warn('╚══════════════════════════════════════════════════════════════╝\n');
     }
 
     if (requiredErrors.length > 0) {
@@ -173,7 +191,7 @@ export function validateEnv(): Record<string, unknown> {
 }
 
 export function printEnvSummary(): void {
-  const env = process.env;
+  const { env } = process;
   const maskSecret = (value?: string) => {
     if (!value || value.length < 8) return '***';
     return `${value.substring(0, 4)}***${value.substring(value.length - 2)}`;

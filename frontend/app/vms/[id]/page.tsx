@@ -48,6 +48,7 @@ interface VM {
   storage: number;
   ipAddress?: string;
   os?: string;
+  dockerImage?: string;
   dockerContainerId?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -82,7 +83,7 @@ export default function VMDetailsPage() {
   const loadVMDetails = async () => {
     try {
       const response = await apiClient.getVM(params.id as string);
-      setVm(response.vm);
+      setVm(response.data.vm);
       // Mock stats for now - replace with actual API call when available
       setStats({
         cpuUsage: Math.random() * 100,
@@ -240,7 +241,7 @@ export default function VMDetailsPage() {
           <div className="flex flex-wrap gap-3">
             <Button
               onClick={() => handleAction('start')}
-              disabled={vm.status === 'running' || actionLoading !== null}
+              disabled={vm.status === 'RUNNING' || actionLoading !== null}
             >
               {actionLoading === 'start' ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -253,7 +254,7 @@ export default function VMDetailsPage() {
             <Button
               variant="outline"
               onClick={() => handleAction('stop')}
-              disabled={vm.status === 'stopped' || actionLoading !== null}
+              disabled={vm.status === 'STOPPED' || actionLoading !== null}
             >
               {actionLoading === 'stop' ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -266,7 +267,7 @@ export default function VMDetailsPage() {
             <Button
               variant="outline"
               onClick={() => handleAction('restart')}
-              disabled={vm.status !== 'running' || actionLoading !== null}
+              disabled={vm.status !== 'RUNNING' || actionLoading !== null}
             >
               {actionLoading === 'restart' ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -326,7 +327,7 @@ export default function VMDetailsPage() {
                 <Activity className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{vm.ram} GB</div>
+                <div className="text-2xl font-bold">{vm.ram / 1024} GB</div>
                 {stats && (
                   <p className="text-xs text-muted-foreground">
                     {stats.ramUsage.toFixed(1)}% usage
@@ -379,7 +380,7 @@ export default function VMDetailsPage() {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Operating System</p>
-                  <p className="text-sm">{vm.os || 'Ubuntu 22.04 LTS'}</p>
+                  <p className="text-sm">{vm.dockerImage || vm.os || 'Ubuntu 22.04 LTS'}</p>
                 </div>
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">IP Address</p>

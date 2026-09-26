@@ -13,6 +13,11 @@ export type Permission =
   | 'vm:start:own'
   | 'vm:stop:own'
   | 'vm:restart:own'
+  | 'vm:create:own'
+  | 'vm:manage:own'
+  | 'invoice:read:own'
+  | 'payment:create'
+  | 'payment:read:own'
   | 'billing:read:own'
   | 'billing:pay:own'
   | 'usage:read:own'
@@ -29,6 +34,16 @@ export type Permission =
   | 'vm:stop:all'
   | 'vm:restart:all'
   | 'vm:suspend:all'
+  | 'vm:create:all'
+  | 'vm:manage:all'
+  | 'invoice:read:all'
+  | 'invoice:create'
+  | 'invoice:update'
+  | 'payment:read:all'
+  | 'payment:refund'
+  | 'docker:manage'
+  | 'admin:access'
+  | 'admin:super'
   | 'billing:read:all'
   | 'billing:create'
   | 'billing:update'
@@ -91,6 +106,11 @@ const USER_PERMISSIONS: Permission[] = [
   'vm:start:own',
   'vm:stop:own',
   'vm:restart:own',
+  'vm:create:own',
+  'vm:manage:own',
+  'invoice:read:own',
+  'payment:create',
+  'payment:read:own',
   'billing:read:own',
   'billing:pay:own',
   'usage:read:own',
@@ -111,6 +131,15 @@ const ADMIN_PERMISSIONS: Permission[] = [
   'vm:stop:all',
   'vm:restart:all',
   'vm:suspend:all',
+  'vm:create:all',
+  'vm:manage:all',
+  'invoice:read:all',
+  'invoice:create',
+  'invoice:update',
+  'payment:read:all',
+  'payment:refund',
+  'docker:manage',
+  'admin:access',
   'billing:read:all',
   'billing:create',
   'billing:update',
@@ -130,6 +159,7 @@ const ADMIN_PERMISSIONS: Permission[] = [
 
 const SUPER_ADMIN_PERMISSIONS: Permission[] = [
   ...ADMIN_PERMISSIONS,
+  'admin:super',
   'user:create',
   'user:delete',
   'user:update:role',
@@ -284,9 +314,7 @@ export class RBACMiddleware {
         const isOwner = ownershipPattern ? ownershipPattern(req, resource) : false;
 
         const userPermissions = resolvePermissionsForRole(req.user.role);
-        const hasAdminPermission = userPermissions.some((permission) =>
-          permission.startsWith(`${resourceType}:`) && permission.includes(':all'),
-        );
+        const hasAdminPermission = userPermissions.some((permission) => permission.startsWith(`${resourceType}:`) && permission.includes(':all'));
 
         if (!isOwner && !hasAdminPermission) {
           res.status(403).json({
@@ -429,18 +457,18 @@ export class RBACMiddleware {
   }
 }
 
-export const requirePermission = RBACMiddleware.requirePermission;
-export const requireAnyPermission = RBACMiddleware.requireAnyPermission;
-export const requireAllPermissions = RBACMiddleware.requireAllPermissions;
-export const requireOwnershipOrPermission = RBACMiddleware.requireOwnershipOrPermission;
-export const requireDynamicPermission = RBACMiddleware.requireDynamicPermission;
-export const getUserPermissions = RBACMiddleware.getUserPermissions;
-export const canPerformAction = RBACMiddleware.canPerformAction;
-export const conditionalPermission = RBACMiddleware.conditionalPermission;
-export const logPermissionCheck = RBACMiddleware.logPermissionCheck;
-export const getPermissionsForRole = RBACMiddleware.getPermissionsForRole;
-export const roleHasPermission = RBACMiddleware.roleHasPermission;
-export const getMinimumRoleForPermission = RBACMiddleware.getMinimumRoleForPermission;
+export const { requirePermission } = RBACMiddleware;
+export const { requireAnyPermission } = RBACMiddleware;
+export const { requireAllPermissions } = RBACMiddleware;
+export const { requireOwnershipOrPermission } = RBACMiddleware;
+export const { requireDynamicPermission } = RBACMiddleware;
+export const { getUserPermissions } = RBACMiddleware;
+export const { canPerformAction } = RBACMiddleware;
+export const { conditionalPermission } = RBACMiddleware;
+export const { logPermissionCheck } = RBACMiddleware;
+export const { getPermissionsForRole } = RBACMiddleware;
+export const { roleHasPermission } = RBACMiddleware;
+export const { getMinimumRoleForPermission } = RBACMiddleware;
 
 export default {
   RBACMiddleware,

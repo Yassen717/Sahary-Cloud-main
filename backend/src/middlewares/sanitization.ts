@@ -16,7 +16,10 @@ const sanitizeString = (input: unknown): unknown => {
     return input;
   }
 
-  return validator.stripLow(input).trim();
+  // Remove low-level chars then HTML-escape — matches the original .js behavior
+  const sanitized = validator.escape(validator.stripLow(input));
+
+  return sanitized.trim();
 };
 
 const sanitizeObject = (obj: unknown): unknown => {
@@ -117,6 +120,7 @@ const checkXSS = (req: Request, _res: Response, next: NextFunction): void => {
   const checkValue = (value: unknown): void => {
     if (typeof value === 'string') {
       for (const pattern of xssPatterns) {
+        pattern.lastIndex = 0;
         if (pattern.test(value)) {
           throw new ValidationError('Potential XSS attack detected', {
             field: 'input',

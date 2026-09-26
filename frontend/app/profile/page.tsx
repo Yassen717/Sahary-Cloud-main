@@ -16,6 +16,7 @@ import { useRouter } from 'next/navigation';
 export default function ProfilePage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { user: authUser, loading: sessionLoading, isAuthenticated } = useAuth();
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
@@ -23,7 +24,8 @@ export default function ProfilePage() {
   const [authError, setAuthError] = useState<string | null>(null);
 
   // Profile form state
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
 
   // Password form state
@@ -32,40 +34,42 @@ export default function ProfilePage() {
   const [confirmPassword, setConfirmPassword] = useState('');
 
   useEffect(() => {
-    // Try to use the auth context first
-    const checkAuth = async () => {
+    // Wait for the auth context to resolve the session first
+    if (sessionLoading) return;
+
+    const loadProfile = async () => {
+      if (!isAuthenticated) {
+        setAuthError('You need to be logged in to view this page');
+        setAuthLoading(false);
+        return;
+      }
+
+      // Fetch fresh profile data from the API, falling back to the
+      // user already resolved by the auth context
       try {
-        // Check if we have a token
-        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        const response = await apiClient.getMe();
+        const userData = response?.data?.user || response?.user || authUser;
 
-        if (!token) {
-          setAuthError('You need to be logged in to view this page');
-          setAuthLoading(false);
-          return;
-        }
-
-        // Try to get user info from the API
-        try {
-          const response = await apiClient.getMe();
-          const userData = response.data || response.user || response;
-
-          setCurrentUser(userData);
-          setName(userData.name || userData.firstName + ' ' + userData.lastName || '');
-          setEmail(userData.email || '');
-          setAuthLoading(false);
-        } catch (apiError: any) {
-          // If API fails, show error
+        setCurrentUser(userData);
+        setFirstName(userData.firstName || '');
+        setLastName(userData.lastName || '');
+        setEmail(userData.email || '');
+      } catch (apiError: any) {
+        if (authUser) {
+          setCurrentUser(authUser);
+          setFirstName(authUser.firstName || '');
+          setLastName(authUser.lastName || '');
+          setEmail(authUser.email || '');
+        } else {
           setAuthError(apiError.message || 'Failed to load profile');
-          setAuthLoading(false);
         }
-      } catch (error: any) {
-        setAuthError(error.message || 'Authentication error');
+      } finally {
         setAuthLoading(false);
       }
     };
 
-    checkAuth();
-  }, []);
+    loadProfile();
+  }, [sessionLoading, isAuthenticated, authUser]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,7 +77,8 @@ export default function ProfilePage() {
     setSaved(false);
 
     try {
-      await apiClient.updateProfile({ name, email });
+      await apiClient.updateProfile({ firstName, lastName });
+      setCurrentUser((prev: any) => (prev ? { ...prev, firstName, lastName } : prev));
       setSaved(true);
       toast({
         title: 'Success',
@@ -117,7 +122,7 @@ export default function ProfilePage() {
     setLoading(true);
 
     try {
-      await apiClient.changePassword(oldPassword, newPassword);
+      await apiClient.changePassword(oldPassword, newPassword, confirmPassword);
       toast({
         title: 'Success',
         description: 'Password changed successfully',
@@ -257,16 +262,29 @@ export default function ProfilePage() {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleUpdateProfile} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Full Name</Label>
-                  <Input
-                    id="name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    disabled={loading}
-                    className="transition-all-smooth focus:ring-2 focus:ring-primary"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="firstName">First Name</Label>
+                    <Input
+                      id="firstName"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      required
+                      disabled={loading}
+                      className="transition-all-smooth focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="lastName">Last Name</Label>
+                    <Input
+                      id="lastName"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      required
+                      disabled={loading}
+                      className="transition-all-smooth focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -275,11 +293,12 @@ export default function ProfilePage() {
                     id="email"
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    disabled={loading}
+                    disabled
                     className="transition-all-smooth focus:ring-2 focus:ring-primary"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Email address cannot be changed
+                  </p>
                 </div>
 
                 <Button

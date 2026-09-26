@@ -100,11 +100,15 @@ class JWTUtils {
     const accessToken = this.generateAccessToken(payload, options);
     const refreshToken = this.generateRefreshToken(payload, options);
 
+    const exp = this.getTokenExpiration(accessToken);
+    const now = Math.floor(Date.now() / 1000);
+
     return {
       accessToken,
       refreshToken,
       tokenType: 'Bearer',
-      expiresIn: this.getTokenExpiration(accessToken),
+      expiresIn: exp ? Math.max(0, exp - now) : null,
+      expiresAt: exp ? new Date(exp * 1000).toISOString() : null,
     };
   }
 

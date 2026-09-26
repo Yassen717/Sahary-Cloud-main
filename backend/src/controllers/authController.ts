@@ -1,6 +1,9 @@
 import type { Request, Response } from 'express';
+import type { AuthTokenPayload } from '../types/auth';
+import AuthService from '../services/authService';
+import JWTUtils from '../utils/jwt';
+import ValidationHelpers from '../utils/validation.helpers';
 
-const AuthService = require('../services/authService');
 const redisService = require('../services/redisService');
 const { prisma } = require('../config/database');
 
@@ -10,13 +13,18 @@ type AuthRequest = Request & {
   query: any;
   params: any;
   cookies: any;
+  token?: string;
 };
 
 class AuthController {
   static async register(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { email, password, firstName, lastName, phone } = req.body;
-      const result = await AuthService.register({ email, password, firstName, lastName, phone });
+      const {
+        email, password, firstName, lastName, phone,
+      } = req.body;
+      const result = await AuthService.register({
+        email, password, firstName, lastName, phone,
+      });
 
       res.cookie('token', result.tokens.accessToken, {
         httpOnly: true,
@@ -36,7 +44,11 @@ class AuthController {
         message: 'User registered successfully',
         data: {
           user: result.user,
-          tokens: result.tokens,
+          tokens: {
+            accessToken: result.tokens.accessToken,
+            tokenType: result.tokens.tokenType,
+            expiresIn: result.tokens.expiresIn,
+          },
           emailVerificationRequired: result.emailVerificationRequired,
         },
       });
@@ -129,9 +141,11 @@ class AuthController {
         success: true,
         message: 'Token refreshed successfully',
         data: {
-          accessToken: tokens.accessToken,
-          tokenType: tokens.tokenType,
-          expiresIn: tokens.expiresIn,
+          tokens: {
+            accessToken: tokens.accessToken,
+            tokenType: tokens.tokenType,
+            expiresIn: tokens.expiresIn,
+          },
         },
       });
     } catch (error: any) {
@@ -147,7 +161,7 @@ class AuthController {
 
   static async logout(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const accessToken = req.headers.authorization?.replace('Bearer ', '');
+      const accessToken = req.token || req.headers.authorization?.replace('Bearer ', '') || req.cookies?.token;
       const redisClient = redisService.isReady() ? redisService.getClient() : null;
       await AuthService.logout(accessToken, redisClient);
 
@@ -170,7 +184,7 @@ class AuthController {
   static async changePassword(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { currentPassword, newPassword } = req.body;
-      const userId = req.user.userId;
+      const { userId } = req.user;
 
       await AuthService.changePassword(userId, currentPassword, newPassword);
 
@@ -197,11 +211,11 @@ class AuthController {
         message: result.message,
         ...(process.env.NODE_ENV === 'development'
           ? {
-              data: {
-                resetToken: result.resetToken,
-                expiresAt: result.expiresAt,
-              },
-            }
+            data: {
+              resetToken: result.resetToken,
+              expiresAt: result.expiresAt,
+            },
+          }
           : {}),
       });
     } catch (error: any) {
@@ -263,11 +277,11 @@ class AuthController {
         message: result.message,
         ...(process.env.NODE_ENV === 'development'
           ? {
-              data: {
-                verificationToken: result.verificationToken,
-                expiresAt: result.expiresAt,
-              },
-            }
+            data: {
+              verificationToken: (result as any).verificationToken,
+              expiresAt: result.expiresAt,
+            },
+          }
           : {}),
       });
     } catch (error: any) {
@@ -281,7 +295,7 @@ class AuthController {
 
   static async getProfile(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const user = await AuthService.getUserById(userId);
 
       if (!user) {
@@ -311,8 +325,10 @@ class AuthController {
 
   static async updateProfile(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
-      const { firstName, lastName, phone, avatar } = req.body;
+      const { userId } = req.user;
+      const {
+        firstName, lastName, phone, avatar,
+      } = req.body;
 
       const updatedUser = await AuthService.updateProfile(userId, {
         firstName,
@@ -339,7 +355,7 @@ class AuthController {
 
   static async checkAuth(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const user = await AuthService.getUserById(userId);
 
       if (!user || !user.isActive) {
@@ -389,7 +405,7 @@ class AuthController {
 
   static async revokeAllSessions(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
       void userId;
 
       res.status(200).json({
@@ -436,9 +452,8 @@ class AuthController {
         return;
       }
 
-      const JWTUtils = require('../utils/jwt');
       const decoded = await JWTUtils.verifyAccessToken(token);
-      const user = await AuthService.getUserById(decoded.userId);
+      const user = decoded.userId ? await AuthService.getUserById(decoded.userId) : null;
 
       if (!user || !user.isActive) {
         res.status(401).json({
@@ -460,7 +475,7 @@ class AuthController {
           role: user.role,
           isVerified: user.isVerified,
         },
-        expiresAt: new Date(decoded.exp * 1000).toISOString(),
+        expiresAt: decoded.exp ? new Date(decoded.exp * 1000).toISOString() : null,
       });
     } catch (error: any) {
       res.status(401).json({
@@ -536,14 +551,13 @@ class AuthController {
         return;
       }
 
-      const JWTUtils = require('../utils/jwt');
       const impersonationToken = JWTUtils.generateAccessToken({
         userId: targetUser.id,
         email: targetUser.email,
         role: targetUser.role,
         impersonatedBy: req.user.userId,
         isImpersonating: true,
-      });
+      } as AuthTokenPayload);
 
       await AuthService.logAuditEvent(req.user.userId, 'USER_IMPERSONATION_STARTED', 'user', targetUser.id, {
         targetUserId: targetUser.id,
@@ -599,7 +613,6 @@ class AuthController {
         return;
       }
 
-      const JWTUtils = require('../utils/jwt');
       const originalToken = JWTUtils.generateAccessToken({
         userId: originalUser.id,
         email: originalUser.email,
@@ -636,8 +649,10 @@ class AuthController {
 
   static async getUserActivity(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
-      const { page = 1, limit = 20, action, startDate, endDate } = req.query;
+      const { userId } = req.user;
+      const {
+        page = 1, limit = 20, action, startDate, endDate,
+      } = req.query;
 
       const where: any = { userId };
 
@@ -685,7 +700,7 @@ class AuthController {
 
   static async deactivateAccount(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user.userId;
+      const { userId } = req.user;
       const { reason, password } = req.body;
 
       if (!password) {
@@ -702,7 +717,6 @@ class AuthController {
         select: { password: true },
       });
 
-      const ValidationHelpers = require('../utils/validation.helpers');
       const isPasswordValid = await ValidationHelpers.comparePassword(password, user.password);
 
       if (!isPasswordValid) {
@@ -714,12 +728,15 @@ class AuthController {
         return;
       }
 
+      const reactivationToken = crypto.randomUUID();
+      const reactivationTokenExpires = new Date(Date.now() + 72 * 60 * 60 * 1000);
+
       await prisma.user.update({
         where: { id: userId },
         data: {
           isActive: false,
-          deactivatedAt: new Date(),
-          deactivationReason: reason || 'User requested deactivation',
+          passwordResetToken: reactivationToken,
+          passwordResetExpires: reactivationTokenExpires,
         },
       });
 
@@ -730,6 +747,9 @@ class AuthController {
       res.status(200).json({
         success: true,
         message: 'Account deactivated successfully',
+        ...(process.env.NODE_ENV === 'development'
+          ? { data: { reactivationToken, reactivationTokenExpires } }
+          : {}),
       });
     } catch (error: any) {
       res.status(400).json({
@@ -797,7 +817,6 @@ class AuthController {
           isActive: true,
           passwordResetToken: null,
           passwordResetExpires: null,
-          reactivatedAt: new Date(),
         },
       });
 

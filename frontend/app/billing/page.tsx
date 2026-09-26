@@ -22,9 +22,9 @@ interface Invoice {
   id: string;
   invoiceNumber: string;
   amount: number;
-  status: 'paid' | 'pending' | 'overdue';
+  status: 'PAID' | 'PENDING' | 'OVERDUE';
   dueDate: string;
-  paidDate?: string;
+  paidAt?: string;
   items: {
     description: string;
     amount: number;
@@ -49,21 +49,22 @@ export default function BillingPage() {
   const loadBillingData = async () => {
     try {
       const response = await apiClient.getInvoices();
-      setInvoices(response.invoices || []);
-      
+      const invoiceList: Invoice[] = response?.data || [];
+      setInvoices(invoiceList);
+
       // Calculate stats
-      const paid = response.invoices?.filter((i: Invoice) => i.status === 'paid')
-        .reduce((sum: number, i: Invoice) => sum + i.amount, 0) || 0;
-      const pending = response.invoices?.filter((i: Invoice) => i.status === 'pending')
-        .reduce((sum: number, i: Invoice) => sum + i.amount, 0) || 0;
-      const overdue = response.invoices?.filter((i: Invoice) => i.status === 'overdue')
-        .reduce((sum: number, i: Invoice) => sum + i.amount, 0) || 0;
-      const currentMonth = response.invoices?.filter((i: Invoice) => {
+      const paid = invoiceList.filter((i: Invoice) => i.status === 'PAID')
+        .reduce((sum: number, i: Invoice) => sum + Number(i.amount), 0);
+      const pending = invoiceList.filter((i: Invoice) => i.status === 'PENDING')
+        .reduce((sum: number, i: Invoice) => sum + Number(i.amount), 0);
+      const overdue = invoiceList.filter((i: Invoice) => i.status === 'OVERDUE')
+        .reduce((sum: number, i: Invoice) => sum + Number(i.amount), 0);
+      const currentMonth = invoiceList.filter((i: Invoice) => {
         const invoiceDate = new Date(i.dueDate);
         const now = new Date();
-        return invoiceDate.getMonth() === now.getMonth() && 
+        return invoiceDate.getMonth() === now.getMonth() &&
                invoiceDate.getFullYear() === now.getFullYear();
-      }).reduce((sum: number, i: Invoice) => sum + i.amount, 0) || 0;
+      }).reduce((sum: number, i: Invoice) => sum + Number(i.amount), 0);
 
       setStats({ totalPaid: paid, totalPending: pending, totalOverdue: overdue, currentMonth });
     } catch (error: any) {
@@ -79,21 +80,21 @@ export default function BillingPage() {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'paid':
+      case 'PAID':
         return (
           <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
             <CheckCircle className="h-3 w-3 mr-1" />
             Paid
           </Badge>
         );
-      case 'pending':
+      case 'PENDING':
         return (
           <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
             <Clock className="h-3 w-3 mr-1" />
             Pending
           </Badge>
         );
-      case 'overdue':
+      case 'OVERDUE':
         return (
           <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
             <AlertCircle className="h-3 w-3 mr-1" />
@@ -209,15 +210,15 @@ export default function BillingPage() {
                       </div>
                       <p className="text-sm text-muted-foreground">
                         Due: {new Date(invoice.dueDate).toLocaleDateString()}
-                        {invoice.paidDate && (
+                        {invoice.paidAt && (
                           <span className="ml-2">
-                            • Paid: {new Date(invoice.paidDate).toLocaleDateString()}
+                            • Paid: {new Date(invoice.paidAt).toLocaleDateString()}
                           </span>
                         )}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-2xl font-bold">${invoice.amount.toFixed(2)}</p>
+                      <p className="text-2xl font-bold">${Number(invoice.amount).toFixed(2)}</p>
                     </div>
                   </div>
                   <div className="flex gap-2 ml-4">

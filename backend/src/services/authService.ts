@@ -44,7 +44,9 @@ type SessionRecord = {
  */
 class AuthService {
   static async register(userData: RegisterInput): Promise<AuthResult> {
-    const { email, password, firstName, lastName, phone } = userData;
+    const {
+      email, password, firstName, lastName, phone,
+    } = userData;
 
     try {
       const existingUser = await prisma.user.findUnique({
@@ -62,10 +64,6 @@ class AuthService {
 
       const hashedPassword = await ValidationHelpers.hashPassword(password, config.security.bcryptRounds);
 
-      const tempUserId = crypto.randomUUID();
-      const emailVerificationToken = JWTUtils.generateEmailVerificationToken(tempUserId, email);
-      const emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
       const user = await prisma.user.create({
         data: {
           email: email.toLowerCase(),
@@ -73,8 +71,6 @@ class AuthService {
           firstName,
           lastName,
           phone: phone || null,
-          emailVerificationToken,
-          emailVerificationExpires,
           isVerified: false,
           isActive: true,
         },
@@ -91,6 +87,17 @@ class AuthService {
         },
       }) as PublicUser;
 
+      const emailVerificationToken = JWTUtils.generateEmailVerificationToken(user.id, user.email);
+      const emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          emailVerificationToken,
+          emailVerificationExpires,
+        },
+      });
+
       const tokenPayload: AuthTokenPayload = {
         userId: user.id,
         email: user.email,
@@ -98,6 +105,8 @@ class AuthService {
       };
 
       const tokens = JWTUtils.generateTokenPair(tokenPayload) as AuthTokens;
+
+      await this.createSession(user.id, tokens.accessToken, {});
 
       await this.logAuditEvent(user.id, 'USER_REGISTERED', 'user', user.id, {
         email: user.email,
@@ -290,7 +299,9 @@ class AuthService {
     try {
       const user = await prisma.user.findUnique({
         where: { email: email.toLowerCase() },
-        select: { id: true, email: true, firstName: true, isActive: true },
+        select: {
+          id: true, email: true, firstName: true, isActive: true,
+        },
       }) as { id: string; email: string; firstName: string; isActive: boolean } | null;
 
       if (!user || !user.isActive) {
@@ -364,7 +375,7 @@ class AuthService {
 
   static async verifyEmail(verificationToken: string): Promise<VerificationResult> {
     try {
-      const decoded = await JWTUtils.verifyEmailVerificationToken(verificationToken) as AuthTokenPayload;
+      await JWTUtils.verifyEmailVerificationToken(verificationToken);
 
       const user = await prisma.user.findFirst({
         where: {
@@ -411,11 +422,15 @@ class AuthService {
     try {
       const user = await prisma.user.findUnique({
         where: { email: email.toLowerCase() },
-        select: { id: true, email: true, isVerified: true, isActive: true },
+        select: {
+          id: true, email: true, isVerified: true, isActive: true,
+        },
       }) as { id: string; email: string; isVerified: boolean; isActive: boolean } | null;
 
       if (!user || !user.isActive) {
-        throw new Error('User not found or inactive');
+        return {
+          message: 'If the email exists and is unverified, a verification link has been sent',
+        } as PasswordResetResult;
       }
 
       if (user.isVerified) {
@@ -437,9 +452,9 @@ class AuthService {
 
       return {
         message: 'Verification email has been resent',
-        resetToken: verificationToken,
+        verificationToken,
         expiresAt: verificationExpires,
-      };
+      } as PasswordResetResult;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Resend verification failed: ${message}`);
@@ -548,7 +563,9 @@ class AuthService {
 
   static async updateProfile(userId: string, updateData: ProfileUpdateInput): Promise<PublicUser> {
     try {
-      const { firstName, lastName, phone, avatar } = updateData;
+      const {
+        firstName, lastName, phone, avatar,
+      } = updateData;
 
       const updatedUser = await prisma.user.update({
         where: { id: userId },

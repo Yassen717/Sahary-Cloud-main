@@ -81,7 +81,9 @@ const getPaginatedResults = async <T = Record<string, unknown>>(
     hasPrevPage: boolean;
   };
 }> => {
-  const { page = 1, limit = 10, where = {}, orderBy = {}, include = {} } = options;
+  const {
+    page = 1, limit = 10, where = {}, orderBy = {}, include = {},
+  } = options;
 
   const pagination = getPagination({ page, limit });
 
@@ -112,22 +114,18 @@ const getPaginatedResults = async <T = Record<string, unknown>>(
   };
 };
 
-const softDelete = async <T = Record<string, unknown>>(model: UpdateModel<T>, id: string): Promise<T> => {
-  return model.update({
-    where: { id },
-    data: {
-      deletedAt: new Date(),
-      isActive: false,
-    },
-  });
-};
+const softDelete = async <T = Record<string, unknown>>(model: UpdateModel<T>, id: string): Promise<T> => model.update({
+  where: { id },
+  data: {
+    deletedAt: new Date(),
+    isActive: false,
+  },
+});
 
-const bulkCreate = async (model: CreateManyModel, data: Array<Record<string, unknown>>): Promise<Record<string, unknown>> => {
-  return model.createMany({
-    data,
-    skipDuplicates: true,
-  });
-};
+const bulkCreate = async (model: CreateManyModel, data: Array<Record<string, unknown>>): Promise<Record<string, unknown>> => model.createMany({
+  data,
+  skipDuplicates: true,
+});
 
 const searchRecords = async <T = Record<string, unknown>>(
   model: QueryModel,
@@ -150,7 +148,9 @@ const searchRecords = async <T = Record<string, unknown>>(
     hasPrevPage: boolean;
   };
 }> => {
-  const { page = 1, limit = 10, where = {}, orderBy = {} } = options;
+  const {
+    page = 1, limit = 10, where = {}, orderBy = {},
+  } = options;
 
   const searchConditions = searchFields.map((field) => ({
     [field]: {
@@ -172,9 +172,7 @@ const searchRecords = async <T = Record<string, unknown>>(
   });
 };
 
-const executeTransaction = async <T>(callback: TransactionCallback<T>): Promise<T> => {
-  return prisma.$transaction(callback);
-};
+const executeTransaction = async <T>(callback: TransactionCallback<T>): Promise<T> => prisma.$transaction(callback);
 
 const checkHealth = async (): Promise<DatabaseHealth> => {
   try {

@@ -165,9 +165,7 @@ const validationConfig = {
   },
 } as const;
 
-const getValidationConfig = (section: string): Record<string, unknown> => {
-  return (validationConfig as unknown as ValidationConfigMap)[section] || {};
-};
+const getValidationConfig = (section: string): Record<string, unknown> => (validationConfig as unknown as ValidationConfigMap)[section] || {};
 
 const isFeatureEnabled = (feature: string): boolean => {
   const featureFlags: Record<string, boolean> = {

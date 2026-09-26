@@ -8,7 +8,10 @@ export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
   tokenType: 'Bearer';
+  /** Seconds until the access token expires */
   expiresIn: number | null;
+  /** ISO 8601 timestamp of when the access token expires */
+  expiresAt?: string | null;
 }
 
 export interface RegisterInput {

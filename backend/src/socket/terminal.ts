@@ -55,7 +55,7 @@ const handleTerminalSocket = async (socket: Socket): Promise<void> => {
   } catch (error) {
     const message = getErrorMessage(error);
     logger.warn(`Terminal socket auth failed: ${message}`);
-    socket.emit('terminal:error', 'Authentication failed: ' + message);
+    socket.emit('terminal:error', `Authentication failed: ${message}`);
     socket.disconnect(true);
     return;
   }
@@ -66,7 +66,9 @@ const handleTerminalSocket = async (socket: Socket): Promise<void> => {
   let execInstance: ExecInstance | null = null;
 
   socket.on('terminal:start', async (payload: TerminalStartPayload) => {
-    const { vmId, containerId, cols = 80, rows = 24 } = payload;
+    const {
+      vmId, containerId, cols = 80, rows = 24,
+    } = payload;
 
     try {
       if (!dockerService.isReady()) {
