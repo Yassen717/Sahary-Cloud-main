@@ -383,10 +383,9 @@ describe('VM API Integration Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.data.vm.status).toBe('STARTING');
-
-      // Wait for VM to start
-      await new Promise((resolve) => setTimeout(resolve, 2500));
+      // The start endpoint returns the VM after the awaited Docker start —
+      // status is already RUNNING, never the transitional STARTING.
+      expect(response.body.data.vm.status).toBe('RUNNING');
     });
 
     it('should reject starting an already running VM', async () => {
@@ -450,10 +449,9 @@ describe('VM API Integration Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.data.vm.status).toBe('STOPPING');
-
-      // Wait for VM to stop
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // The stop endpoint returns the VM after the awaited Docker stop —
+      // status is already STOPPED, never the transitional STOPPING.
+      expect(response.body.data.vm.status).toBe('STOPPED');
     });
 
     it('should reject stopping an already stopped VM', async () => {
@@ -639,9 +637,10 @@ describe('VM API Integration Tests', () => {
           storage: 20,
         });
 
-      if (response.status === 201) {
-        expect(response.body.data.vm.description).not.toContain('<script>');
-      }
+      // Assert the precondition instead of silently skipping: VM creation
+      // is a DB-only operation and should succeed without Docker.
+      expect(response.status).toBe(201);
+      expect(response.body.data.vm.description).not.toContain('<script>');
     });
 
     it('should enforce rate limiting', async () => {

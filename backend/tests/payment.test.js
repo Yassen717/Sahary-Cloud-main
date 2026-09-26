@@ -124,7 +124,7 @@ describe('Payment Service', () => {
             expect(paymentIntent).toBeDefined();
             expect(paymentIntent.paymentId).toBeDefined();
             expect(paymentIntent.clientSecret).toBeDefined();
-            expect(paymentIntent.amount).toBe(testInvoice.total);
+            expect(Number(paymentIntent.amount)).toBe(Number(testInvoice.amount));
             expect(paymentIntent.currency).toBe(testInvoice.currency);
             expect(paymentIntent.invoice).toBeDefined();
             expect(paymentIntent.invoice.id).toBe(testInvoice.id);
@@ -176,16 +176,17 @@ describe('Payment Service', () => {
 
         beforeAll(async () => {
             // Create a payment record for testing
+            // (Payment model fields: method, gatewayId, processedAt — the row
+            // is linked to the user through its invoice relation)
             testPayment = await prisma.payment.create({
                 data: {
                     invoiceId: testInvoice.id,
-                    userId: testUser.id,
-                    amount: testInvoice.total,
+                    amount: testInvoice.amount,
                     currency: testInvoice.currency,
-                    paymentMethod: 'STRIPE',
+                    method: 'STRIPE',
                     status: 'COMPLETED',
-                    stripePaymentIntentId: 'pi_test_completed',
-                    completedAt: new Date(),
+                    gatewayId: 'pi_test_completed',
+                    processedAt: new Date(),
                 },
             });
         });
@@ -196,7 +197,7 @@ describe('Payment Service', () => {
             expect(payment).toBeDefined();
             expect(payment.id).toBe(testPayment.id);
             expect(payment.invoice).toBeDefined();
-            expect(payment.user).toBeDefined();
+            expect(payment.invoice.user).toBeDefined();
         });
 
         it('should return null for non-existent payment', async () => {
@@ -290,12 +291,11 @@ describe('Payment Service', () => {
             const pendingPayment = await prisma.payment.create({
                 data: {
                     invoiceId: testInvoice.id,
-                    userId: testUser.id,
-                    amount: testInvoice.total,
+                    amount: testInvoice.amount,
                     currency: testInvoice.currency,
-                    paymentMethod: 'STRIPE',
+                    method: 'STRIPE',
                     status: 'PENDING',
-                    stripePaymentIntentId: 'pi_test_webhook_success',
+                    gatewayId: 'pi_test_webhook_success',
                 },
             });
 
@@ -305,7 +305,7 @@ describe('Payment Service', () => {
                     object: {
                         id: 'pi_test_webhook_success',
                         status: 'succeeded',
-                        amount: Math.round(testInvoice.total * 100),
+                        amount: Math.round(Number(testInvoice.amount) * 100),
                         metadata: {
                             invoiceId: testInvoice.id,
                         },
@@ -331,12 +331,11 @@ describe('Payment Service', () => {
             const pendingPayment = await prisma.payment.create({
                 data: {
                     invoiceId: testInvoice.id,
-                    userId: testUser.id,
-                    amount: testInvoice.total,
+                    amount: testInvoice.amount,
                     currency: testInvoice.currency,
-                    paymentMethod: 'STRIPE',
+                    method: 'STRIPE',
                     status: 'PENDING',
-                    stripePaymentIntentId: 'pi_test_webhook_failed',
+                    gatewayId: 'pi_test_webhook_failed',
                 },
             });
 
@@ -390,13 +389,12 @@ describe('Payment Service', () => {
             completedPayment = await prisma.payment.create({
                 data: {
                     invoiceId: testInvoice.id,
-                    userId: testUser.id,
-                    amount: testInvoice.total,
+                    amount: testInvoice.amount,
                     currency: testInvoice.currency,
-                    paymentMethod: 'STRIPE',
+                    method: 'STRIPE',
                     status: 'COMPLETED',
-                    stripePaymentIntentId: 'pi_test_refund',
-                    completedAt: new Date(),
+                    gatewayId: 'pi_test_refund',
+                    processedAt: new Date(),
                 },
             });
         });
@@ -415,20 +413,20 @@ describe('Payment Service', () => {
                 where: { id: completedPayment.id },
             });
 
+            // Refund metadata is stored inside gatewayResponse; the payment
+            // row itself only flips status to REFUNDED.
             expect(updatedPayment.status).toBe('REFUNDED');
-            expect(updatedPayment.refundedAt).toBeDefined();
         });
 
         it('should reject refund for non-completed payment', async () => {
             const pendingPayment = await prisma.payment.create({
                 data: {
                     invoiceId: testInvoice.id,
-                    userId: testUser.id,
-                    amount: testInvoice.total,
+                    amount: testInvoice.amount,
                     currency: testInvoice.currency,
-                    paymentMethod: 'STRIPE',
+                    method: 'STRIPE',
                     status: 'PENDING',
-                    stripePaymentIntentId: 'pi_test_pending',
+                    gatewayId: 'pi_test_pending',
                 },
             });
 

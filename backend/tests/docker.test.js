@@ -1,22 +1,65 @@
 const request = require('supertest');
 const app = require('../src/index');
 const dockerService = require('../src/services/dockerService').default;
+const JWTUtils = require('../src/utils/jwt').default;
+const { prisma } = require('../src/config/database');
 
 // Mock Docker service
 jest.mock('../src/services/dockerService');
+
+// Fixture users returned by the prisma.user.findUnique spy below so that
+// real JWTs pass `authenticate` without a live database.
+const TEST_USER = {
+  id: 'docker-test-user-id',
+  email: 'docker-user@test.com',
+  firstName: 'Docker',
+  lastName: 'User',
+  role: 'USER',
+  isActive: true,
+  isVerified: true,
+};
+const TEST_ADMIN = {
+  id: 'docker-test-admin-id',
+  email: 'docker-admin@test.com',
+  firstName: 'Docker',
+  lastName: 'Admin',
+  role: 'ADMIN',
+  isActive: true,
+  isVerified: true,
+};
 
 describe('Docker API Tests', () => {
   let authToken;
   let adminToken;
 
   beforeAll(async () => {
-    // Mock authentication tokens
-    authToken = 'mock-user-token';
-    adminToken = 'mock-admin-token';
+    // Mint real access tokens — 'mock-*-token' strings always failed
+    // authenticate with 401.
+    authToken = JWTUtils.generateAccessToken({
+      userId: TEST_USER.id,
+      email: TEST_USER.email,
+      role: TEST_USER.role,
+    });
+    adminToken = JWTUtils.generateAccessToken({
+      userId: TEST_ADMIN.id,
+      email: TEST_ADMIN.email,
+      role: TEST_ADMIN.role,
+    });
   });
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // The auto-mocked service reports !isReady() -> controller short-circuits
+    // every request with 503. Mark it ready so requests reach the handlers.
+    dockerService.isReady.mockReturnValue(true);
+    // restoreMocks config resets spies before each test, so (re)install the
+    // findUnique spy here: authenticate resolves the token userId via
+    // AuthService.getUserById -> prisma.user.findUnique.
+    jest.spyOn(prisma.user, 'findUnique').mockImplementation(async ({ where }) => {
+      if (where.id === TEST_USER.id) return TEST_USER;
+      if (where.id === TEST_ADMIN.id) return TEST_ADMIN;
+      return null;
+    });
   });
 
   describe('POST /api/v1/docker/containers', () => {
@@ -103,7 +146,7 @@ describe('Docker API Tests', () => {
       expect(response.status).toBe(500);
       expect(response.body.success).toBe(false);
       expect(response.body.message).toBe('Failed to create container');
-      expect(response.body.error).toBe('Docker daemon not available');
+      // The controller does not echo the underlying error message back.
     });
   });
 
@@ -125,7 +168,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .post(`/api/v1/docker/containers/${containerId}/start`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -137,7 +180,7 @@ describe('Docker API Tests', () => {
     it('should return 400 for invalid container ID', async () => {
       const response = await request(app)
         .post('/api/v1/docker/containers/invalid-id/start')
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(400);
       expect(response.body.success).toBe(false);
@@ -148,7 +191,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .post(`/api/v1/docker/containers/${containerId}/start`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(500);
       expect(response.body.success).toBe(false);
@@ -170,7 +213,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .post(`/api/v1/docker/containers/${containerId}/stop`)
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({ timeout: 30 });
 
       expect(response.status).toBe(200);
@@ -191,7 +234,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .post(`/api/v1/docker/containers/${containerId}/stop`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(200);
       expect(dockerService.stopContainer).toHaveBeenCalledWith(containerId, 10);
@@ -229,7 +272,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .get(`/api/v1/docker/containers/${containerId}/status`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -242,7 +285,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .get(`/api/v1/docker/containers/${containerId}/status`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(404);
       expect(response.body.success).toBe(false);
@@ -291,7 +334,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .get('/api/v1/docker/containers')
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -301,7 +344,8 @@ describe('Docker API Tests', () => {
     });
 
     it('should filter containers by VM ID', async () => {
-      const vmId = 'vm-1';
+      // Route validation requires vmId to be a valid UUID
+      const vmId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
       const mockContainers = [
         {
           containerId: 'container-1',
@@ -315,7 +359,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .get(`/api/v1/docker/containers?vmId=${vmId}`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(200);
       expect(response.body.data).toEqual(mockContainers);
@@ -338,7 +382,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .get(`/api/v1/docker/containers?status=${status}`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(200);
       expect(dockerService.listContainers).toHaveBeenCalledWith({
@@ -357,7 +401,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .get(`/api/v1/docker/containers/${containerId}/logs?tail=100&timestamps=true`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -378,7 +422,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .get(`/api/v1/docker/containers/${containerId}/logs`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(200);
       expect(dockerService.getContainerLogs).toHaveBeenCalledWith(containerId, {
@@ -405,7 +449,7 @@ describe('Docker API Tests', () => {
 
       const response = await request(app)
         .post(`/api/v1/docker/containers/${containerId}/exec`)
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({ command });
 
       expect(response.status).toBe(200);
@@ -417,7 +461,7 @@ describe('Docker API Tests', () => {
     it('should return 400 for invalid command format', async () => {
       const response = await request(app)
         .post(`/api/v1/docker/containers/${containerId}/exec`)
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({ command: 'invalid-command-string' });
 
       expect(response.status).toBe(400);
@@ -562,6 +606,10 @@ describe('Docker API Tests', () => {
 });
 
 describe('Docker Service Unit Tests', () => {
+  // These tests exercise the real helper methods — the module is auto-mocked
+  // above for the API tests, so pull the actual implementation here.
+  const realDockerService = jest.requireActual('../src/services/dockerService').default;
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -573,7 +621,7 @@ describe('Docker Service Unit Tests', () => {
         { containerPort: 443, hostPort: 8443 }
       ];
 
-      const result = dockerService.formatPortBindings(ports);
+      const result = realDockerService.formatPortBindings(ports);
 
       expect(result).toEqual({
         '80/tcp': [{ HostPort: '8080' }],
@@ -587,7 +635,7 @@ describe('Docker Service Unit Tests', () => {
         { containerPort: 443, hostPort: 8443 }
       ];
 
-      const result = dockerService.formatExposedPorts(ports);
+      const result = realDockerService.formatExposedPorts(ports);
 
       expect(result).toEqual({
         '80/tcp': {},
@@ -604,7 +652,7 @@ describe('Docker Service Unit Tests', () => {
         }
       };
 
-      const result = dockerService.extractIPAddress(networkSettings);
+      const result = realDockerService.extractIPAddress(networkSettings);
 
       expect(result).toBe('172.20.0.2');
     });
@@ -615,7 +663,7 @@ describe('Docker Service Unit Tests', () => {
         '443/tcp': [{ HostPort: '8443' }]
       };
 
-      const result = dockerService.extractPortMappings(ports);
+      const result = realDockerService.extractPortMappings(ports);
 
       expect(result).toEqual([
         { containerPort: 80, hostPort: 8080, protocol: 'tcp' },
@@ -636,7 +684,7 @@ describe('Docker Service Unit Tests', () => {
         }
       };
 
-      const result = dockerService.calculateCPUUsage(stats);
+      const result = realDockerService.calculateCPUUsage(stats);
 
       expect(result).toBe(200); // (1000000000 / 1000000000) * 2 * 100 = 200%
     });
@@ -649,7 +697,7 @@ describe('Docker Service Unit Tests', () => {
         }
       };
 
-      const result = dockerService.calculateNetworkIO(networks);
+      const result = realDockerService.calculateNetworkIO(networks);
 
       expect(result).toEqual({
         rxBytes: 1024,
@@ -666,7 +714,7 @@ describe('Docker Service Unit Tests', () => {
         ]
       };
 
-      const result = dockerService.calculateBlockIO(blkioStats);
+      const result = realDockerService.calculateBlockIO(blkioStats);
 
       expect(result).toEqual({
         readBytes: 4096,

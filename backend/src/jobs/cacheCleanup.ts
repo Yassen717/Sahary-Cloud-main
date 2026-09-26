@@ -26,15 +26,15 @@ class CacheCleanupJob {
     this.task = cron.schedule(this.schedule, async () => {
       try {
         console.log('🧹 Starting cache cleanup...');
-        
+
         const result = await cacheMonitorService.optimizeCache();
-        
+
         console.log(`✅ Cache cleanup completed: removed ${result.keysRemoved} expired keys`);
-        
+
         // Log cache health
         const health = await cacheMonitorService.getHealthStatus();
         console.log(`📊 Cache health: ${health.status}`);
-        
+
         if (health.issues.length > 0) {
           console.warn('⚠️  Cache issues detected:', health.issues);
         }
@@ -80,7 +80,7 @@ class CacheCleanupJob {
     return {
       isRunning: this.isRunning,
       schedule: this.schedule,
-      nextRun: this.task ? this.task.nextDate() : null
+      nextRun: this.task ? this.task.nextDate() : null,
     };
   }
 }

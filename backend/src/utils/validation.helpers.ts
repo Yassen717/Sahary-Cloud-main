@@ -223,7 +223,9 @@ class ValidationHelpers {
   }
 
   static validateVMResources(resources: VMResourcesInput): VMResourcesValidationResult {
-    const { cpu, ram, storage, bandwidth } = resources;
+    const {
+      cpu, ram, storage, bandwidth,
+    } = resources;
     const errors: string[] = [];
     const warnings: string[] = [];
 
@@ -272,7 +274,9 @@ class ValidationHelpers {
   }
 
   static calculateVMCost(resources: VMResourcesInput): number {
-    const { cpu, ram, storage, bandwidth = 1000 } = resources;
+    const {
+      cpu, ram, storage, bandwidth = 1000,
+    } = resources;
 
     const cpuCost = cpu * 0.01;
     const ramCost = (ram / 1024) * 0.005;

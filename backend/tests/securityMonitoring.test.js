@@ -9,14 +9,16 @@ describe('Security Monitoring Service', () => {
 
   describe('Log Security Events', () => {
     it('should log security event', async () => {
+      // Event types are whitelisted (VALID_EVENT_TYPES) — arbitrary types
+      // are normalized to 'CUSTOM', so use a valid type here.
       const event = await securityMonitorService.logSecurityEvent({
-        type: 'TEST_EVENT',
+        type: 'TOKEN_MISUSE',
         severity: 'INFO',
         description: 'Test event',
         ip: '127.0.0.1',
       });
 
-      expect(event).toHaveProperty('type', 'TEST_EVENT');
+      expect(event).toHaveProperty('type', 'TOKEN_MISUSE');
       expect(event).toHaveProperty('severity', 'INFO');
       expect(event).toHaveProperty('timestamp');
     });
@@ -71,18 +73,19 @@ describe('Security Monitoring Service', () => {
 
   describe('Get Security Events', () => {
     beforeEach(async () => {
+      // Valid whitelisted types — arbitrary strings normalize to 'CUSTOM'
       await securityMonitorService.logSecurityEvent({
-        type: 'TEST_EVENT_1',
+        type: 'IP_BLOCKED',
         severity: 'INFO',
         description: 'Test 1',
       });
       await securityMonitorService.logSecurityEvent({
-        type: 'TEST_EVENT_2',
+        type: 'TOKEN_MISUSE',
         severity: 'HIGH',
         description: 'Test 2',
       });
       await securityMonitorService.logSecurityEvent({
-        type: 'TEST_EVENT_1',
+        type: 'IP_BLOCKED',
         severity: 'CRITICAL',
         description: 'Test 3',
       });
@@ -94,7 +97,7 @@ describe('Security Monitoring Service', () => {
     });
 
     it('should filter by type', () => {
-      const events = securityMonitorService.getSecurityEvents({ type: 'TEST_EVENT_1' });
+      const events = securityMonitorService.getSecurityEvents({ type: 'IP_BLOCKED' });
       expect(events.length).toBe(2);
     });
 
@@ -111,18 +114,19 @@ describe('Security Monitoring Service', () => {
 
   describe('Security Statistics', () => {
     beforeEach(async () => {
+      // Valid whitelisted types — arbitrary strings normalize to 'CUSTOM'
       await securityMonitorService.logSecurityEvent({
-        type: 'TYPE_A',
+        type: 'FAILED_LOGIN',
         severity: 'INFO',
         description: 'Test',
       });
       await securityMonitorService.logSecurityEvent({
-        type: 'TYPE_A',
+        type: 'FAILED_LOGIN',
         severity: 'HIGH',
         description: 'Test',
       });
       await securityMonitorService.logSecurityEvent({
-        type: 'TYPE_B',
+        type: 'IP_BLOCKED',
         severity: 'CRITICAL',
         description: 'Test',
       });
@@ -135,8 +139,8 @@ describe('Security Monitoring Service', () => {
       expect(stats.bySeverity.INFO).toBe(1);
       expect(stats.bySeverity.HIGH).toBe(1);
       expect(stats.bySeverity.CRITICAL).toBe(1);
-      expect(stats.byType.TYPE_A).toBe(2);
-      expect(stats.byType.TYPE_B).toBe(1);
+      expect(stats.byType.FAILED_LOGIN).toBe(2);
+      expect(stats.byType.IP_BLOCKED).toBe(1);
     });
   });
 

@@ -1,5 +1,6 @@
 // @ts-nocheck
 const express = require('express');
+
 const router = express.Router();
 const monitoringController = require('../controllers/monitoringController');
 const { authenticate, requireRole } = require('../middlewares/auth');

@@ -200,11 +200,10 @@ describe('VM Service', () => {
     test('should start VM successfully', async () => {
       const vm = await VMService.startVM(vmId, userId);
 
-      expect(vm.status).toBe('STARTING');
-      
-      // Wait for async status update
-      await new Promise(resolve => setTimeout(resolve, 2500));
-      
+      // startVM awaits the Docker start and re-fetches the VM, so the
+      // returned record is already RUNNING (STARTING is never returned).
+      expect(vm.status).toBe('RUNNING');
+
       const updatedVM = await VMService.getVMById(vmId, userId);
       expect(updatedVM.status).toBe('RUNNING');
       expect(updatedVM.ipAddress).toBeDefined();
@@ -229,11 +228,10 @@ describe('VM Service', () => {
     test('should stop running VM', async () => {
       const vm = await VMService.stopVM(vmId, userId);
 
-      expect(vm.status).toBe('STOPPING');
-      
-      // Wait for async status update
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
+      // stopVM awaits the Docker stop and re-fetches the VM, so the
+      // returned record is already STOPPED (STOPPING is never returned).
+      expect(vm.status).toBe('STOPPED');
+
       const updatedVM = await VMService.getVMById(vmId, userId);
       expect(updatedVM.status).toBe('STOPPED');
     });
@@ -468,7 +466,9 @@ describe('VM API Integration Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.data.vm.status).toBe('STARTING');
+      // The start endpoint returns the VM after the awaited Docker start —
+      // status is already RUNNING, never the transitional STARTING.
+      expect(response.body.data.vm.status).toBe('RUNNING');
     });
 
     test('should stop VM via API', async () => {
@@ -481,7 +481,9 @@ describe('VM API Integration Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.data.vm.status).toBe('STOPPING');
+      // The stop endpoint returns the VM after the awaited Docker stop —
+      // status is already STOPPED, never the transitional STOPPING.
+      expect(response.body.data.vm.status).toBe('STOPPED');
     });
 
     test('should delete VM via API', async () => {
@@ -533,9 +535,10 @@ describe('VM API Integration Tests', () => {
           storage: 20,
         });
 
-      if (response.status === 201) {
-        expect(response.body.data.vm.description).not.toContain('<script>');
-      }
+      // Assert the precondition instead of silently skipping: VM creation
+      // is a DB-only operation and should succeed without Docker.
+      expect(response.status).toBe(201);
+      expect(response.body.data.vm.description).not.toContain('<script>');
     });
   });
 });

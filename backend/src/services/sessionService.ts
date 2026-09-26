@@ -1,6 +1,6 @@
 // @ts-nocheck
-const redisService = require('./redisService');
 const { v4: uuidv4 } = require('uuid');
+const redisService = require('./redisService');
 
 /**
  * Session Management Service
@@ -30,8 +30,8 @@ class SessionService {
         metadata: {
           ...metadata,
           createdAt: new Date().toISOString(),
-          lastAccessedAt: new Date().toISOString()
-        }
+          lastAccessedAt: new Date().toISOString(),
+        },
       };
 
       // Store session
@@ -91,7 +91,7 @@ class SessionService {
 
       session.data = {
         ...session.data,
-        ...data
+        ...data,
       };
       session.metadata.lastAccessedAt = new Date().toISOString();
 
@@ -257,13 +257,13 @@ class SessionService {
 
       return {
         totalSessions: sessionKeys.length,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
       console.error('Error getting session stats:', error);
       return {
         totalSessions: 0,
-        error: error.message
+        error: error.message,
       };
     }
   }

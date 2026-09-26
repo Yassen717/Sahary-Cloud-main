@@ -19,9 +19,19 @@ const testAdmin = {
   lastName: 'User',
 };
 
+// Second user that is never deactivated — 'Account Management' deactivates
+// testUser, so userToken is dead (401) for every test after that point.
+const freshUser = {
+  email: 'fresh@example.com',
+  password: 'FreshPassword123!',
+  firstName: 'Fresh',
+  lastName: 'User',
+};
+
 describe('Authentication API Integration Tests', () => {
   let userToken;
   let adminToken;
+  let freshUserToken;
   let userId;
   let adminId;
 
@@ -32,9 +42,17 @@ describe('Authentication API Integration Tests', () => {
     await prisma.user.deleteMany({
       where: {
         email: {
-          in: [testUser.email, testAdmin.email]
+          in: [testUser.email, testAdmin.email, freshUser.email]
         }
       }
+    });
+
+    // Register the never-deactivated user and mint its token up front
+    const freshResult = await AuthService.register(freshUser);
+    freshUserToken = JWTUtils.generateAccessToken({
+      userId: freshResult.user.id,
+      email: freshUser.email,
+      role: freshResult.user.role || 'USER',
     });
   });
 
@@ -45,7 +63,7 @@ describe('Authentication API Integration Tests', () => {
     await prisma.user.deleteMany({
       where: {
         email: {
-          in: [testUser.email, testAdmin.email]
+          in: [testUser.email, testAdmin.email, freshUser.email]
         }
       }
     });
@@ -397,9 +415,11 @@ describe('Authentication API Integration Tests', () => {
     });
 
     test('should not impersonate as regular user', async () => {
+      // userToken is dead here (testUser was deactivated above) — a live
+      // regular-user token is required to reach the permission check (403).
       const response = await request(app)
         .post('/api/v1/auth/impersonate')
-        .set('Authorization', `Bearer ${userToken}`)
+        .set('Authorization', `Bearer ${freshUserToken}`)
         .send({ targetUserId: adminId });
 
       expect(response.status).toBe(403);
@@ -411,7 +431,7 @@ describe('Authentication API Integration Tests', () => {
     test('should check authentication status', async () => {
       const response = await request(app)
         .get('/api/v1/auth/check')
-        .set('Authorization', `Bearer ${userToken}`);
+        .set('Authorization', `Bearer ${freshUserToken}`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -430,7 +450,7 @@ describe('Authentication API Integration Tests', () => {
     test('should logout successfully', async () => {
       const response = await request(app)
         .post('/api/v1/auth/logout')
-        .set('Authorization', `Bearer ${userToken}`);
+        .set('Authorization', `Bearer ${freshUserToken}`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);

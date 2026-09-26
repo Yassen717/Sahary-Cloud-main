@@ -1,5 +1,6 @@
 const request = require('supertest');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const app = require('../src/index');
 const { prisma } = require('../src/config/database');
 const AuthService = require('../src/services/authService').default;
@@ -365,7 +366,23 @@ describe('JWT Utils', () => {
     });
 
     test('should not verify wrong token type', async () => {
-      await expect(JWTUtils.verifyAccessToken(refreshToken))
+      // A refresh token is signed with the REFRESH secret, so it fails
+      // signature verification before the type check. To exercise the type
+      // check, sign a 'refresh'-type payload with the ACCESS secret.
+      const wrongTypeToken = jwt.sign(
+        {
+          userId: testPayload.userId,
+          email: testPayload.email,
+          type: 'refresh',
+        },
+        process.env.JWT_SECRET,
+        {
+          issuer: 'sahary-cloud',
+          audience: 'sahary-cloud-users',
+        }
+      );
+
+      await expect(JWTUtils.verifyAccessToken(wrongTypeToken))
         .rejects.toThrow('Invalid token type');
     });
   });

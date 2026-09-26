@@ -139,11 +139,13 @@ describe('Cache Monitor Service', () => {
     });
 
     it('should return warning status with low hit rate', async () => {
-      // Simulate poor cache performance
+      // Simulate poor cache performance. The service warns when
+      // hitRate < 50 AND total > 100, so exceed 100 records here
+      // (40/101 ≈ 39.6% hit rate).
       for (let i = 0; i < 40; i++) {
         cacheMonitorService.recordHit(`key${i}`);
       }
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < 61; i++) {
         cacheMonitorService.recordMiss(`key${i}`);
       }
 

@@ -33,8 +33,8 @@ class RedisService {
               return false; // Stop reconnecting
             }
             return Math.min(retries * 100, 1000);
-          }
-        }
+          },
+        },
       });
 
       this.client.on('error', (err) => {
@@ -356,7 +356,7 @@ class RedisService {
   async lRange(key, start, stop) {
     try {
       const values = await this.client.lRange(key, start, stop);
-      return values.map(v => {
+      return values.map((v) => {
         try {
           return JSON.parse(v);
         } catch {
@@ -411,7 +411,7 @@ class RedisService {
   async sMembers(key) {
     try {
       const members = await this.client.sMembers(key);
-      return members.map(m => {
+      return members.map((m) => {
         try {
           return JSON.parse(m);
         } catch {
@@ -547,13 +547,13 @@ class RedisService {
       return {
         connected: this.isConnected,
         dbSize,
-        info: this.parseInfo(info)
+        info: this.parseInfo(info),
       };
     } catch (error) {
       console.error('Error getting Redis stats:', error);
       return {
         connected: this.isConnected,
-        error: error.message
+        error: error.message,
       };
     }
   }

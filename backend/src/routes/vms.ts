@@ -58,13 +58,14 @@ router.use(xssProtection());
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
  */
-router.post('/',
+router.post(
+  '/',
   apiRateLimit(),
   validate(createVMSchema),
   authenticate,
   requireEmailVerification,
   requirePermission('vm:create'),
-  VMController.createVM
+  VMController.createVM,
 );
 
 /**
@@ -103,12 +104,13 @@ router.post('/',
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
  */
-router.get('/',
+router.get(
+  '/',
   apiRateLimit(),
   validate(vmQuerySchema),
   authenticate,
   requirePermission('vm:read:own'),
-  VMController.getUserVMs
+  VMController.getUserVMs,
 );
 
 /**
@@ -116,12 +118,13 @@ router.get('/',
  * @desc    Get all VMs (Admin only)
  * @access  Private (Admin+)
  */
-router.get('/all',
+router.get(
+  '/all',
   apiRateLimit(),
   validate(adminVMQuerySchema),
   authenticate,
   requirePermission('vm:read:all'),
-  VMController.getAllVMs
+  VMController.getAllVMs,
 );
 
 /**
@@ -129,11 +132,12 @@ router.get('/all',
  * @desc    Get system resource statistics (Admin only)
  * @access  Private (Admin+)
  */
-router.get('/stats',
+router.get(
+  '/stats',
   apiRateLimit(),
   authenticate,
   requirePermission('vm:read:all'),
-  VMController.getSystemStats
+  VMController.getSystemStats,
 );
 
 /**
@@ -141,11 +145,12 @@ router.get('/stats',
  * @desc    Get user resource usage
  * @access  Private (User+)
  */
-router.get('/resources',
+router.get(
+  '/resources',
   apiRateLimit(),
   authenticate,
   requirePermission('vm:read:own'),
-  VMController.getUserResourceUsage
+  VMController.getUserResourceUsage,
 );
 
 /**
@@ -153,11 +158,12 @@ router.get('/resources',
  * @desc    Get VM pricing estimate
  * @access  Private (User+)
  */
-router.post('/pricing',
+router.post(
+  '/pricing',
   apiRateLimit(),
   validate(calculatePricingSchema),
   authenticate,
-  VMController.getVMPricingEstimate
+  VMController.getVMPricingEstimate,
 );
 
 // Health check for VM routes
@@ -174,12 +180,13 @@ router.get('/health', (req, res) => {
  * @desc    Get VM by ID
  * @access  Private (Owner or Admin)
  */
-router.get('/:id',
+router.get(
+  '/:id',
   apiRateLimit(),
   validate(vmActionSchema),
   authenticate,
   requireAnyPermission('vm:read:own', 'vm:read:all'),
-  VMController.getVMById
+  VMController.getVMById,
 );
 
 /**
@@ -187,13 +194,14 @@ router.get('/:id',
  * @desc    Update VM
  * @access  Private (Owner or Admin)
  */
-router.put('/:id',
+router.put(
+  '/:id',
   apiRateLimit(),
   validate(updateVMSchema),
   authenticate,
   requireEmailVerification,
   requireAnyPermission('vm:update:own', 'vm:update:all'),
-  VMController.updateVM
+  VMController.updateVM,
 );
 
 /**
@@ -201,13 +209,14 @@ router.put('/:id',
  * @desc    Delete VM
  * @access  Private (Owner or Admin)
  */
-router.delete('/:id',
+router.delete(
+  '/:id',
   apiRateLimit(),
   validate(vmActionSchema),
   authenticate,
   requireEmailVerification,
   requireAnyPermission('vm:delete:own', 'vm:delete:all'),
-  VMController.deleteVM
+  VMController.deleteVM,
 );
 
 /**
@@ -229,12 +238,13 @@ router.delete('/:id',
  *       503:
  *         $ref: '#/components/responses/ServiceUnavailable'
  */
-router.post('/:id/start',
+router.post(
+  '/:id/start',
   apiRateLimit(),
   validate(vmActionSchema),
   authenticate,
   requireAnyPermission('vm:start:own', 'vm:start:all'),
-  VMController.startVM
+  VMController.startVM,
 );
 
 /**
@@ -256,12 +266,13 @@ router.post('/:id/start',
  *       503:
  *         $ref: '#/components/responses/ServiceUnavailable'
  */
-router.post('/:id/stop',
+router.post(
+  '/:id/stop',
   apiRateLimit(),
   validate(vmActionSchema),
   authenticate,
   requireAnyPermission('vm:stop:own', 'vm:stop:all'),
-  VMController.stopVM
+  VMController.stopVM,
 );
 
 /**
@@ -269,12 +280,13 @@ router.post('/:id/stop',
  * @desc    Restart VM
  * @access  Private (Owner or Admin)
  */
-router.post('/:id/restart',
+router.post(
+  '/:id/restart',
   apiRateLimit(),
   validate(vmActionSchema),
   authenticate,
   requireAnyPermission('vm:restart:own', 'vm:restart:all'),
-  VMController.restartVM
+  VMController.restartVM,
 );
 
 /**
@@ -282,12 +294,13 @@ router.post('/:id/restart',
  * @desc    Suspend VM (Admin only)
  * @access  Private (Admin+)
  */
-router.post('/:id/suspend',
+router.post(
+  '/:id/suspend',
   apiRateLimit(),
   validate(vmSuspendSchema),
   authenticate,
   requirePermission('vm:suspend:all'),
-  VMController.suspendVM
+  VMController.suspendVM,
 );
 
 /**
@@ -295,12 +308,13 @@ router.post('/:id/suspend',
  * @desc    Resume suspended VM (Admin only)
  * @access  Private (Admin+)
  */
-router.post('/:id/resume',
+router.post(
+  '/:id/resume',
   apiRateLimit(),
   validate(vmActionSchema),
   authenticate,
   requirePermission('vm:suspend:all'),
-  VMController.resumeVM
+  VMController.resumeVM,
 );
 
 /**
@@ -308,12 +322,13 @@ router.post('/:id/resume',
  * @desc    Get VM statistics
  * @access  Private (Owner or Admin)
  */
-router.get('/:id/stats',
+router.get(
+  '/:id/stats',
   apiRateLimit(),
   validate(vmStatsQuerySchema),
   authenticate,
   requireAnyPermission('vm:read:own', 'vm:read:all'),
-  VMController.getVMStatistics
+  VMController.getVMStatistics,
 );
 
 /**
@@ -321,12 +336,13 @@ router.get('/:id/stats',
  * @desc    Get VM container status
  * @access  Private (Owner or Admin)
  */
-router.get('/:id/container/status',
+router.get(
+  '/:id/container/status',
   apiRateLimit(),
   validate(vmActionSchema),
   authenticate,
   requireAnyPermission('vm:read:own', 'vm:read:all'),
-  VMController.getVMContainerStatus
+  VMController.getVMContainerStatus,
 );
 
 /**
@@ -334,12 +350,13 @@ router.get('/:id/container/status',
  * @desc    Get VM container logs
  * @access  Private (Owner or Admin)
  */
-router.get('/:id/container/logs',
+router.get(
+  '/:id/container/logs',
   apiRateLimit(),
   validate(containerLogsSchema),
   authenticate,
   requireAnyPermission('vm:read:own', 'vm:read:all'),
-  VMController.getVMContainerLogs
+  VMController.getVMContainerLogs,
 );
 
 /**
@@ -347,12 +364,13 @@ router.get('/:id/container/logs',
  * @desc    Execute command in VM container
  * @access  Private (Owner or Admin)
  */
-router.post('/:id/container/exec',
+router.post(
+  '/:id/container/exec',
   apiRateLimit(),
   validate(execContainerSchema),
   authenticate,
   requireAnyPermission('vm:manage:own', 'vm:manage:all'),
-  VMController.execInVMContainer
+  VMController.execInVMContainer,
 );
 
 /**
@@ -360,12 +378,13 @@ router.post('/:id/container/exec',
  * @desc    Create VM backup
  * @access  Private (Owner or Admin)
  */
-router.post('/:id/backup',
+router.post(
+  '/:id/backup',
   apiRateLimit(),
   validate(createBackupSchema),
   authenticate,
   requireAnyPermission('vm:manage:own', 'vm:manage:all'),
-  VMController.createVMBackup
+  VMController.createVMBackup,
 );
 
 /**
@@ -373,12 +392,13 @@ router.post('/:id/backup',
  * @desc    Restore VM from backup
  * @access  Private (Owner or Admin)
  */
-router.post('/restore/:backupId',
+router.post(
+  '/restore/:backupId',
   apiRateLimit(),
   validate(restoreBackupSchema),
   authenticate,
   requireAnyPermission('vm:create:own', 'vm:create:all'),
-  VMController.restoreVMFromBackup
+  VMController.restoreVMFromBackup,
 );
 
 /**
@@ -386,12 +406,13 @@ router.post('/restore/:backupId',
  * @desc    Get VM resource usage stats
  * @access  Private (Owner or Admin)
  */
-router.get('/:id/resources',
+router.get(
+  '/:id/resources',
   apiRateLimit(),
   validate(vmActionSchema),
   authenticate,
   requireAnyPermission('vm:read:own', 'vm:read:all'),
-  VMController.getVMResourceStats
+  VMController.getVMResourceStats,
 );
 
 module.exports = router;

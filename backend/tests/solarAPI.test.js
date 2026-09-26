@@ -1,17 +1,20 @@
 const request = require('supertest');
 const app = require('../src/index');
 const { PrismaClient } = require('@prisma/client');
-const jwt = require('jsonwebtoken');
+const JWTUtils = require('../src/utils/jwt').default;
 
 const prisma = new PrismaClient();
 
-// Helper function to generate JWT token
-const generateToken = (userId, role = 'USER') => {
-  return jwt.sign(
-    { id: userId, role },
-    process.env.JWT_SECRET || 'test-secret',
-    { expiresIn: '1h' }
-  );
+// Helper function to generate JWT token — must match the shape
+// `authenticate` verifies: { userId, email, role, type: 'access' } signed
+// with the configured secret and issuer/audience. Hand-rolled tokens with
+// { id, role } always fail verification, so mint real access tokens.
+const generateToken = (user) => {
+  return JWTUtils.generateAccessToken({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+  });
 };
 
 describe('Solar Energy Monitoring API Integration Tests', () => {
@@ -47,8 +50,8 @@ describe('Solar Energy Monitoring API Integration Tests', () => {
       }
     });
 
-    userToken = generateToken(testUser.id, 'USER');
-    adminToken = generateToken(testAdmin.id, 'ADMIN');
+    userToken = generateToken(testUser);
+    adminToken = generateToken(testAdmin);
   });
 
   afterAll(async () => {

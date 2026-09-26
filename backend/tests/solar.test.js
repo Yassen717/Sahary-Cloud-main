@@ -257,10 +257,10 @@ describe('Solar Service', () => {
     it('should return error status on failure', async () => {
       jest.spyOn(solarService, 'getCurrentProduction').mockRejectedValue(new Error('API error'));
 
-      const status = await solarService.getSystemStatus();
-
-      expect(status.status).toBe('error');
-      expect(status.message).toBeDefined();
+      // The service throws a 503 error instead of returning an error payload
+      await expect(solarService.getSystemStatus()).rejects.toThrow(
+        'Unable to retrieve system status'
+      );
     });
   });
 

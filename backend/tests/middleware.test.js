@@ -282,7 +282,9 @@ describe('Security Middleware', () => {
       const maliciousData = {
         name: '<script>alert("xss")</script>John',
         email: 'test@example.com',
-        description: 'Hello <b>world</b>',
+        // NOTE: 'description' is a preserved free-text field (PRESERVED_TEXT_FIELDS)
+        // and is intentionally not sanitized — use a normal field here.
+        bio: 'Hello <b>world</b>',
       };
 
       const response = await request(app)
@@ -292,7 +294,7 @@ describe('Security Middleware', () => {
       expect(response.status).toBe(200);
       expect(response.body.body.name).not.toContain('<script>');
       expect(response.body.body.name).toBe('John');
-      expect(response.body.body.description).not.toContain('<b>');
+      expect(response.body.body.bio).not.toContain('<b>');
     });
 
     test('should preserve safe input', async () => {
@@ -317,8 +319,10 @@ describe('Security Middleware', () => {
     test('should block XSS attempts', async () => {
       const app = createTestApp(xssProtection());
 
+      // NOTE: 'comment' is a preserved free-text field and is intentionally
+      // exempt from XSS scanning — use a normal field here.
       const xssData = {
-        comment: '<script>alert("xss")</script>',
+        feedback: '<script>alert("xss")</script>',
       };
 
       const response = await request(app)
@@ -421,7 +425,8 @@ describe('Security Middleware', () => {
     test('should allow whitelisted IPs', async () => {
       const app = createTestApp(
         SecurityMiddleware.ipFilter({
-          whitelist: ['127.0.0.1', '::1'],
+          // supertest connects from the IPv6-mapped loopback on most stacks
+          whitelist: ['127.0.0.1', '::1', '::ffff:127.0.0.1'],
         })
       );
 
@@ -432,22 +437,22 @@ describe('Security Middleware', () => {
     test('should block blacklisted IPs', async () => {
       const app = express();
       app.use(express.json());
-      
-      // Mock req.ip to simulate blacklisted IP
-      app.use((req, res, next) => {
-        req.ip = '192.168.1.100';
-        next();
-      });
-      
+
+      // req.ip is a getter-only Express property and cannot be assigned —
+      // trust the proxy and supply the client IP via X-Forwarded-For instead.
+      app.set('trust proxy', true);
+
       app.use(SecurityMiddleware.ipFilter({
         blacklist: ['192.168.1.100'],
       }));
-      
+
       app.get('/test', (req, res) => {
         res.json({ success: true });
       });
 
-      const response = await request(app).get('/test');
+      const response = await request(app)
+        .get('/test')
+        .set('X-Forwarded-For', '192.168.1.100');
       expect(response.status).toBe(403);
       expect(response.body.error).toBe('Access denied');
     });
