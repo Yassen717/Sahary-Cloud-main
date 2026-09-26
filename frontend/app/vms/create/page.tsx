@@ -36,11 +36,11 @@ const plans: Plan[] = [
 ];
 
 const operatingSystems = [
-  { id: 'ubuntu-22.04', name: 'Ubuntu 22.04 LTS', icon: '🐧' },
-  { id: 'ubuntu-20.04', name: 'Ubuntu 20.04 LTS', icon: '🐧' },
-  { id: 'debian-11', name: 'Debian 11', icon: '🌀' },
-  { id: 'centos-8', name: 'CentOS 8', icon: '💠' },
-  { id: 'fedora-38', name: 'Fedora 38', icon: '🎩' },
+  { id: 'ubuntu-22.04', name: 'Ubuntu 22.04 LTS', icon: '🐧', dockerImage: 'ubuntu:22.04' },
+  { id: 'ubuntu-20.04', name: 'Ubuntu 20.04 LTS', icon: '🐧', dockerImage: 'ubuntu:20.04' },
+  { id: 'debian-11', name: 'Debian 11', icon: '🌀', dockerImage: 'debian:11' },
+  { id: 'centos-8', name: 'CentOS 8', icon: '💠', dockerImage: 'centos:8' },
+  { id: 'fedora-38', name: 'Fedora 38', icon: '🎩', dockerImage: 'fedora:38' },
 ];
 
 export default function CreateVMPage() {
@@ -85,9 +85,9 @@ export default function CreateVMPage() {
       setLoading(true);
       const vmData = {
         name: formData.name,
-        os: formData.os,
+        dockerImage: selectedOS?.dockerImage,
         cpu: formData.customSpecs ? formData.cpu : selectedPlan?.cpu,
-        ram: formData.customSpecs ? formData.ram : selectedPlan?.ram,
+        ram: (formData.customSpecs ? formData.ram : selectedPlan?.ram ?? 0) * 1024, // backend expects RAM in MB
         storage: formData.customSpecs ? formData.storage : selectedPlan?.storage,
       };
 
@@ -98,7 +98,7 @@ export default function CreateVMPage() {
         description: 'VM created successfully',
       });
       
-      router.push(`/vms/${response.vm.id}`);
+      router.push(`/vms/${response.data.vm.id}`);
     } catch (error: any) {
       toast({
         title: 'Error',

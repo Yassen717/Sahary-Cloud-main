@@ -48,24 +48,23 @@ export default function UsageTrackingPage() {
   const loadUsageData = async () => {
     try {
       const response = await apiClient.getUsage();
-      
-      // Mock data if API doesn't return proper structure
-      const mockData: UsageData = {
-        vms: [
-          { id: '1', name: 'web-server-01', cost: 15.50, cpu: 2, ram: 4, storage: 40, bandwidth: 500 },
-          { id: '2', name: 'db-server-01', cost: 25.00, cpu: 4, ram: 8, storage: 80, bandwidth: 300 },
-          { id: '3', name: 'app-server-01', cost: 12.75, cpu: 2, ram: 4, storage: 40, bandwidth: 400 },
-        ],
-        totalCost: 53.25,
-        projectedCost: 159.75,
-        budget: 200,
-        dailyUsage: Array.from({ length: 30 }, (_, i) => ({
-          date: new Date(Date.now() - (29 - i) * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          cost: Math.random() * 10 + 1,
+      const data = response?.data;
+
+      setUsage({
+        vms: (data?.vms || []).map((vm: any) => ({
+          id: vm.vmId ?? vm.id,
+          name: vm.vmName ?? vm.name,
+          cost: vm.totalCost ?? vm.cost ?? 0,
+          cpu: vm.averages?.cpu ?? vm.cpu ?? 0,
+          ram: vm.averages?.ram ?? vm.ram ?? 0,
+          storage: vm.averages?.storage ?? vm.storage ?? 0,
+          bandwidth: vm.totalBandwidth ?? vm.bandwidth ?? 0,
         })),
-      };
-      
-      setUsage(response.usage || mockData);
+        totalCost: data?.totalCost ?? 0,
+        projectedCost: data?.projectedCost ?? data?.totalCost ?? 0,
+        budget: data?.budget,
+        dailyUsage: data?.dailyUsage || [],
+      });
     } catch (error: any) {
       toast({
         title: 'Error',

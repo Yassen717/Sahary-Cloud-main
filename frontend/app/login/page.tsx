@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { apiClient } from '@/lib/api';
+import { Suspense, useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,12 +10,12 @@ import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const router = useRouter();
+  const { login } = useAuth();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect');
   const expired = searchParams.get('expired');
@@ -32,15 +32,9 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await apiClient.login(email, password);
-      console.log('Login successful:', response);
-      
-      // Redirect to the original page or dashboard
-      if (redirectTo) {
-        router.push(redirectTo);
-      } else {
-        router.push('/dashboard');
-      }
+      // AuthContext handles the API call, session refresh, and
+      // navigation to redirectTo || '/dashboard'
+      await login(email, password, redirectTo ?? undefined);
     } catch (err: any) {
       setError(err.message || 'Login failed');
     } finally {
@@ -94,13 +88,23 @@ export default function LoginPage() {
             </div>
 
             {error && (
-              <div 
+              <div
                 id="login-error"
                 className="p-3 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded-md"
                 role="alert"
                 aria-live="assertive"
               >
                 {error}
+                {/verif/i.test(error) && (
+                  <div className="mt-1">
+                    <Link
+                      href="/verify-email"
+                      className="font-medium underline"
+                    >
+                      Resend verification email
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
 
@@ -121,6 +125,15 @@ export default function LoginPage() {
             </Button>
 
             <div className="text-center text-sm">
+              <Link
+                href="/forgot-password"
+                className="text-primary hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
+
+            <div className="text-center text-sm">
               <span className="text-muted-foreground">Don't have an account? </span>
               <Link href="/register" className="text-primary hover:underline">
                 Sign up
@@ -136,5 +149,19 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

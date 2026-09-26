@@ -59,50 +59,48 @@ const sanitizeInput = (data: unknown): unknown => {
   return data;
 };
 
-const validate = (schema: z.ZodTypeAny): ValidationMiddleware => {
-  return async (req, res, next) => {
-    try {
-      const validatedData = await schema.parseAsync({
-        body: req.body,
-        query: req.query,
-        params: req.params,
+const validate = (schema: z.ZodTypeAny): ValidationMiddleware => async (req, res, next) => {
+  try {
+    const validatedData = await schema.parseAsync({
+      body: req.body,
+      query: req.query,
+      params: req.params,
+    });
+
+    req.body = validatedData.body || req.body;
+    req.query = validatedData.query || req.query;
+    req.params = validatedData.params || req.params;
+
+    next();
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const formattedErrors = error.errors.map((issue) => {
+        const received = 'received' in issue ? issue.received : undefined;
+        return {
+          field: issue.path.join('.'),
+          message: issue.message,
+          code: issue.code,
+          ...(received !== undefined ? { received } : {}),
+        };
       });
 
-      req.body = validatedData.body || req.body;
-      req.query = validatedData.query || req.query;
-      req.params = validatedData.params || req.params;
-
-      next();
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        const formattedErrors = error.errors.map((issue) => {
-          const received = 'received' in issue ? issue.received : undefined;
-          return {
-            field: issue.path.join('.'),
-            message: issue.message,
-            code: issue.code,
-            ...(received !== undefined ? { received } : {}),
-          };
-        });
-
-        res.status(400).json({
-          success: false,
-          error: 'Validation failed',
-          details: formattedErrors,
-          timestamp: new Date().toISOString(),
-        });
-        return;
-      }
-
-      const message = error instanceof Error ? error.message : 'Validation error';
       res.status(400).json({
         success: false,
-        error: 'Validation error',
-        message,
+        error: 'Validation failed',
+        details: formattedErrors,
         timestamp: new Date().toISOString(),
       });
+      return;
     }
-  };
+
+    const message = error instanceof Error ? error.message : 'Validation error';
+    res.status(400).json({
+      success: false,
+      error: 'Validation error',
+      message,
+      timestamp: new Date().toISOString(),
+    });
+  }
 };
 
 const sanitize: ValidationMiddleware = (req, res, next) => {
@@ -178,7 +176,9 @@ const customValidators = {
   },
 
   validateVMResources: (resources: { cpu: number; ram: number; storage: number; bandwidth?: number }): ValidationErrorResult => {
-    const { cpu, ram, storage, bandwidth } = resources;
+    const {
+      cpu, ram, storage, bandwidth,
+    } = resources;
     const errors: string[] = [];
     const warnings: string[] = [];
 
@@ -225,7 +225,9 @@ const customValidators = {
   },
 
   calculateVMCost: (resources: { cpu: number; ram: number; storage: number; bandwidth?: number }): number => {
-    const { cpu, ram, storage, bandwidth = 1000 } = resources;
+    const {
+      cpu, ram, storage, bandwidth = 1000,
+    } = resources;
 
     const cpuCost = cpu * 0.01;
     const ramCost = (ram / 1024) * 0.005;

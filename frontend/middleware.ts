@@ -20,16 +20,28 @@ function decodeJWTPayload(token: string): Record<string, unknown> | null {
 }
 
 // Routes that don't require authentication
-const publicRoutes = ["/", "/login", "/register", "/test-api"];
+const publicRoutes = [
+  "/",
+  "/login",
+  "/register",
+  "/test-api",
+  "/verify-email",
+  "/forgot-password",
+  "/reset-password",
+];
 
 // Routes that require authentication
 const protectedRoutes = [
   "/dashboard",
   "/vms",
   "/solar",
+  "/solar-alerts",
   "/billing",
   "/profile",
   "/settings",
+  "/notifications",
+  "/subscription",
+  "/search",
 ];
 
 // Admin-only routes
@@ -43,13 +55,16 @@ export function middleware(request: NextRequest) {
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
 
-  // Check if the route is protected
-  const isProtectedRoute = protectedRoutes.some((route) =>
-    pathname.startsWith(route),
+  // Check if the route is protected (exact match or sub-path, so
+  // "/solar" doesn't accidentally match "/solar-alerts", etc.)
+  const isProtectedRoute = protectedRoutes.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
 
   // Check if the route is admin-only
-  const isAdminRoute = adminRoutes.some((route) => pathname.startsWith(route));
+  const isAdminRoute = adminRoutes.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
+  );
 
   // Get token from cookies or headers
   const token = request.cookies.get("token")?.value;

@@ -243,4 +243,4 @@ class PaymentController {
   }
 }
 
-export default PaymentController;
+export = PaymentController;

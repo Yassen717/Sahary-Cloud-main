@@ -44,21 +44,23 @@ export default function AdminDashboardPage() {
   const loadAdminStats = async () => {
     try {
       const response = await apiClient.getStats();
-      
-      // Mock data if API doesn't return proper structure
-      const mockStats: AdminStats = {
-        totalUsers: 1250,
-        activeUsers: 890,
-        totalVMs: 3420,
-        runningVMs: 2890,
-        totalRevenue: 125000,
-        monthlyRevenue: 15000,
-        cpuUsage: 65.5,
-        ramUsage: 72.3,
-        storageUsage: 58.7,
-      };
-      
-      setStats(response.stats || mockStats);
+      const data = response?.data;
+
+      setStats({
+        totalUsers: data?.users?.total ?? data?.totalUsers ?? 0,
+        activeUsers: data?.users?.active ?? data?.activeUsers ?? 0,
+        totalVMs: data?.vms?.total ?? data?.totalVMs ?? 0,
+        runningVMs: data?.vms?.statusDistribution?.RUNNING ?? data?.runningVMs ?? 0,
+        totalRevenue:
+          data?.payments?.totalProcessed ??
+          data?.invoices?.amounts?.totalRevenue ??
+          data?.totalRevenue ??
+          0,
+        monthlyRevenue: data?.monthlyRevenue ?? 0,
+        cpuUsage: data?.usage?.averages?.cpu ?? data?.cpuUsage ?? 0,
+        ramUsage: data?.usage?.averages?.ram ?? data?.ramUsage ?? 0,
+        storageUsage: data?.storageUsage ?? 0,
+      });
     } catch (error: any) {
       toast({
         title: 'Error',

@@ -58,9 +58,31 @@ export default function SolarDashboardPage() {
         apiClient.getEnvironmentalImpact(),
       ]);
 
-      setStatus(statusData);
-      setProduction(productionData);
-      setImpact(impactData);
+      const statusPayload = statusData?.data ?? {};
+      const productionPayload = productionData?.data ?? {};
+      const impactPayload = impactData?.data?.environmentalImpact ?? {};
+
+      setStatus({
+        currentProduction: statusPayload.currentProduction ?? statusPayload.production ?? 0,
+        batteryLevel: statusPayload.batteryLevel ?? 0,
+        currentConsumption: statusPayload.currentConsumption ?? statusPayload.consumption ?? 0,
+        availablePower:
+          statusPayload.availablePower ??
+          Math.max((statusPayload.production ?? 0) - (statusPayload.consumption ?? 0), 0),
+        efficiency: statusPayload.efficiency ?? 0,
+        status: statusPayload.status ?? 'unknown',
+      });
+      setProduction({
+        daily: productionPayload.daily ?? [],
+        monthly: productionPayload.monthly ?? [],
+      });
+      setImpact({
+        co2Saved: impactPayload.co2Saved ?? 0,
+        treesEquivalent: impactPayload.treesEquivalent ?? 0,
+        cleanEnergyPercentage: impactPayload.cleanEnergyPercentage ?? 0,
+        traditionalEnergyComparison:
+          impactPayload.traditionalEnergyComparison ?? impactPayload.solarEnergyUsed ?? 0,
+      });
     } catch (error: any) {
       toast({
         title: 'Error',
