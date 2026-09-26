@@ -1,4 +1,5 @@
 import BillingService from '../services/billingService';
+import { roleHasPermission } from '../middlewares/rbac';
 import ValidationHelpers from '../utils/validation.helpers';
 import type {
   DiscountInput,
@@ -7,7 +8,6 @@ import type {
   InvoiceQueryOptions,
   InvoiceStatus,
   InvoiceStatusUpdateMetadata,
-  PaymentQueryOptions,
   UsageQueryOptions,
 } from '../types/billing';
 
@@ -50,16 +50,34 @@ const getAuthenticatedUser = (req: BillingRequest): BillingUser => {
   return req.user;
 };
 
-const getQueryOptions = (query: BillingQuery): InvoiceQueryOptions & UsageQueryOptions & PaymentQueryOptions => ({
-  page: query.page,
-  limit: query.limit,
-  status: query.status as never,
-  startDate: query.startDate,
-  endDate: query.endDate,
-  sortBy: query.sortBy,
-  sortOrder: query.sortOrder as 'asc' | 'desc' | undefined,
-  groupBy: query.groupBy as never,
-});
+// Map errors to a safe HTTP response without echoing internal error details
+const sendError = (res: BillingResponse, error: unknown, fallback: string): void => {
+  const message = error instanceof Error ? error.message : '';
+
+  if (/authenticated user context/i.test(message)) {
+    res.status(401).json({
+      success: false,
+      error: 'Authentication required',
+      message: 'Please authenticate to access this resource',
+    });
+    return;
+  }
+
+  if (/not found/i.test(message)) {
+    res.status(404).json({
+      success: false,
+      error: fallback,
+      message: 'The requested resource was not found',
+    });
+    return;
+  }
+
+  res.status(500).json({
+    success: false,
+    error: fallback,
+    message: 'An unexpected error occurred',
+  });
+};
 
 class BillingController {
   static async getUserInvoices(req: BillingRequest, res: BillingResponse): Promise<void> {
@@ -84,12 +102,7 @@ class BillingController {
         pagination: result.pagination,
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get invoices',
-        message,
-      });
+      sendError(res, error, 'Failed to get invoices');
     }
   }
 
@@ -116,12 +129,7 @@ class BillingController {
         data: { invoice },
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get invoice',
-        message,
-      });
+      sendError(res, error, 'Failed to get invoice');
     }
   }
 
@@ -141,12 +149,7 @@ class BillingController {
         data: usage,
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get usage',
-        message,
-      });
+      sendError(res, error, 'Failed to get usage');
     }
   }
 
@@ -167,26 +170,25 @@ class BillingController {
         data: summary,
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get usage summary',
-        message,
-      });
+      sendError(res, error, 'Failed to get usage summary');
     }
   }
 
   static async getVMUsage(req: BillingRequest, res: BillingResponse): Promise<void> {
     try {
+      const user = getAuthenticatedUser(req);
       const { vmId } = req.params ?? {};
       const query = req.query ?? {};
+
+      // Scope to the VM owner unless the caller holds the usage:read:all permission
+      const canReadAllUsage = roleHasPermission(user.role, 'usage:read:all');
 
       const usage = await BillingService.getVMUsage(vmId, {
         startDate: query.startDate,
         endDate: query.endDate,
         page: query.page,
         limit: query.limit,
-      });
+      }, canReadAllUsage ? null : user.userId);
 
       res.status(200).json({
         success: true,
@@ -196,18 +198,15 @@ class BillingController {
         statistics: usage.statistics,
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get VM usage',
-        message,
-      });
+      sendError(res, error, 'Failed to get VM usage');
     }
   }
 
   static async getPricingEstimate(req: BillingRequest, res: BillingResponse): Promise<void> {
     try {
-      const { cpu, ram, storage, bandwidth, duration } = (req.body ?? {}) as PricingEstimateBody;
+      const {
+        cpu, ram, storage, bandwidth, duration,
+      } = (req.body ?? {}) as PricingEstimateBody;
 
       if (
         typeof cpu !== 'number'
@@ -263,26 +262,25 @@ class BillingController {
         success: true,
         message: 'Pricing estimate calculated successfully',
         data: {
-          resources: { cpu, ram, storage, bandwidth: normalizedBandwidth },
+          resources: {
+            cpu, ram, storage, bandwidth: normalizedBandwidth,
+          },
           estimates,
           currency: 'USD',
           warnings: resourceValidation.warnings || [],
         },
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Pricing calculation failed',
-        message,
-      });
+      sendError(res, error, 'Pricing calculation failed');
     }
   }
 
   static async applyDiscount(req: BillingRequest, res: BillingResponse): Promise<void> {
     try {
       const { id } = req.params ?? {};
-      const { discountCode, discountAmount, discountPercentage, reason } = (req.body ?? {}) as DiscountInput;
+      const {
+        discountCode, discountAmount, discountPercentage, reason,
+      } = (req.body ?? {}) as DiscountInput;
 
       const invoice = await BillingService.applyDiscount(id, {
         discountCode,
@@ -297,12 +295,7 @@ class BillingController {
         data: { invoice },
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to apply discount',
-        message,
-      });
+      sendError(res, error, 'Failed to apply discount');
     }
   }
 
@@ -319,12 +312,7 @@ class BillingController {
         data: stats,
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get invoice statistics',
-        message,
-      });
+      sendError(res, error, 'Failed to get invoice statistics');
     }
   }
 
@@ -345,12 +333,7 @@ class BillingController {
         data: { invoice },
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to generate invoice',
-        message,
-      });
+      sendError(res, error, 'Failed to generate invoice');
     }
   }
 
@@ -369,12 +352,7 @@ class BillingController {
         data: results,
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to generate invoices',
-        message,
-      });
+      sendError(res, error, 'Failed to generate invoices');
     }
   }
 
@@ -388,12 +366,7 @@ class BillingController {
         data: results,
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to mark overdue invoices',
-        message,
-      });
+      sendError(res, error, 'Failed to mark overdue invoices');
     }
   }
 
@@ -423,24 +396,24 @@ class BillingController {
         pagination: result.pagination,
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to get invoices',
-        message,
-      });
+      sendError(res, error, 'Failed to get invoices');
     }
   }
 
   static async updateInvoiceStatus(req: BillingRequest, res: BillingResponse): Promise<void> {
     try {
+      const user = getAuthenticatedUser(req);
       const { id } = req.params ?? {};
       const { status, metadata } = (req.body ?? {}) as {
         status: InvoiceStatus;
         metadata?: InvoiceStatusUpdateMetadata;
       };
 
-      const invoice = await BillingService.updateInvoiceStatus(id, status, metadata || {});
+      // Attribute the audit entry to the acting user — server-set, not client-controlled
+      const invoice = await BillingService.updateInvoiceStatus(id, status, {
+        ...(metadata || {}),
+        userId: user.userId,
+      });
 
       res.status(200).json({
         success: true,
@@ -448,12 +421,7 @@ class BillingController {
         data: { invoice },
       });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
-        success: false,
-        error: 'Failed to update invoice status',
-        message,
-      });
+      sendError(res, error, 'Failed to update invoice status');
     }
   }
 }

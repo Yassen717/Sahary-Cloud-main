@@ -1,5 +1,7 @@
 // @ts-nocheck
+const cron = require('node-cron');
 const BillingService = require('../services/billingService').default;
+const { prisma } = require('../config/database');
 const logger = require('../utils/logger').default;
 
 /**
@@ -9,7 +11,14 @@ const logger = require('../utils/logger').default;
 class InvoiceGenerator {
   constructor() {
     this.isRunning = false;
+    this.isGenerating = false;
     this.lastRun = null;
+    this.monthlyTask = null;
+    this.overdueTask = null;
+    // Generate invoices on the 1st of each month at 00:00
+    this.monthlySchedule = process.env.INVOICE_GENERATION_SCHEDULE || '0 0 1 * *';
+    // Check for overdue invoices daily at 00:00
+    this.overdueSchedule = process.env.OVERDUE_CHECK_SCHEDULE || '0 0 * * *';
   }
 
   /**
@@ -17,12 +26,12 @@ class InvoiceGenerator {
    * Should be run on the 1st of each month
    */
   async generateMonthlyInvoices() {
-    if (this.isRunning) {
+    if (this.isGenerating) {
       logger.warn('Invoice generation is already running');
       return;
     }
 
-    this.isRunning = true;
+    this.isGenerating = true;
     logger.info('Starting monthly invoice generation');
 
     try {
@@ -47,7 +56,6 @@ class InvoiceGenerator {
         total: results.total,
         success: results.success,
         failed: results.failed,
-        skipped: results.skipped,
         month: month + 1,
         year,
       });
@@ -61,11 +69,9 @@ class InvoiceGenerator {
 
       if (results.success > 0) {
         logger.info('Generated invoices', {
-          invoices: results.invoices.map((inv) => ({
-            user: inv.userEmail,
-            invoice: inv.invoiceNumber,
-            total: `$${inv.total}`,
-          })),
+          success: results.success,
+          month: month + 1,
+          year,
         });
       }
 
@@ -75,9 +81,10 @@ class InvoiceGenerator {
         error: error.message,
         stack: error.stack,
       });
-      throw error;
+      // Do not rethrow: this runs inside a cron callback and must never
+      // reject, otherwise the schedule dies and an unhandled rejection occurs
     } finally {
-      this.isRunning = false;
+      this.isGenerating = false;
     }
   }
 
@@ -91,13 +98,20 @@ class InvoiceGenerator {
 
       const results = await BillingService.markOverdueInvoices();
 
-      if (results.updated > 0) {
+      if (results.success > 0) {
         logger.warn('Marked invoices as overdue', {
-          count: results.updated,
-          timestamp: results.timestamp,
+          count: results.success,
+          total: results.total,
         });
       } else {
         logger.info('No overdue invoices found');
+      }
+
+      if (results.failed > 0) {
+        logger.error('Some invoices failed to be marked as overdue', {
+          failed: results.failed,
+          errors: results.errors,
+        });
       }
 
       return results;
@@ -106,7 +120,8 @@ class InvoiceGenerator {
         error: error.message,
         stack: error.stack,
       });
-      throw error;
+      // Do not rethrow: callers invoke this unawaited (startup, cron),
+      // so a rethrow would produce an unhandled rejection
     }
   }
 
@@ -116,57 +131,99 @@ class InvoiceGenerator {
   getStatus() {
     return {
       isRunning: this.isRunning,
+      isGenerating: this.isGenerating,
       lastRun: this.lastRun,
+      monthlySchedule: this.monthlySchedule,
+      overdueSchedule: this.overdueSchedule,
     };
   }
 
   /**
    * Schedule monthly invoice generation
-   * Uses cron-like scheduling
+   * Runs on the 1st of each month at 00:00
    */
   scheduleMonthlyGeneration() {
-    // Run on the 1st of each month at 00:00
-    const now = new Date();
-    const nextRun = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0);
-    const delay = nextRun.getTime() - now.getTime();
-
-    logger.info('Scheduling next monthly invoice generation', {
-      nextRun: nextRun.toISOString(),
-      delayMs: delay,
+    this.monthlyTask = cron.schedule(this.monthlySchedule, async () => {
+      try {
+        await this.generateMonthlyInvoices();
+      } catch (error) {
+        logger.error('Monthly invoice generation job failed', {
+          error: error.message,
+          stack: error.stack,
+        });
+      }
     });
 
-    setTimeout(async () => {
-      await this.generateMonthlyInvoices();
-      // Schedule next run
-      this.scheduleMonthlyGeneration();
-    }, delay);
+    logger.info('Monthly invoice generation scheduled', {
+      schedule: this.monthlySchedule,
+    });
   }
 
   /**
    * Schedule daily overdue check
+   * Runs every day at 00:00
    */
   scheduleDailyOverdueCheck() {
-    // Run daily at 00:00
-    const now = new Date();
-    const nextRun = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
-    const delay = nextRun.getTime() - now.getTime();
-
-    logger.info('Scheduling next overdue check', {
-      nextRun: nextRun.toISOString(),
-      delayMs: delay,
+    this.overdueTask = cron.schedule(this.overdueSchedule, async () => {
+      try {
+        await this.checkOverdueInvoices();
+      } catch (error) {
+        logger.error('Overdue invoice check job failed', {
+          error: error.message,
+          stack: error.stack,
+        });
+      }
     });
 
-    setTimeout(async () => {
-      await this.checkOverdueInvoices();
-      // Schedule next run
-      this.scheduleDailyOverdueCheck();
-    }, delay);
+    logger.info('Daily overdue invoice check scheduled', {
+      schedule: this.overdueSchedule,
+    });
+  }
+
+  /**
+   * Recover a missed monthly generation
+   * If the process was down on the 1st, no invoices exist for the previous
+   * month's billing period, so run generation once at startup
+   */
+  async recoverMissedGeneration() {
+    try {
+      // Generation targets the previous month's billing period
+      const now = new Date();
+      const previousMonth = now.getMonth() - 1;
+      const year = previousMonth < 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const month = previousMonth < 0 ? 11 : previousMonth;
+      const periodStart = new Date(year, month, 1);
+
+      const existingInvoice = await prisma.invoice.findFirst({
+        where: { billingPeriodStart: periodStart },
+      });
+
+      if (existingInvoice) {
+        return;
+      }
+
+      logger.warn('No invoices found for the previous billing period, running missed monthly generation', {
+        billingPeriodStart: periodStart.toISOString(),
+      });
+
+      await this.generateMonthlyInvoices();
+    } catch (error) {
+      logger.error('Failed to check for missed invoice generation', {
+        error: error.message,
+        stack: error.stack,
+      });
+    }
   }
 
   /**
    * Start all scheduled jobs
    */
   start() {
+    if (this.isRunning) {
+      logger.warn('Invoice generator jobs are already running');
+      return;
+    }
+
     logger.info('Starting invoice generator jobs');
 
     // Schedule monthly generation
@@ -175,8 +232,47 @@ class InvoiceGenerator {
     // Schedule daily overdue check
     this.scheduleDailyOverdueCheck();
 
+    this.isRunning = true;
+
     // Run overdue check immediately on startup
-    this.checkOverdueInvoices();
+    this.checkOverdueInvoices().catch((error) => {
+      logger.error('Startup overdue invoice check failed', {
+        error: error.message,
+        stack: error.stack,
+      });
+    });
+
+    // Recover generation missed while the process was down (e.g. on the 1st)
+    this.recoverMissedGeneration().catch((error) => {
+      logger.error('Missed invoice generation recovery failed', {
+        error: error.message,
+        stack: error.stack,
+      });
+    });
+  }
+
+  /**
+   * Stop all scheduled jobs
+   */
+  stop() {
+    if (!this.isRunning) {
+      logger.warn('Invoice generator jobs are not running');
+      return;
+    }
+
+    logger.info('Stopping invoice generator jobs');
+
+    if (this.monthlyTask) {
+      this.monthlyTask.stop();
+      this.monthlyTask = null;
+    }
+
+    if (this.overdueTask) {
+      this.overdueTask.stop();
+      this.overdueTask = null;
+    }
+
+    this.isRunning = false;
   }
 }
 

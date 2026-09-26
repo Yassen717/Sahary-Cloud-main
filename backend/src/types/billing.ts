@@ -108,10 +108,12 @@ export interface PaymentQueryOptions {
 
 export interface RefundInput {
   amount?: number | string;
-  reason?: string;
+  // Required — matches refundPaymentSchema (reason: z.string().min(10)...).
+  reason: string;
 }
 
 export interface PaymentIntentOptions {
-  paymentMethodId?: string;
+  // Required — matches processPaymentSchema (paymentMethodId: z.string().min(1)).
+  paymentMethodId: string;
   savePaymentMethod?: boolean;
 }

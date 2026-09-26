@@ -62,7 +62,9 @@ class UsageCollector {
       logger.info('Starting usage collection cycle');
 
       const startTime = Date.now();
-      const results = await BillingService.collectAllRunningVMsUsage();
+      const results = await BillingService.collectAllRunningVMsUsage({
+        intervalMs: this.collectionInterval,
+      });
       const duration = Date.now() - startTime;
 
       logger.info('Usage collection completed', {

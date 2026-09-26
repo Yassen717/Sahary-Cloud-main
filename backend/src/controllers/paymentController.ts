@@ -47,15 +47,23 @@ const normalizeWebhookSignature = (headers: PaymentHeaders | undefined): string 
   return signature || '';
 };
 
-const normalizeWebhookPayload = (body: PaymentRequest['body']): string => {
+const normalizeWebhookPayload = (body: PaymentRequest['body']): Buffer | string => {
+  // Prefer the raw Buffer produced by express.raw — Stripe signature
+  // verification requires the exact bytes that were received.
   if (Buffer.isBuffer(body)) {
-    return body.toString('utf8');
+    return body;
   }
 
   if (typeof body === 'string') {
     return body;
   }
 
+  // Graceful fallback only: re-serialized JSON is not guaranteed to match the
+  // signed payload byte-for-byte, so warn loudly whenever this path is taken.
+  console.warn(
+    'Stripe webhook arrived without a raw Buffer body; re-serializing JSON payload. '
+      + 'Ensure express.raw is mounted for /api/v1/payments/webhook before express.json.',
+  );
   return JSON.stringify(body ?? {});
 };
 
@@ -85,18 +93,28 @@ class PaymentController {
   static async processPayment(req: PaymentRequest, res: PaymentResponse): Promise<void> {
     try {
       const { invoiceId } = req.params ?? {};
-      const { paymentMethodId, savePaymentMethod } = (req.body ?? {}) as PaymentIntentOptions & {
+      const user = getAuthenticatedUser(req);
+      const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(user.role);
+      const { paymentMethodId, savePaymentMethod } = (req.body ?? {}) as unknown as PaymentIntentOptions & {
         savePaymentMethod?: boolean;
       };
 
+      // userId/isAdmin travel inside paymentData so invoice ownership (IDOR)
+      // can be enforced in the service layer.
       const result = await PaymentService.processPayment(invoiceId, {
         paymentMethodId,
         savePaymentMethod,
-      });
+        userId: user.userId,
+        isAdmin,
+      } as PaymentIntentOptions & { userId: string; isAdmin: boolean });
 
+      // 200 with success:false (rather than an error status) so the client can
+      // still act on the returned clientSecret/status (e.g. 3DS, retry).
       res.status(200).json({
         success: result.success,
-        message: result.success ? 'Payment processed successfully' : 'Payment processing initiated',
+        message: result.success
+          ? 'Payment processed successfully'
+          : 'Payment requires additional action or could not be completed',
         data: result,
       });
     } catch (error: unknown) {
@@ -114,7 +132,9 @@ class PaymentController {
       const signature = normalizeWebhookSignature(req.headers);
       const payload = normalizeWebhookPayload(req.body);
 
-      const event = PaymentService.verifyWebhookSignature(payload, signature);
+      // Buffer payloads are passed straight through to
+      // stripe.webhooks.constructEvent at runtime.
+      const event = PaymentService.verifyWebhookSignature(payload as string, signature);
       const result = await PaymentService.handleWebhook(event as never);
 
       res.status(200).json({
@@ -198,12 +218,15 @@ class PaymentController {
   static async refundPayment(req: PaymentRequest, res: PaymentResponse): Promise<void> {
     try {
       const { id } = req.params ?? {};
-      const { amount, reason } = (req.body ?? {}) as RefundInput;
+      const { amount, reason, notes } = (req.body ?? {}) as unknown as RefundInput & { notes?: string };
 
-      const result = await PaymentService.refundPayment(id, {
+      const refundData: RefundInput & { notes?: string } = {
         amount,
         reason,
-      });
+        notes,
+      };
+
+      const result = await PaymentService.refundPayment(id, refundData);
 
       res.status(200).json({
         success: true,
