@@ -11,13 +11,19 @@ export class AppError extends Error {
 
   timestamp: string;
 
-  constructor(message: string, statusCode: number, errorCode: string | null = null, details: ErrorDetails = null) {
+  constructor(
+    message: string,
+    statusCode: number,
+    errorCode: string | null = null,
+    details: ErrorDetails = null,
+    isOperational = true,
+  ) {
     super(message);
     this.name = this.constructor.name;
     this.statusCode = statusCode;
     this.errorCode = errorCode;
     this.details = details;
-    this.isOperational = true;
+    this.isOperational = isOperational;
     this.timestamp = new Date().toISOString();
 
     Error.captureStackTrace?.(this, this.constructor);
@@ -78,7 +84,8 @@ export class RateLimitError extends AppError {
 
 export class InternalServerError extends AppError {
   constructor(message = 'Internal server error', details: ErrorDetails = null) {
-    super(message, 500, 'INTERNAL_SERVER_ERROR', details);
+    // Not operational: the errorHandler hides message/details in production.
+    super(message, 500, 'INTERNAL_SERVER_ERROR', details, false);
   }
 }
 
@@ -90,13 +97,15 @@ export class ServiceUnavailableError extends AppError {
 
 export class DatabaseError extends AppError {
   constructor(message = 'Database operation failed', details: ErrorDetails = null) {
-    super(message, 500, 'DATABASE_ERROR', details);
+    // Not operational: DB errors leak internals — hide them in production.
+    super(message, 500, 'DATABASE_ERROR', details, false);
   }
 }
 
 export class ExternalAPIError extends AppError {
   constructor(service: string, message = 'External API request failed', details: Record<string, unknown> = {}) {
-    super(message, 502, 'EXTERNAL_API_ERROR', { service, ...details });
+    // Not operational: upstream failures leak internals in production.
+    super(message, 502, 'EXTERNAL_API_ERROR', { service, ...details }, false);
   }
 }
 
@@ -120,7 +129,8 @@ export class FileUploadError extends AppError {
 
 export class ConfigurationError extends AppError {
   constructor(message = 'Configuration error', details: ErrorDetails = null) {
-    super(message, 500, 'CONFIGURATION_ERROR', details);
+    // Not operational: config errors leak internals — hide them in production.
+    super(message, 500, 'CONFIGURATION_ERROR', details, false);
   }
 }
 

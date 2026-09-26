@@ -104,11 +104,14 @@ const gracefulShutdown = async (): Promise<void> => {
   await disconnectDatabase();
 };
 
-process.on('SIGINT', gracefulShutdown);
-process.on('SIGTERM', gracefulShutdown);
-process.on('beforeExit', gracefulShutdown);
+// NB: no SIGINT/SIGTERM/beforeExit handlers are registered here on purpose —
+// registering async shutdown on those signals raced the main shutdown in
+// index.ts (and beforeExit re-fires after async work drains the loop).
+// index.ts owns process shutdown and calls disconnectDatabase() itself.
 
-export { prisma, connectDatabase, disconnectDatabase, checkDatabaseHealth, cleanupDatabase, gracefulShutdown };
+export {
+  prisma, connectDatabase, disconnectDatabase, checkDatabaseHealth, cleanupDatabase, gracefulShutdown,
+};
 export type { DatabaseHealth };
 
 export default {
