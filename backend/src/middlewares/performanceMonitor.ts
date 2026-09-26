@@ -10,32 +10,36 @@ export interface PerformanceMonitorRequest extends Request {
 
 const performanceMonitor = (req: PerformanceMonitorRequest, res: Response, next: NextFunction): void => {
   const startTime = Date.now();
-  const originalSend = res.send.bind(res);
 
-  res.send = ((data: unknown) => {
-    const responseTime = Date.now() - startTime;
-    const success = res.statusCode < 400;
+  // 'finish' covers every response path (send, sendFile, streams), unlike a
+  // res.send wrapper which misses non-send responses entirely.
+  res.on('finish', () => {
+    try {
+      const responseTime = Date.now() - startTime;
+      const success = res.statusCode < 400;
 
-    monitoringService.recordRequest(responseTime, success);
+      monitoringService.recordRequest(responseTime, success);
 
-    const slowRequestThreshold = Number.parseInt(process.env.SLOW_REQUEST_THRESHOLD || '1000', 10);
-    if (responseTime > slowRequestThreshold) {
-      logger.warn('Slow Request Detected', {
+      const slowRequestThreshold = Number.parseInt(process.env.SLOW_REQUEST_THRESHOLD || '1000', 10);
+      if (responseTime > slowRequestThreshold) {
+        logger.warn('Slow Request Detected', {
+          method: req.method,
+          url: req.originalUrl,
+          responseTime: `${responseTime}ms`,
+          statusCode: res.statusCode,
+        });
+      }
+
+      logger.logPerformance('request_duration', responseTime, {
         method: req.method,
         url: req.originalUrl,
-        responseTime: `${responseTime}ms`,
         statusCode: res.statusCode,
       });
+    } catch (error) {
+      // Monitoring must never break the response path.
+      logger.error('Performance monitoring error', error);
     }
-
-    logger.logPerformance('request_duration', responseTime, {
-      method: req.method,
-      url: req.originalUrl,
-      statusCode: res.statusCode,
-    });
-
-    return originalSend(data);
-  }) as Response['send'];
+  });
 
   next();
 };

@@ -1,6 +1,10 @@
-import type { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
+import type {
+  ErrorRequestHandler, NextFunction, Request, Response,
+} from 'express';
 import logger from '../utils/logger';
 import { AppError, ErrorFactory } from '../utils/errors';
+
+const errorTrackingService = require('../services/errorTrackingService');
 
 type ErrorLike = Error & {
   statusCode?: number;
@@ -70,8 +74,11 @@ const sendErrorDev = (err: AppError, res: Response): void => {
 
 const sendErrorProd = (err: AppError, res: Response): void => {
   const statusCode = err.statusCode || 500;
+  // Database errors are "operational" AppErrors but their messages/details
+  // contain Prisma internals — never leak those to clients in production.
+  const isDatabaseError = err.errorCode === 'DATABASE_ERROR';
 
-  if (err.isOperational) {
+  if (err.isOperational && !isDatabaseError) {
     res.status(statusCode).json({
       success: false,
       message: err.message,
@@ -99,6 +106,12 @@ const sendErrorProd = (err: AppError, res: Response): void => {
 };
 
 const errorHandler: ErrorRequestHandler = (err: ErrorLike, req: Request, res: Response, _next: NextFunction) => {
+  // If a response was already partially sent, writing here would throw —
+  // hand the error back to Express's default handler instead.
+  if (res.headersSent) {
+    return _next(err);
+  }
+
   let error: AppError = err instanceof AppError
     ? err
     : new AppError(err.message || 'Internal server error', err.statusCode || 500, 'UNKNOWN_ERROR');
@@ -132,6 +145,16 @@ const errorHandler: ErrorRequestHandler = (err: ErrorLike, req: Request, res: Re
     error.isOperational = false;
   }
 
+  try {
+    void errorTrackingService?.trackError?.(err, {
+      path: req.path,
+      method: req.method,
+      statusCode: error.statusCode || 500,
+    });
+  } catch (trackingError) {
+    logger.error('Failed to track error:', trackingError);
+  }
+
   if (process.env.NODE_ENV === 'development') {
     sendErrorDev(error, res);
   } else {
@@ -153,10 +176,8 @@ const notFoundHandler = (req: Request, _res: Response, next: NextFunction): void
   next(error);
 };
 
-const asyncHandler = <T extends (req: Request, res: Response, next: NextFunction) => Promise<unknown> | unknown>(fn: T) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
+const asyncHandler = <T extends (req: Request, res: Response, next: NextFunction) => Promise<unknown> | unknown>(fn: T) => (req: Request, res: Response, next: NextFunction): void => {
+  Promise.resolve(fn(req, res, next)).catch(next);
 };
 
 const handleUnhandledRejection = (): void => {

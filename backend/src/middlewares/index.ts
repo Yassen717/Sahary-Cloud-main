@@ -36,7 +36,6 @@ import {
 import {
   SecurityMiddleware,
   createAdvancedRateLimit,
-  createSlowDown,
   authRateLimit,
   apiRateLimit,
   uploadRateLimit,
@@ -51,7 +50,9 @@ import {
   securityLogging,
   combineSecurityMiddlewares,
 } from './security';
-import { validate, sanitize, customValidators, createValidator } from './validation';
+import {
+  validate, sanitize, customValidators, createValidator,
+} from './validation';
 
 type Middleware = (...args: any[]) => unknown;
 type MiddlewareItem = Middleware | Middleware[];
@@ -113,26 +114,46 @@ const commonMiddleware = {
 };
 
 const createMiddlewareChain = (...middlewares: MiddlewareItem[]): MiddlewareChain => {
-  const flatten = (items: MiddlewareItem[]): Middleware[] => {
-    return items.reduce<Middleware[]>((flat, item) => {
-      return flat.concat(Array.isArray(item) ? flatten(item) : item);
-    }, []);
-  };
+  const flatten = (items: MiddlewareItem[]): Middleware[] => items.reduce<Middleware[]>((flat, item) => flat.concat(Array.isArray(item) ? flatten(item) : item), []);
 
   return flatten(middlewares);
 };
 
 const applyIf = (condition: (req: unknown) => boolean, middleware: MiddlewareItem): Middleware => {
-  return (req, res, next) => {
-    if (condition(req)) {
-      if (Array.isArray(middleware)) {
-        return createMiddlewareChain(...middleware)[0](req, res, next);
-      }
+  // Flatten once — every item in the chain must run, not just the first.
+  const chain = createMiddlewareChain(...(Array.isArray(middleware) ? middleware : [middleware]));
 
-      return middleware(req, res, next);
+  return (req, res, next) => {
+    if (!condition(req)) {
+      next();
+      return;
     }
 
-    next();
+    let index = 0;
+
+    const runNext = (error?: unknown): void => {
+      if (error) {
+        next(error);
+        return;
+      }
+
+      if (index >= chain.length) {
+        next();
+        return;
+      }
+
+      const current = chain[index++];
+
+      try {
+        // Forward async rejections to next() so a throwing middleware can't
+        // hang the request or produce an unhandled rejection.
+        Promise.resolve(current(req, res, runNext)).catch(runNext);
+      } catch (error) {
+        runNext(error);
+      }
+    };
+
+    runNext();
   };
 };
 

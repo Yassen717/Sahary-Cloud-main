@@ -35,13 +35,34 @@ type ValidationErrorResult = {
   domain?: string;
 };
 
+// Free-text fields preserved verbatim — stripping markup chars from these
+// silently corrupts legitimate input (e.g. VM exec `command` arrays).
+const PRESERVED_TEXT_FIELDS = new Set([
+  'command',
+  'commands',
+  'args',
+  'description',
+  'reason',
+  'content',
+  'comment',
+  'notes',
+  'message',
+  'text',
+  'title',
+]);
+
+const isPreservedTextValue = (value: unknown): boolean => typeof value === 'string'
+  || (Array.isArray(value) && value.every((item) => typeof item === 'string'));
+
 const sanitizeInput = (data: unknown): unknown => {
   if (typeof data === 'string') {
     return data
       .trim()
       .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/javascript:/gi, '')
-      .replace(/on\w+\s*=/gi, '');
+      .replace(/javascript\s*:/gi, '')
+      // Strip HTML-like tags only — `on*=` outside tags (`done=true`) and
+      // bare `<`/`>` (`x > y`) are legitimate input.
+      .replace(/<\/?[a-zA-Z][^<>]*>/g, '');
   }
 
   if (Array.isArray(data)) {
@@ -51,7 +72,7 @@ const sanitizeInput = (data: unknown): unknown => {
   if (typeof data === 'object' && data !== null) {
     const sanitized: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data)) {
-      sanitized[key] = sanitizeInput(value);
+      sanitized[key] = PRESERVED_TEXT_FIELDS.has(key) && isPreservedTextValue(value) ? value : sanitizeInput(value);
     }
     return sanitized;
   }
@@ -59,50 +80,50 @@ const sanitizeInput = (data: unknown): unknown => {
   return data;
 };
 
-const validate = (schema: z.ZodTypeAny): ValidationMiddleware => {
-  return async (req, res, next) => {
-    try {
-      const validatedData = await schema.parseAsync({
-        body: req.body,
-        query: req.query,
-        params: req.params,
+const validate = (schema: z.ZodTypeAny): ValidationMiddleware => async (req, res, next) => {
+  try {
+    const validatedData = await schema.parseAsync({
+      body: req.body,
+      query: req.query,
+      params: req.params,
+    });
+
+    req.body = validatedData.body || req.body;
+    // req.query is a plain writable property on Express 4 — assignment is
+    // intentional (verified; not a getter-only property like Express 5).
+    req.query = validatedData.query || req.query;
+    req.params = validatedData.params || req.params;
+
+    next();
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const formattedErrors = error.errors.map((issue) => {
+        const received = 'received' in issue ? issue.received : undefined;
+        return {
+          field: issue.path.join('.'),
+          message: issue.message,
+          code: issue.code,
+          ...(received !== undefined ? { received } : {}),
+        };
       });
 
-      req.body = validatedData.body || req.body;
-      req.query = validatedData.query || req.query;
-      req.params = validatedData.params || req.params;
-
-      next();
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        const formattedErrors = error.errors.map((issue) => {
-          const received = 'received' in issue ? issue.received : undefined;
-          return {
-            field: issue.path.join('.'),
-            message: issue.message,
-            code: issue.code,
-            ...(received !== undefined ? { received } : {}),
-          };
-        });
-
-        res.status(400).json({
-          success: false,
-          error: 'Validation failed',
-          details: formattedErrors,
-          timestamp: new Date().toISOString(),
-        });
-        return;
-      }
-
-      const message = error instanceof Error ? error.message : 'Validation error';
       res.status(400).json({
         success: false,
-        error: 'Validation error',
-        message,
+        error: 'Validation failed',
+        details: formattedErrors,
         timestamp: new Date().toISOString(),
       });
+      return;
     }
-  };
+
+    const message = error instanceof Error ? error.message : 'Validation error';
+    res.status(400).json({
+      success: false,
+      error: 'Validation error',
+      message,
+      timestamp: new Date().toISOString(),
+    });
+  }
 };
 
 const sanitize: ValidationMiddleware = (req, res, next) => {
@@ -178,7 +199,9 @@ const customValidators = {
   },
 
   validateVMResources: (resources: { cpu: number; ram: number; storage: number; bandwidth?: number }): ValidationErrorResult => {
-    const { cpu, ram, storage, bandwidth } = resources;
+    const {
+      cpu, ram, storage, bandwidth,
+    } = resources;
     const errors: string[] = [];
     const warnings: string[] = [];
 
@@ -225,7 +248,9 @@ const customValidators = {
   },
 
   calculateVMCost: (resources: { cpu: number; ram: number; storage: number; bandwidth?: number }): number => {
-    const { cpu, ram, storage, bandwidth = 1000 } = resources;
+    const {
+      cpu, ram, storage, bandwidth = 1000,
+    } = resources;
 
     const cpuCost = cpu * 0.01;
     const ramCost = (ram / 1024) * 0.005;
@@ -240,7 +265,7 @@ const customValidators = {
     endDate: string | Date,
     options: { maxDays?: number; allowFuture?: boolean; allowPast?: boolean } = {},
   ): ValidationErrorResult => {
-    const { maxDays = 365 } = options;
+    const { maxDays = 365, allowFuture = false, allowPast = true } = options;
 
     const errors: string[] = [];
     const start = new Date(startDate);
@@ -263,8 +288,12 @@ const customValidators = {
       errors.push('Start date must be before or equal to end date');
     }
 
-    if (end > now) {
+    if (!allowFuture && end > now) {
       errors.push('End date cannot be in the future');
+    }
+
+    if (!allowPast && start < now) {
+      errors.push('Start date cannot be in the past');
     }
 
     const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
@@ -294,6 +323,8 @@ const createValidator = (schema: z.ZodTypeAny, options: ValidationOptions = {}):
       );
 
       req.body = validatedData.body || req.body;
+      // req.query is a plain writable property on Express 4 — assignment is
+      // intentional (verified; not a getter-only property like Express 5).
       req.query = validatedData.query || req.query;
       req.params = validatedData.params || req.params;
       req.validationPassed = true;

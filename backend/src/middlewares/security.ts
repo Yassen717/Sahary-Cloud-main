@@ -4,6 +4,7 @@ import type { AuthRequest } from './auth';
 const rateLimit = require('express-rate-limit');
 const slowDown = require('express-slow-down');
 const redisService = require('../services/redisService');
+const logger = require('../utils/logger').default;
 
 type Middleware = (req: AuthRequest, res: Response, next: NextFunction) => unknown;
 
@@ -30,14 +31,6 @@ type IPFilterOptions = {
   blacklist?: string[];
 };
 
-const getErrorMessage = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return 'Unknown error';
-};
-
 const getClientIp = (req: AuthRequest): string => req.ip || req.connection?.remoteAddress || 'unknown';
 
 const SENSITIVE_FIELDS = new Set([
@@ -50,6 +43,28 @@ const SENSITIVE_FIELDS = new Set([
   'refreshToken',
   'token',
 ]);
+
+// Free-text fields whose content must be preserved verbatim. Stripping
+// `<`, `>`, `javascript:` or `on*=` from these silently corrupts legitimate
+// input — e.g. VM exec `command` arrays like `['sh', '-c', 'x > y']`.
+const PRESERVED_TEXT_FIELDS = new Set([
+  'command',
+  'commands',
+  'args',
+  'description',
+  'reason',
+  'content',
+  'comment',
+  'notes',
+  'message',
+  'text',
+  'title',
+]);
+
+const isPreservedTextValue = (value: unknown): boolean => typeof value === 'string'
+  || (Array.isArray(value) && value.every((item) => typeof item === 'string'));
+
+const shouldSkipField = (key: string, value: unknown): boolean => SENSITIVE_FIELDS.has(key) || (PRESERVED_TEXT_FIELDS.has(key) && isPreservedTextValue(value));
 
 export class SecurityMiddleware {
   static createAdvancedRateLimit(options: AdvancedRateLimitOptions = {}): Middleware {
@@ -68,7 +83,7 @@ export class SecurityMiddleware {
 
     try {
       if (redisService.isReady()) {
-        const RedisStore = require('rate-limit-redis').RedisStore;
+        const { RedisStore } = require('rate-limit-redis');
         const redisClient = redisService.getClient();
 
         store = new RedisStore({
@@ -128,16 +143,29 @@ export class SecurityMiddleware {
   }
 
   static authRateLimit(): Middleware {
-    return SecurityMiddleware.createAdvancedRateLimit({
+    // Two composed limiters: a per-IP cap bounds password spraying across many
+    // accounts, while a per IP+email cap bounds targeted floods without letting
+    // an attacker lock out an account globally (DoS via `auth:{email}` keys).
+    const ipLimiter = SecurityMiddleware.createAdvancedRateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 20,
+      message: 'Too many authentication attempts from this IP, please try again later',
+      skipSuccessfulRequests: true,
+      keyGenerator: (req: AuthRequest) => `auth:${getClientIp(req)}`,
+    });
+
+    const accountLimiter = SecurityMiddleware.createAdvancedRateLimit({
       windowMs: 15 * 60 * 1000,
       max: 5,
       message: 'Too many authentication attempts, please try again later',
       skipSuccessfulRequests: true,
       keyGenerator: (req: AuthRequest) => {
         const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-        return email ? `auth:${email}` : `auth:${getClientIp(req)}`;
+        return `auth:${getClientIp(req)}:${email || 'anonymous'}`;
       },
     });
+
+    return SecurityMiddleware.combineSecurityMiddlewares([ipLimiter, accountLimiter]);
   }
 
   static apiRateLimit(): Middleware {
@@ -187,17 +215,30 @@ export class SecurityMiddleware {
     const attempts = new Map<string, { count: number; lockoutUntil: number }>();
     const LOCKOUT_TIME = 30 * 60 * 1000;
     const MAX_ATTEMPTS = 5;
+    const MAX_ENTRIES = 10000;
 
     return (req, res, next) => {
       const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-      const key = email || getClientIp(req);
+      // Key by email+ip so a distributed attacker can't lock an account out
+      // globally, and a single IP can't spray unlimited accounts either.
+      const key = `${email || 'anonymous'}:${getClientIp(req)}`;
       const now = Date.now();
 
-      if (attempts.size > 10000) {
+      if (attempts.size >= MAX_ENTRIES) {
+        // Evict expired/unlocked entries first, then oldest if still over capacity
+        // (Map preserves insertion order, so keys() yields oldest first).
         for (const [attemptKey, attemptValue] of attempts) {
-          if (attemptValue.count === 0 && attemptValue.lockoutUntil <= now) {
+          if (attemptValue.lockoutUntil <= now) {
             attempts.delete(attemptKey);
           }
+        }
+
+        while (attempts.size >= MAX_ENTRIES) {
+          const oldestKey = attempts.keys().next().value;
+          if (oldestKey === undefined) {
+            break;
+          }
+          attempts.delete(oldestKey);
         }
       }
 
@@ -267,9 +308,10 @@ export class SecurityMiddleware {
         if (typeof obj === 'string') {
           return obj
             .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-            .replace(/javascript:/gi, '')
-            .replace(/on\w+\s*=/gi, '')
-            .replace(/[<>]/g, '');
+            .replace(/javascript\s*:/gi, '')
+            // Strip HTML-like tags only — bare `<`/`>` (e.g. `x > y`) and
+            // `on*=` outside tags (e.g. `done=true`) are legitimate input.
+            .replace(/<\/?[a-zA-Z][^<>]*>/g, '');
         }
 
         if (Array.isArray(obj)) {
@@ -279,7 +321,7 @@ export class SecurityMiddleware {
         if (typeof obj === 'object' && obj !== null) {
           const sanitized: Record<string, unknown> = {};
           for (const [key, value] of Object.entries(obj)) {
-            sanitized[key] = SENSITIVE_FIELDS.has(key) ? value : sanitize(value);
+            sanitized[key] = shouldSkipField(key, value) ? value : sanitize(value);
           }
           return sanitized;
         }
@@ -300,11 +342,16 @@ export class SecurityMiddleware {
   }
 
   static sqlInjectionProtection(): Middleware {
+    // High-signal patterns only — bare keywords (SELECT, DROP), comments (`--`)
+    // or `1=1` in prose are legitimate text and must not be flagged.
     const suspiciousPatterns = [
-      /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|UNION)\b)/gi,
-      /(\b(OR|AND)\s+\d+\s*=\s*\d+)/gi,
-      /(--|\/\*|\*\/)/g,
-      /(\b(SCRIPT|JAVASCRIPT|VBSCRIPT)\b)/gi,
+      /(\b(OR|AND)\s+\d+\s*=\s*\d+(\s*(--|#|\/\*))?)/gi,
+      /('\s*(OR|AND)\s+[\w'"-]+\s*=\s*[\w'"-]+)/gi,
+      /(\bUNION\s+(ALL\s+)?SELECT\b)/gi,
+      /(;\s*(DROP|TRUNCATE|ALTER)\s+(TABLE|DATABASE|INDEX|VIEW))/gi,
+      /(;\s*(DELETE\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET))/gi,
+      /('\s*(--|#|\/\*))/g,
+      /(\bEXEC(UTE)?\s+(xp_|sp_))/gi,
     ];
 
     return (req, res, next) => {
@@ -322,17 +369,16 @@ export class SecurityMiddleware {
 
         if (typeof obj === 'object' && obj !== null) {
           return Object.entries(obj).some(
-            ([key, value]) => !SENSITIVE_FIELDS.has(key) && checkForSQLInjection(value)
+            ([key, value]) => !shouldSkipField(key, value) && checkForSQLInjection(value),
           );
         }
 
         return false;
       };
 
-      const hasSuspiciousContent =
-        checkForSQLInjection(req.body) ||
-        checkForSQLInjection(req.query) ||
-        checkForSQLInjection(req.params);
+      const hasSuspiciousContent = checkForSQLInjection(req.body)
+        || checkForSQLInjection(req.query)
+        || checkForSQLInjection(req.params);
 
       if (hasSuspiciousContent) {
         console.warn(`Potential SQL injection attempt from IP: ${req.ip}`);
@@ -352,19 +398,29 @@ export class SecurityMiddleware {
     const xssPatterns = [
       /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
       /javascript:/gi,
-      /on\w+\s*=/gi,
       /<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi,
       /<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi,
       /<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi,
     ];
 
+    // `on*=` is only an event handler inside a tag — `done=true`, `tone=440`
+    // or `once=1` in plain text are legitimate input.
+    const eventHandlerPattern = /on\w+\s*=/gi;
+
     return (req, res, next) => {
       const checkForXSS = (obj: unknown): boolean => {
         if (typeof obj === 'string') {
-          return xssPatterns.some((pattern) => {
+          const matchesPattern = xssPatterns.some((pattern) => {
             pattern.lastIndex = 0;
             return pattern.test(obj);
           });
+
+          if (matchesPattern) {
+            return true;
+          }
+
+          eventHandlerPattern.lastIndex = 0;
+          return obj.includes('<') && eventHandlerPattern.test(obj);
         }
 
         if (Array.isArray(obj)) {
@@ -373,17 +429,16 @@ export class SecurityMiddleware {
 
         if (typeof obj === 'object' && obj !== null) {
           return Object.entries(obj).some(
-            ([key, value]) => !SENSITIVE_FIELDS.has(key) && checkForXSS(value)
+            ([key, value]) => !shouldSkipField(key, value) && checkForXSS(value),
           );
         }
 
         return false;
       };
 
-      const hasXSSContent =
-        checkForXSS(req.body) ||
-        checkForXSS(req.query) ||
-        checkForXSS(req.params);
+      const hasXSSContent = checkForXSS(req.body)
+        || checkForXSS(req.query)
+        || checkForXSS(req.params);
 
       if (hasXSSContent) {
         console.warn(`Potential XSS attempt from IP: ${req.ip}`);
@@ -403,7 +458,20 @@ export class SecurityMiddleware {
     const { maxSize = 10 * 1024 * 1024 } = options;
 
     return (req, res, next) => {
-      const contentLength = Number.parseInt(String(req.headers['content-length'] || '0'), 10);
+      // NOTE: Content-Length is client-supplied and advisory — chunked bodies
+      // can bypass this check entirely. Reject non-numeric values, but real
+      // limits must also be enforced by the body parser / reverse proxy.
+      const rawContentLength = req.headers['content-length'];
+      const contentLength = Number.parseInt(String(rawContentLength || '0'), 10);
+
+      if (rawContentLength !== undefined && Number.isNaN(contentLength)) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid request',
+          message: 'Invalid Content-Length header',
+        });
+        return;
+      }
 
       if (contentLength > maxSize) {
         res.status(413).json({
@@ -470,22 +538,27 @@ export class SecurityMiddleware {
       const startTime = Date.now();
 
       const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined;
-      const isSuspicious =
-        req.path.includes('..') ||
-        req.path.includes('admin') ||
-        req.path.includes('config') ||
-        userAgent?.includes('bot') ||
-        userAgent?.includes('crawler');
+      // Only flag genuinely suspicious signals: path traversal or scanner UAs.
+      // `/admin` and `/config` are legitimate authenticated routes, so matching
+      // on them produced noise for every admin request.
+      const isSuspicious = req.path.includes('..')
+        || userAgent?.includes('bot')
+        || userAgent?.includes('crawler');
 
       if (isSuspicious) {
-        console.warn(`Suspicious request: ${req.method} ${req.path} from ${req.ip}`);
+        logger.logSecurity('Suspicious request', {
+          method: req.method,
+          path: req.path,
+          ip: req.ip,
+          userAgent,
+        });
       }
 
       res.on('finish', () => {
         const duration = Date.now() - startTime;
 
         if (res.statusCode >= 400) {
-          console.warn(`Error response: ${res.statusCode} ${req.method} ${req.path} (${duration}ms) from ${req.ip}`);
+          logger.warn(`Error response: ${res.statusCode} ${req.method} ${req.path} (${duration}ms) from ${req.ip}`);
         }
       });
 
@@ -515,7 +588,13 @@ export class SecurityMiddleware {
           return;
         }
 
-        middleware(req, res, runNext);
+        try {
+          // Async middleware that rejects must be forwarded to next() —
+          // otherwise the request hangs and the rejection goes unhandled.
+          Promise.resolve(middleware(req, res, runNext)).catch(runNext);
+        } catch (error) {
+          runNext(error);
+        }
       };
 
       runNext();
@@ -523,21 +602,21 @@ export class SecurityMiddleware {
   }
 }
 
-export const createAdvancedRateLimit = SecurityMiddleware.createAdvancedRateLimit;
-export const createSlowDown = SecurityMiddleware.createSlowDown;
-export const authRateLimit = SecurityMiddleware.authRateLimit;
-export const apiRateLimit = SecurityMiddleware.apiRateLimit;
-export const uploadRateLimit = SecurityMiddleware.uploadRateLimit;
-export const ddosProtection = SecurityMiddleware.ddosProtection;
-export const bruteForceProtection = SecurityMiddleware.bruteForceProtection;
-export const sanitizeInput = SecurityMiddleware.sanitizeInput;
-export const sqlInjectionProtection = SecurityMiddleware.sqlInjectionProtection;
-export const xssProtection = SecurityMiddleware.xssProtection;
-export const requestSizeLimit = SecurityMiddleware.requestSizeLimit;
-export const ipFilter = SecurityMiddleware.ipFilter;
-export const securityHeaders = SecurityMiddleware.securityHeaders;
-export const securityLogging = SecurityMiddleware.securityLogging;
-export const combineSecurityMiddlewares = SecurityMiddleware.combineSecurityMiddlewares;
+export const { createAdvancedRateLimit } = SecurityMiddleware;
+export const { createSlowDown } = SecurityMiddleware;
+export const { authRateLimit } = SecurityMiddleware;
+export const { apiRateLimit } = SecurityMiddleware;
+export const { uploadRateLimit } = SecurityMiddleware;
+export const { ddosProtection } = SecurityMiddleware;
+export const { bruteForceProtection } = SecurityMiddleware;
+export const { sanitizeInput } = SecurityMiddleware;
+export const { sqlInjectionProtection } = SecurityMiddleware;
+export const { xssProtection } = SecurityMiddleware;
+export const { requestSizeLimit } = SecurityMiddleware;
+export const { ipFilter } = SecurityMiddleware;
+export const { securityHeaders } = SecurityMiddleware;
+export const { securityLogging } = SecurityMiddleware;
+export const { combineSecurityMiddlewares } = SecurityMiddleware;
 
 export default {
   SecurityMiddleware,
