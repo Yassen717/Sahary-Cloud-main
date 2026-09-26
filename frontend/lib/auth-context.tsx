@@ -63,7 +63,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     password: string,
     redirectTo?: string,
   ) => {
-    await apiClient.login(email, password);
+    const response = await apiClient.login(email, password);
+    // Set user immediately from the login response (avoids a window where
+    // user is null); checkSession below confirms/refreshes it regardless.
+    if (response?.data?.user) {
+      setUser(response.data.user);
+    }
     await checkSession();
     if (redirectTo) {
       router.push(redirectTo);
@@ -73,15 +78,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const register = async (userData: ApiRegisterRequest) => {
-    await apiClient.register(userData);
+    const response = await apiClient.register(userData);
+    if (response?.data?.user) {
+      setUser(response.data.user);
+    }
     await checkSession();
     router.push("/dashboard");
   };
 
   const logout = async () => {
-    await apiClient.logout();
-    setUser(null);
-    router.push("/login");
+    try {
+      await apiClient.logout();
+    } finally {
+      // Always clear local state and navigate even if the backend call fails
+      setUser(null);
+      router.push("/login");
+    }
   };
 
   return (

@@ -1,10 +1,10 @@
 import type { NextFunction, Request, Response } from 'express';
 import JWTUtils from '../utils/jwt';
 import AuthService from '../services/authService';
-import redisService from '../services/redisService';
 import { prisma } from '../config/database';
 import { isFeatureEnabled } from '../config/auth';
 
+const redisService = require('../services/redisService');
 const rateLimit = require('express-rate-limit');
 
 export interface AuthenticatedUser {
@@ -364,10 +364,11 @@ class AuthMiddleware {
       const session = await prisma.session.findFirst({
         where: {
           userId: req.user.userId,
+          // Session.data is a JSON-serialized String column, not a Json field —
+          // use a string contains filter (token is embedded in the JSON blob).
           data: {
-            path: ['accessToken'],
-            equals: req.token,
-          } as any,
+            contains: req.token,
+          },
           expiresAt: {
             gt: new Date(),
           },

@@ -1,5 +1,6 @@
+// @ts-nocheck
 const express = require('express');
-import PaymentController from '../controllers/paymentController';
+const PaymentController = require('../controllers/paymentController');
 const { validate } = require('../middlewares/validation');
 const { authenticate, requireEmailVerification } = require('../middlewares/auth');
 const { requirePermission, requireAnyPermission } = require('../middlewares/rbac');
@@ -49,6 +50,22 @@ router.get(
 );
 
 router.get(
+  '/stats',
+  apiRateLimit(),
+  authenticate,
+  requireAnyPermission('payment:read:own', 'payment:read:all'),
+  PaymentController.getPaymentStatistics,
+);
+
+router.get('/health', (_req: unknown, res: { status(code: number): { json(payload: unknown): void } }) => {
+  res.status(200).json({
+    success: true,
+    message: 'Payment routes are healthy',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+router.get(
   '/:id',
   apiRateLimit(),
   validate(paymentIdSchema),
@@ -66,20 +83,4 @@ router.post(
   PaymentController.refundPayment,
 );
 
-router.get(
-  '/stats',
-  apiRateLimit(),
-  authenticate,
-  requireAnyPermission('payment:read:own', 'payment:read:all'),
-  PaymentController.getPaymentStatistics,
-);
-
-router.get('/health', (_req: unknown, res: { status(code: number): { json(payload: unknown): void } }) => {
-  res.status(200).json({
-    success: true,
-    message: 'Payment routes are healthy',
-    timestamp: new Date().toISOString(),
-  });
-});
-
-export default router;
+module.exports = router;

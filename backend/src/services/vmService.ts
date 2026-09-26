@@ -2,7 +2,7 @@ import { prisma } from '../config/database';
 import ValidationHelpers from '../utils/validation.helpers';
 import dockerService from './dockerService';
 import { getPaginatedResults } from '../utils/prisma';
-import { validateVMResources } from '../validations/vm.validation';
+const { validateVMResources } = require('../validations/vm.validation');
 import type {
   CreateVmInput,
   VmListOptions,

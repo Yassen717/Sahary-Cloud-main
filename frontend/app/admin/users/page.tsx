@@ -82,55 +82,25 @@ export default function UsersManagementPage() {
   const loadUsers = async () => {
     try {
       const response = await apiClient.getUsers();
-      
-      // Mock data if API doesn't return proper structure
-      const mockUsers: User[] = [
-        {
-          id: '1',
-          email: 'john@example.com',
-          firstName: 'John',
-          lastName: 'Doe',
-          role: 'user',
-          status: 'active',
-          createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-          lastLogin: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-          vmsCount: 3,
-        },
-        {
-          id: '2',
-          email: 'admin@example.com',
-          firstName: 'Admin',
-          lastName: 'User',
-          role: 'admin',
-          status: 'active',
-          createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
-          lastLogin: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-          vmsCount: 0,
-        },
-        {
-          id: '3',
-          email: 'jane@example.com',
-          firstName: 'Jane',
-          lastName: 'Smith',
-          role: 'user',
-          status: 'active',
-          createdAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
-          lastLogin: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-          vmsCount: 5,
-        },
-        {
-          id: '4',
-          email: 'suspended@example.com',
-          firstName: 'Suspended',
-          lastName: 'User',
-          role: 'user',
-          status: 'suspended',
-          createdAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
-          vmsCount: 1,
-        },
-      ];
-      
-      setUsers(response.users || mockUsers);
+      const apiUsers: any[] = response?.data || [];
+
+      setUsers(apiUsers.map((u: any) => ({
+        id: u.id,
+        email: u.email,
+        firstName: u.firstName ?? '',
+        lastName: u.lastName ?? '',
+        role: String(u.role ?? '').toUpperCase().includes('ADMIN') ? 'admin' : 'user',
+        status:
+          u.status ??
+          (u.isActive === false
+            ? 'suspended'
+            : u.isVerified === false
+              ? 'pending'
+              : 'active'),
+        createdAt: u.createdAt,
+        lastLogin: u.lastLogin,
+        vmsCount: u._count?.vms ?? u.vmsCount ?? 0,
+      })));
     } catch (error: any) {
       toast({
         title: 'Error',

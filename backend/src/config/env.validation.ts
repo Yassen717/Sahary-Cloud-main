@@ -116,8 +116,20 @@ export const envSchema = Joi.object({
   abortEarly: false,
 });
 
+const REQUIRED_ENV_VARS = new Set(['DATABASE_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'SESSION_SECRET']);
+
 export function validateEnv(): Record<string, unknown> {
-  const { error, value } = envSchema.validate(process.env);
+  // Treat present-but-empty env vars as unset: optional vars then fall back to
+  // their defaults instead of emitting "is not allowed to be empty" warnings,
+  // and empty required vars are reported as missing (any.required).
+  const envInput: Record<string, string | undefined> = {};
+  for (const [key, envValue] of Object.entries(process.env)) {
+    if (envValue !== '') {
+      envInput[key] = envValue;
+    }
+  }
+
+  const { error, value } = envSchema.validate(envInput);
 
   if (error) {
     const requiredErrors: Array<{ key: string; message: string }> = [];
@@ -127,17 +139,21 @@ export function validateEnv(): Record<string, unknown> {
       const key = detail.context?.key || detail.path.join('.');
       const message = detail.message.replace(/"/g, '');
 
-      if (detail.type === 'any.required' || detail.type === 'string.min') {
+      if (detail.type === 'any.required' || REQUIRED_ENV_VARS.has(key)) {
         requiredErrors.push({ key, message });
       } else {
         warnings.push({ key, message });
       }
     });
 
-    if (requiredErrors.length > 0 || warnings.length > 0) {
+    if (requiredErrors.length > 0) {
       console.error('\n╔══════════════════════════════════════════════════════════════╗');
       console.error('║           ⚠️  ENVIRONMENT VARIABLE VALIDATION FAILED        ║');
       console.error('╚══════════════════════════════════════════════════════════════╝\n');
+    } else if (warnings.length > 0) {
+      console.warn('\n╔══════════════════════════════════════════════════════════════╗');
+      console.warn('║               ⚠️  ENVIRONMENT VARIABLE WARNINGS              ║');
+      console.warn('╚══════════════════════════════════════════════════════════════╝\n');
     }
 
     if (requiredErrors.length > 0) {

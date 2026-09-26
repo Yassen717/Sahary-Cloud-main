@@ -1,10 +1,10 @@
 const request = require('supertest');
 const app = require('../src/index');
 const { prisma } = require('../src/config/database');
-const AuthService = require('../src/services/authService');
-const VMService = require('../src/services/vmService');
-const BillingService = require('../src/services/billingService');
-const JWTUtils = require('../src/utils/jwt');
+const AuthService = require('../src/services/authService').default;
+const VMService = require('../src/services/vmService').default;
+const BillingService = require('../src/services/billingService').default;
+const JWTUtils = require('../src/utils/jwt').default;
 
 /**
  * Billing API Integration Tests

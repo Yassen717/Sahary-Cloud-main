@@ -1,7 +1,7 @@
 const { prisma } = require('../src/config/database');
-const BillingService = require('../src/services/billingService');
-const VMService = require('../src/services/vmService');
-const AuthService = require('../src/services/authService');
+const BillingService = require('../src/services/billingService').default;
+const VMService = require('../src/services/vmService').default;
+const AuthService = require('../src/services/authService').default;
 
 /**
  * Billing Service Tests

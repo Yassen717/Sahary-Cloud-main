@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
-import monitoringService = require('../services/monitoringService');
 import logger from '../utils/logger';
+
+const monitoringService = require('../services/monitoringService');
 
 export interface PerformanceMonitorRequest extends Request {
   correlationId?: string;

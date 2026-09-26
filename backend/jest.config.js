@@ -2,12 +2,27 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src', '<rootDir>/tests'],
   testMatch: [
-    '**/__tests__/**/*.js',
-    '**/?(*.)+(spec|test).js'
+    '**/__tests__/**/*.[jt]s',
+    '**/?(*.)+(spec|test).[jt]s'
   ],
+  // Resolve .ts before the stale .js siblings so tests exercise live code.
+  moduleFileExtensions: ['ts', 'js', 'json', 'node'],
+  transform: {
+    '^.+\\.tsx?$': [
+      'ts-jest',
+      {
+        tsconfig: '<rootDir>/tsconfig.json',
+        // Repo has heavy @ts-nocheck/type noise; transpile only.
+        diagnostics: false
+      }
+    ],
+    // .js test files must be transformed so babel-plugin-jest-hoist lifts
+    // jest.mock() calls above their top-level require()s.
+    '^.+\\.jsx?$': 'babel-jest'
+  },
   collectCoverageFrom: [
-    'src/**/*.js',
-    '!src/index.js',
+    'src/**/*.{js,ts}',
+    '!src/index.{js,ts}',
     '!**/node_modules/**',
     '!**/coverage/**'
   ],

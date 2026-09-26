@@ -1,9 +1,9 @@
 const request = require('supertest');
 const app = require('../src/index');
 const { prisma } = require('../src/config/database');
-const VMService = require('../src/services/vmService');
-const AuthService = require('../src/services/authService');
-const JWTUtils = require('../src/utils/jwt');
+const VMService = require('../src/services/vmService').default;
+const AuthService = require('../src/services/authService').default;
+const JWTUtils = require('../src/utils/jwt').default;
 
 // Test data
 const testUser = {

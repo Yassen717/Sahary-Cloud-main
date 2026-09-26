@@ -32,6 +32,7 @@ type JoiErrorLike = ErrorLike & {
 
 type ErrorResponse = {
   success: false;
+  message: string;
   error: {
     message: string;
     statusCode: number;
@@ -55,6 +56,7 @@ const sendErrorDev = (err: AppError, res: Response): void => {
 
   res.status(statusCode).json({
     success: false,
+    message: err.message,
     error: {
       message: err.message,
       statusCode,
@@ -72,6 +74,7 @@ const sendErrorProd = (err: AppError, res: Response): void => {
   if (err.isOperational) {
     res.status(statusCode).json({
       success: false,
+      message: err.message,
       error: {
         message: err.message,
         errorCode: err.errorCode,
@@ -86,6 +89,7 @@ const sendErrorProd = (err: AppError, res: Response): void => {
 
   res.status(500).json({
     success: false,
+    message: 'Something went wrong',
     error: {
       message: 'Something went wrong',
       errorCode: 'INTERNAL_SERVER_ERROR',

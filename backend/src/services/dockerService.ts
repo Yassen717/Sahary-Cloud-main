@@ -203,6 +203,11 @@ class DockerService {
       this._connected = false;
       console.warn('⚠️  Docker daemon not available:', getErrorMessage(error));
       console.warn('⚠️  VM management features will be disabled');
+      // In development: resolve so the server still starts.
+      // In production Docker is required: propagate so startup fails hard.
+      if (process.env.NODE_ENV === 'production') {
+        throw error;
+      }
       return false;
     }
   }

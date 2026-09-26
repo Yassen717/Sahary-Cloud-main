@@ -1,6 +1,6 @@
 const request = require('supertest');
 const app = require('../src/index');
-const dockerService = require('../src/services/dockerService');
+const dockerService = require('../src/services/dockerService').default;
 
 // Mock Docker service
 jest.mock('../src/services/dockerService');

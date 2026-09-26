@@ -1,8 +1,8 @@
 const request = require('supertest');
 const app = require('../src/index');
 const { prisma } = require('../src/config/database');
-const AuthService = require('../src/services/authService');
-const JWTUtils = require('../src/utils/jwt');
+const AuthService = require('../src/services/authService').default;
+const JWTUtils = require('../src/utils/jwt').default;
 
 /**
  * Comprehensive VM API Integration Tests

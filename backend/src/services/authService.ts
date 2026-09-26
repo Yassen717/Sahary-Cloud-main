@@ -62,10 +62,6 @@ class AuthService {
 
       const hashedPassword = await ValidationHelpers.hashPassword(password, config.security.bcryptRounds);
 
-      const tempUserId = crypto.randomUUID();
-      const emailVerificationToken = JWTUtils.generateEmailVerificationToken(tempUserId, email);
-      const emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
       const user = await prisma.user.create({
         data: {
           email: email.toLowerCase(),
@@ -73,8 +69,6 @@ class AuthService {
           firstName,
           lastName,
           phone: phone || null,
-          emailVerificationToken,
-          emailVerificationExpires,
           isVerified: false,
           isActive: true,
         },
@@ -91,6 +85,17 @@ class AuthService {
         },
       }) as PublicUser;
 
+      const emailVerificationToken = JWTUtils.generateEmailVerificationToken(user.id, user.email);
+      const emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          emailVerificationToken,
+          emailVerificationExpires,
+        },
+      });
+
       const tokenPayload: AuthTokenPayload = {
         userId: user.id,
         email: user.email,
@@ -98,6 +103,8 @@ class AuthService {
       };
 
       const tokens = JWTUtils.generateTokenPair(tokenPayload) as AuthTokens;
+
+      await this.createSession(user.id, tokens.accessToken, {});
 
       await this.logAuditEvent(user.id, 'USER_REGISTERED', 'user', user.id, {
         email: user.email,
@@ -415,7 +422,9 @@ class AuthService {
       }) as { id: string; email: string; isVerified: boolean; isActive: boolean } | null;
 
       if (!user || !user.isActive) {
-        throw new Error('User not found or inactive');
+        return {
+          message: 'If the email exists and is unverified, a verification link has been sent',
+        } as PasswordResetResult;
       }
 
       if (user.isVerified) {
@@ -437,9 +446,9 @@ class AuthService {
 
       return {
         message: 'Verification email has been resent',
-        resetToken: verificationToken,
+        verificationToken,
         expiresAt: verificationExpires,
-      };
+      } as PasswordResetResult;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Resend verification failed: ${message}`);

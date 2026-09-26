@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import http from 'http';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
@@ -9,7 +10,6 @@ import session from 'express-session';
 import RedisStore from 'connect-redis';
 import swaggerUi from 'swagger-ui-express';
 import { connectDatabase, checkDatabaseHealth } from './config/database';
-import redisService = require('./services/redisService');
 import dockerService from './services/dockerService';
 import {
   errorHandler,
@@ -23,8 +23,9 @@ import { performanceMonitor } from './middlewares/performanceMonitor';
 import { sanitizeAll, checkXSS, preventNoSQLInjection } from './middlewares/sanitization';
 import { ddosProtectionMiddleware, connectionLimitMiddleware } from './middlewares/ddosProtection';
 
+const redisService = require('./services/redisService');
 const swaggerSpec = require('./config/swagger');
-const { initSocket } = require('./socket') as { initSocket: (server: http.Server) => void };
+const { initSocket } = require('./socket/index') as { initSocket: (server: http.Server) => void };
 
 type BackgroundJob = {
   start: () => void;
@@ -32,8 +33,6 @@ type BackgroundJob = {
 };
 
 type RedisClientLike = ReturnType<typeof redisService.getClient> | undefined;
-
-require('dotenv').config();
 
 handleUnhandledRejection();
 handleUncaughtException();
@@ -103,10 +102,6 @@ app.use(
   })
 );
 
-app.use(sanitizeAll);
-app.use(checkXSS);
-app.use(preventNoSQLInjection);
-
 if (process.env.NODE_ENV === 'production') {
   app.use(ddosProtectionMiddleware);
   app.use(connectionLimitMiddleware);
@@ -117,7 +112,7 @@ app.use(
     origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token'],
   })
 );
 
@@ -141,6 +136,10 @@ app.use('/api/', limiter);
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+app.use(sanitizeAll);
+app.use(checkXSS);
+app.use(preventNoSQLInjection);
 
 if (process.env.NODE_ENV !== 'test') {
   app.use(requestLogger);
@@ -207,17 +206,21 @@ app.get('/api', (_req: Request, res: Response) => {
   });
 });
 
-app.use('/api/v1/auth', require('./routes/auth'));
-app.use('/api/v1/hosting', require('./routes/hosting'));
-app.use('/api/v1/vms', require('./routes/vms'));
-app.use('/api/v1/docker', require('./routes/docker'));
-app.use('/api/v1/payments', require('./routes/payments'));
-app.use('/api/v1/billing', require('./routes/billing'));
-app.use('/api/v1/admin', require('./routes/admin'));
-app.use('/api/v1/solar', require('./routes/solar'));
-app.use('/api/v1/cache', require('./routes/cache'));
-app.use('/api/v1/monitoring', require('./routes/monitoring'));
-app.use('/api/v1/security', require('./routes/security'));
+// Route modules may export the router directly (module.exports) or as a
+// default export ({ default: router }) — unwrap either shape defensively.
+const asMiddleware = (m: unknown) => ((m as any)?.default ?? m) as express.RequestHandler;
+
+app.use('/api/v1/auth', asMiddleware(require('./routes/auth')));
+app.use('/api/v1/hosting', asMiddleware(require('./routes/hosting')));
+app.use('/api/v1/vms', asMiddleware(require('./routes/vms')));
+app.use('/api/v1/docker', asMiddleware(require('./routes/docker')));
+app.use('/api/v1/payments', asMiddleware(require('./routes/payments')));
+app.use('/api/v1/billing', asMiddleware(require('./routes/billing')));
+app.use('/api/v1/admin', asMiddleware(require('./routes/admin')));
+app.use('/api/v1/solar', asMiddleware(require('./routes/solar')));
+app.use('/api/v1/cache', asMiddleware(require('./routes/cache')));
+app.use('/api/v1/monitoring', asMiddleware(require('./routes/monitoring')));
+app.use('/api/v1/security', asMiddleware(require('./routes/security')));
 
 app.use('*', notFoundHandler);
 app.use(errorHandler);

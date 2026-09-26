@@ -1,8 +1,8 @@
 const { prisma } = require('../src/config/database');
-const PaymentService = require('../src/services/paymentService');
-const BillingService = require('../src/services/billingService');
-const VMService = require('../src/services/vmService');
-const AuthService = require('../src/services/authService');
+const PaymentService = require('../src/services/paymentService').default;
+const BillingService = require('../src/services/billingService').default;
+const VMService = require('../src/services/vmService').default;
+const AuthService = require('../src/services/authService').default;
 
 /**
  * Payment Service Tests

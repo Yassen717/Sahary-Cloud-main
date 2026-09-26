@@ -52,7 +52,7 @@ export default function VMsPage() {
     try {
       setLoading(true);
       const response = await apiClient.getVMs();
-      setVms(response.vms || []);
+      setVms(response.data || []);
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -76,7 +76,7 @@ export default function VMsPage() {
 
     // Apply status filter
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(vm => vm.status === statusFilter);
+      filtered = filtered.filter(vm => vm.status?.toUpperCase() === statusFilter);
     }
 
     // Apply sorting
@@ -165,9 +165,9 @@ export default function VMsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="running">Running</SelectItem>
-                <SelectItem value="stopped">Stopped</SelectItem>
-                <SelectItem value="error">Error</SelectItem>
+                <SelectItem value="RUNNING">Running</SelectItem>
+                <SelectItem value="STOPPED">Stopped</SelectItem>
+                <SelectItem value="ERROR">Error</SelectItem>
               </SelectContent>
             </Select>
 
@@ -252,7 +252,7 @@ export default function VMsPage() {
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">RAM:</span>
-                    <span className="font-medium">{vm.ram} GB</span>
+                    <span className="font-medium">{vm.ram / 1024} GB</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Storage:</span>
@@ -276,7 +276,7 @@ export default function VMsPage() {
                   <div className="flex-1">
                     <h3 className="font-semibold text-lg">{vm.name}</h3>
                     <p className="text-sm text-muted-foreground">
-                      {vm.cpu} vCPU • {vm.ram}GB RAM • {vm.storage}GB Storage
+                      {vm.cpu} vCPU • {vm.ram / 1024}GB RAM • {vm.storage}GB Storage
                     </p>
                   </div>
                   <div className="hidden md:block">

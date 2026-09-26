@@ -434,7 +434,7 @@ class BillingService {
         };
       }
 
-      const dockerService = require('./dockerService');
+      const dockerService = require('./dockerService').default;
       const containerStats = await dockerService.getContainerStats(vm.dockerContainerId);
 
       const cpuUsage = containerStats.cpu_stats?.cpu_usage?.total_usage || 0;

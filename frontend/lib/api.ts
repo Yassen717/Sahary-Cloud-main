@@ -13,12 +13,9 @@ export type ApiCreateVmRequest = Partial<
   storage?: number;
 };
 export type ApiUpdateProfileRequest = Partial<
-  Pick<
-    components["schemas"]["User"],
-    "firstName" | "lastName" | "email" | "phone"
-  >
+  Pick<components["schemas"]["User"], "firstName" | "lastName" | "phone">
 > & {
-  name?: string;
+  avatar?: string;
 };
 
 const API_URL =
@@ -37,10 +34,25 @@ export class ApiClient {
 
   setToken(token: string) {
     this.token = token;
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("accessToken", token);
+    }
   }
 
   clearToken() {
     this.token = null;
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem("accessToken");
+    }
+  }
+
+  getToken(): string | null {
+    return (
+      this.token ??
+      (typeof window !== "undefined"
+        ? sessionStorage.getItem("accessToken")
+        : null)
+    );
   }
 
   /**
@@ -61,7 +73,22 @@ export class ApiClient {
           credentials: "include",
           headers: { "Content-Type": "application/json" },
         });
-        return res.ok;
+        if (res.ok) {
+          // Capture the refreshed access token so subsequent requests send it
+          // as a Bearer header (the HttpOnly cookie is also rotated).
+          // Handles both { data: { tokens: { accessToken } } } and the
+          // legacy { data: { accessToken } } response shape.
+          const body = await res.json().catch(() => null);
+          const token =
+            body?.data?.tokens?.accessToken ?? body?.data?.accessToken ?? null;
+          if (token) {
+            this.setToken(token);
+          }
+          return true;
+        }
+        // Refresh was rejected (e.g. 401) — drop any stale access token
+        this.clearToken();
+        return false;
       } catch {
         return false;
       } finally {
@@ -78,7 +105,8 @@ export class ApiClient {
     options: RequestInit = {},
   ): Promise<any> {
     // Rate limiting check
-    const rateLimitKey = `${endpoint}-${this.token || "anonymous"}`;
+    const token = this.getToken();
+    const rateLimitKey = `${endpoint}-${token || "anonymous"}`;
     if (!rateLimiter.canMakeRequest(rateLimitKey)) {
       logSecurityEvent({
         type: "RATE_LIMIT_EXCEEDED",
@@ -93,9 +121,9 @@ export class ApiClient {
       ...options.headers,
     };
 
-    if (this.token) {
+    if (token) {
       (headers as Record<string, string>)["Authorization"] =
-        `Bearer ${this.token}`;
+        `Bearer ${token}`;
     }
 
     // Add CSRF token for state-changing requests
@@ -142,10 +170,36 @@ export class ApiClient {
         });
       }
 
-      throw new Error(error.message || `HTTP ${response.status}`);
+      throw new Error(this.extractErrorMessage(error, response.status));
     }
 
     return response.json();
+  }
+
+  /**
+   * Normalize the backend's various error body shapes into a readable message:
+   * - { success:false, error:'string', message:'...' }           (controller catches)
+   * - { success:false, error:'Validation failed', details:[...] } (zod middleware)
+   * - { success:false, error:{ message:'...', statusCode,... } }  (errorHandler middleware)
+   */
+  private extractErrorMessage(error: any, status: number): string {
+    const detailsMessage =
+      Array.isArray(error?.details) && error.details.length > 0
+        ? error.details
+            .map((d: any) =>
+              d?.field ? `${d.field}: ${d?.message}` : d?.message,
+            )
+            .filter(Boolean)
+            .join("; ")
+        : null;
+
+    return (
+      error?.message ??
+      error?.error?.message ??
+      (detailsMessage || null) ??
+      (typeof error?.error === "string" ? error.error : null) ??
+      `HTTP ${status}`
+    );
   }
 
   // Auth methods
@@ -154,6 +208,13 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
+
+    // Persist the access token so it is sent as a Bearer header on
+    // subsequent requests (the HttpOnly cookie remains primary).
+    const token = response?.data?.tokens?.accessToken;
+    if (token) {
+      this.setToken(token);
+    }
 
     return response;
   }
@@ -164,12 +225,24 @@ export class ApiClient {
       body: JSON.stringify(userData),
     });
 
+    // Persist the access token so it is sent as a Bearer header on
+    // subsequent requests (the HttpOnly cookie remains primary).
+    const token = response?.data?.tokens?.accessToken;
+    if (token) {
+      this.setToken(token);
+    }
+
     return response;
   }
 
   async logout() {
-    await this.request("/auth/logout", { method: "POST" });
-    this.clearToken();
+    try {
+      await this.request("/auth/logout", { method: "POST" });
+    } catch {
+      // Network/server failure — local auth state is still cleared below.
+    } finally {
+      this.clearToken();
+    }
   }
 
   async getMe() {
@@ -177,7 +250,7 @@ export class ApiClient {
   }
 
   async checkAuth() {
-    return this.request("/auth/profile");
+    return this.request("/auth/check");
   }
 
   async updateProfile(userData: ApiUpdateProfileRequest) {
@@ -187,10 +260,82 @@ export class ApiClient {
     });
   }
 
-  async changePassword(oldPassword: string, newPassword: string) {
+  async changePassword(
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+  ) {
     return this.request("/auth/change-password", {
       method: "POST",
-      body: JSON.stringify({ oldPassword, newPassword }),
+      body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+    });
+  }
+
+  async verifyEmail(token: string) {
+    return this.request("/auth/verify-email", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  async resendVerification(email: string) {
+    return this.request("/auth/resend-verification", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async forgotPassword(email: string) {
+    return this.request("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async resetPassword(
+    token: string,
+    password: string,
+    confirmPassword: string,
+  ) {
+    return this.request("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password, confirmPassword }),
+    });
+  }
+
+  async validateToken(token: string) {
+    return this.request("/auth/validate-token", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  async getSessions() {
+    return this.request("/auth/sessions");
+  }
+
+  async revokeAllSessions() {
+    return this.request("/auth/sessions", { method: "DELETE" });
+  }
+
+  async revokeSession(id: string) {
+    return this.request(`/auth/sessions/${id}`, { method: "DELETE" });
+  }
+
+  async deactivateAccount(password: string, reason?: string) {
+    return this.request("/auth/deactivate", {
+      method: "POST",
+      body: JSON.stringify({
+        password,
+        ...(reason ? { reason } : {}),
+      }),
+    });
+  }
+
+  async reactivateAccount(email: string, token: string) {
+    return this.request("/auth/reactivate", {
+      method: "POST",
+      body: JSON.stringify({ email, token }),
     });
   }
 
@@ -280,7 +425,7 @@ export class ApiClient {
   }
 
   async payInvoice(id: string) {
-    return this.request(`/billing/pay/${id}`, { method: "POST" });
+    return this.request(`/payments/intent/${id}`, { method: "POST" });
   }
 
   // Admin methods
@@ -289,13 +434,13 @@ export class ApiClient {
   }
 
   async getStats() {
-    return this.request("/admin/stats");
+    return this.request("/admin/dashboard/stats");
   }
 
   async updateUserStatus(id: string, status: string) {
     return this.request(`/admin/users/${id}/status`, {
       method: "PUT",
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ isActive: status === "active", reason: status }),
     });
   }
 

@@ -458,4 +458,4 @@ class BillingController {
   }
 }
 
-export default BillingController;
+export = BillingController;

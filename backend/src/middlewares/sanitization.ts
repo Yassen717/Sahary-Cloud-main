@@ -117,6 +117,7 @@ const checkXSS = (req: Request, _res: Response, next: NextFunction): void => {
   const checkValue = (value: unknown): void => {
     if (typeof value === 'string') {
       for (const pattern of xssPatterns) {
+        pattern.lastIndex = 0;
         if (pattern.test(value)) {
           throw new ValidationError('Potential XSS attack detected', {
             field: 'input',
@@ -137,7 +138,7 @@ const checkXSS = (req: Request, _res: Response, next: NextFunction): void => {
         if (Array.isArray(value)) {
           value.forEach((item) => checkValue(item));
         } else if (typeof value === 'object') {
-          checkObject(value);
+          checkObject(value, excludeKeys);
         } else {
           checkValue(value);
         }

@@ -1,7 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
-import redisService = require('../services/redisService');
 import logger from '../utils/logger';
 import { RateLimitError, ServiceUnavailableError } from '../utils/errors';
+
+const redisService = require('../services/redisService');
 
 type RequestLike = Request & {
   connection?: { remoteAddress?: string | null };

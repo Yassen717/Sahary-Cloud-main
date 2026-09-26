@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 const { validationResult } = require('express-validator');
 
-const dockerService = require('../services/dockerService');
+const dockerService = require('../services/dockerService').default;
 
 type DockerQuery = {
   vmId?: string;

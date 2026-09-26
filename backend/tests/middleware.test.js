@@ -3,7 +3,7 @@ const express = require('express');
 const { AuthMiddleware, authenticate, requireRole, requireAdmin } = require('../src/middlewares/auth');
 const { RBACMiddleware, requirePermission } = require('../src/middlewares/rbac');
 const { SecurityMiddleware, authRateLimit, sanitizeInput, xssProtection } = require('../src/middlewares/security');
-const JWTUtils = require('../src/utils/jwt');
+const JWTUtils = require('../src/utils/jwt').default;
 const { prisma } = require('../src/config/database');
 
 // Create test app

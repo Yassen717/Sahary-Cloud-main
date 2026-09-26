@@ -1,4 +1,4 @@
-const ValidationHelpers = require('../src/utils/validation.helpers');
+const ValidationHelpers = require('../src/utils/validation.helpers').default;
 const { validate } = require('../src/middlewares/validation');
 const { registerSchema, loginSchema } = require('../src/validations/user.validation');
 const { createVMSchema } = require('../src/validations/vm.validation');

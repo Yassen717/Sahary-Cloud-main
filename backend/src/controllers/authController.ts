@@ -1,6 +1,9 @@
 import type { Request, Response } from 'express';
+import type { AuthTokenPayload } from '../types/auth';
+import AuthService from '../services/authService';
+import JWTUtils from '../utils/jwt';
+import ValidationHelpers from '../utils/validation.helpers';
 
-const AuthService = require('../services/authService');
 const redisService = require('../services/redisService');
 const { prisma } = require('../config/database');
 
@@ -10,6 +13,7 @@ type AuthRequest = Request & {
   query: any;
   params: any;
   cookies: any;
+  token?: string;
 };
 
 class AuthController {
@@ -36,15 +40,40 @@ class AuthController {
         message: 'User registered successfully',
         data: {
           user: result.user,
-          tokens: result.tokens,
+          tokens: {
+            accessToken: result.tokens.accessToken,
+            tokenType: result.tokens.tokenType,
+            expiresIn: result.tokens.expiresIn,
+          },
           emailVerificationRequired: result.emailVerificationRequired,
         },
       });
     } catch (error: any) {
-      res.status(400).json({
+      const msg = error instanceof Error ? error.message : '';
+
+      if (msg.includes('already exists')) {
+        res.status(409).json({
+          success: false,
+          error: 'Registration failed',
+          message: 'A user with this email already exists',
+        });
+        return;
+      }
+
+      if (msg.includes('Password validation failed')) {
+        res.status(400).json({
+          success: false,
+          error: 'Registration failed',
+          message: msg,
+        });
+        return;
+      }
+
+      console.error('Registration error:', error);
+      res.status(500).json({
         success: false,
         error: 'Registration failed',
-        message: error.message,
+        message: 'Registration failed',
       });
     }
   }
@@ -129,9 +158,11 @@ class AuthController {
         success: true,
         message: 'Token refreshed successfully',
         data: {
-          accessToken: tokens.accessToken,
-          tokenType: tokens.tokenType,
-          expiresIn: tokens.expiresIn,
+          tokens: {
+            accessToken: tokens.accessToken,
+            tokenType: tokens.tokenType,
+            expiresIn: tokens.expiresIn,
+          },
         },
       });
     } catch (error: any) {
@@ -147,7 +178,8 @@ class AuthController {
 
   static async logout(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const accessToken = req.headers.authorization?.replace('Bearer ', '');
+      const accessToken =
+        req.token || req.headers.authorization?.replace('Bearer ', '') || req.cookies?.token;
       const redisClient = redisService.isReady() ? redisService.getClient() : null;
       await AuthService.logout(accessToken, redisClient);
 
@@ -264,7 +296,7 @@ class AuthController {
         ...(process.env.NODE_ENV === 'development'
           ? {
               data: {
-                verificationToken: result.verificationToken,
+                verificationToken: (result as any).verificationToken,
                 expiresAt: result.expiresAt,
               },
             }
@@ -436,9 +468,8 @@ class AuthController {
         return;
       }
 
-      const JWTUtils = require('../utils/jwt');
       const decoded = await JWTUtils.verifyAccessToken(token);
-      const user = await AuthService.getUserById(decoded.userId);
+      const user = decoded.userId ? await AuthService.getUserById(decoded.userId) : null;
 
       if (!user || !user.isActive) {
         res.status(401).json({
@@ -460,7 +491,7 @@ class AuthController {
           role: user.role,
           isVerified: user.isVerified,
         },
-        expiresAt: new Date(decoded.exp * 1000).toISOString(),
+        expiresAt: decoded.exp ? new Date(decoded.exp * 1000).toISOString() : null,
       });
     } catch (error: any) {
       res.status(401).json({
@@ -536,14 +567,13 @@ class AuthController {
         return;
       }
 
-      const JWTUtils = require('../utils/jwt');
       const impersonationToken = JWTUtils.generateAccessToken({
         userId: targetUser.id,
         email: targetUser.email,
         role: targetUser.role,
         impersonatedBy: req.user.userId,
         isImpersonating: true,
-      });
+      } as AuthTokenPayload);
 
       await AuthService.logAuditEvent(req.user.userId, 'USER_IMPERSONATION_STARTED', 'user', targetUser.id, {
         targetUserId: targetUser.id,
@@ -599,7 +629,6 @@ class AuthController {
         return;
       }
 
-      const JWTUtils = require('../utils/jwt');
       const originalToken = JWTUtils.generateAccessToken({
         userId: originalUser.id,
         email: originalUser.email,
@@ -702,7 +731,6 @@ class AuthController {
         select: { password: true },
       });
 
-      const ValidationHelpers = require('../utils/validation.helpers');
       const isPasswordValid = await ValidationHelpers.comparePassword(password, user.password);
 
       if (!isPasswordValid) {
@@ -714,12 +742,15 @@ class AuthController {
         return;
       }
 
+      const reactivationToken = crypto.randomUUID();
+      const reactivationTokenExpires = new Date(Date.now() + 72 * 60 * 60 * 1000);
+
       await prisma.user.update({
         where: { id: userId },
         data: {
           isActive: false,
-          deactivatedAt: new Date(),
-          deactivationReason: reason || 'User requested deactivation',
+          passwordResetToken: reactivationToken,
+          passwordResetExpires: reactivationTokenExpires,
         },
       });
 
@@ -730,6 +761,9 @@ class AuthController {
       res.status(200).json({
         success: true,
         message: 'Account deactivated successfully',
+        ...(process.env.NODE_ENV === 'development'
+          ? { data: { reactivationToken, reactivationTokenExpires } }
+          : {}),
       });
     } catch (error: any) {
       res.status(400).json({
@@ -797,7 +831,6 @@ class AuthController {
           isActive: true,
           passwordResetToken: null,
           passwordResetExpires: null,
-          reactivatedAt: new Date(),
         },
       });
 

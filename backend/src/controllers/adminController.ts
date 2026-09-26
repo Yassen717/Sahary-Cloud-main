@@ -133,9 +133,8 @@ class AdminController {
             updatedAt: true,
             _count: {
               select: {
-                vms: true,
+                virtualMachines: true,
                 invoices: true,
-                payments: true,
               },
             },
           },
@@ -171,7 +170,7 @@ class AdminController {
       const user = await prisma.user.findUnique({
         where: { id },
         include: {
-          vms: {
+          virtualMachines: {
             select: {
               id: true,
               name: true,
@@ -188,16 +187,6 @@ class AdminController {
             select: {
               id: true,
               invoiceNumber: true,
-              total: true,
-              status: true,
-              createdAt: true,
-            },
-          },
-          payments: {
-            take: 10,
-            orderBy: { createdAt: 'desc' },
-            select: {
-              id: true,
               amount: true,
               status: true,
               createdAt: true,
@@ -254,11 +243,11 @@ class AdminController {
           action: isActive ? 'USER_ACTIVATED' : 'USER_DEACTIVATED',
           resource: 'user',
           resourceId: id,
-          newValues: {
+          newValues: JSON.stringify({
             isActive,
             reason,
             updatedBy: req.user.email,
-          },
+          }),
         },
       });
 
@@ -300,10 +289,10 @@ class AdminController {
           action: 'USER_ROLE_UPDATED',
           resource: 'user',
           resourceId: id,
-          newValues: {
+          newValues: JSON.stringify({
             role,
             updatedBy: req.user.email,
-          },
+          }),
         },
       });
 

@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 
-const VMService = require('../services/vmService');
+const VMService = require('../services/vmService').default;
 const { prisma } = require('../config/database');
 
 type VMUserRequest = Request & {
@@ -440,7 +440,7 @@ class VMController {
     try {
       const { cpu, ram, storage, bandwidth, duration } = req.body;
 
-      const ValidationHelpers = require('../utils/validation.helpers');
+      const ValidationHelpers = require('../utils/validation.helpers').default;
       const resourceValidation = ValidationHelpers.validateVMResources({
         cpu,
         ram,

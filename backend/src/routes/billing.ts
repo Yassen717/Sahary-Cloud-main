@@ -1,5 +1,6 @@
+// @ts-nocheck
 const express = require('express');
-import BillingController from '../controllers/billingController';
+const BillingController = require('../controllers/billingController');
 const { validate } = require('../middlewares/validation');
 const { authenticate } = require('../middlewares/auth');
 const { requirePermission, requireAnyPermission } = require('../middlewares/rbac');
@@ -37,6 +38,14 @@ router.get(
   authenticate,
   requirePermission('invoice:read:all'),
   BillingController.getAllInvoices,
+);
+
+router.get(
+  '/invoices/stats',
+  apiRateLimit(),
+  authenticate,
+  requireAnyPermission('invoice:read:own', 'invoice:read:all'),
+  BillingController.getInvoiceStatistics,
 );
 
 router.get(
@@ -93,14 +102,6 @@ router.post(
 );
 
 router.get(
-  '/invoices/stats',
-  apiRateLimit(),
-  authenticate,
-  requireAnyPermission('invoice:read:own', 'invoice:read:all'),
-  BillingController.getInvoiceStatistics,
-);
-
-router.get(
   '/usage',
   apiRateLimit(),
   validate(usageQuerySchema),
@@ -143,4 +144,4 @@ router.get('/health', (_req: unknown, res: { status(code: number): { json(payloa
   });
 });
 
-export default router;
+module.exports = router;

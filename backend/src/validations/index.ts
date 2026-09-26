@@ -1,10 +1,10 @@
 import type { ValidationRegistry } from '../types/validation';
 
-const userValidations = require('./user.validation.js');
-const vmValidations = require('./vm.validation.js');
-const billingValidations = require('./billing.validation.js');
-const adminValidations = require('./admin.validation.js');
-const solarValidations = require('./solar.validation.js');
+const userValidations = require('./user.validation');
+const vmValidations = require('./vm.validation');
+const billingValidations = require('./billing.validation');
+const adminValidations = require('./admin.validation');
+const solarValidations = require('./solar.validation');
 
 const validations: ValidationRegistry = {
 	user: userValidations,

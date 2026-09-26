@@ -13,6 +13,11 @@ export type Permission =
   | 'vm:start:own'
   | 'vm:stop:own'
   | 'vm:restart:own'
+  | 'vm:create:own'
+  | 'vm:manage:own'
+  | 'invoice:read:own'
+  | 'payment:create'
+  | 'payment:read:own'
   | 'billing:read:own'
   | 'billing:pay:own'
   | 'usage:read:own'
@@ -29,6 +34,16 @@ export type Permission =
   | 'vm:stop:all'
   | 'vm:restart:all'
   | 'vm:suspend:all'
+  | 'vm:create:all'
+  | 'vm:manage:all'
+  | 'invoice:read:all'
+  | 'invoice:create'
+  | 'invoice:update'
+  | 'payment:read:all'
+  | 'payment:refund'
+  | 'docker:manage'
+  | 'admin:access'
+  | 'admin:super'
   | 'billing:read:all'
   | 'billing:create'
   | 'billing:update'
@@ -91,6 +106,11 @@ const USER_PERMISSIONS: Permission[] = [
   'vm:start:own',
   'vm:stop:own',
   'vm:restart:own',
+  'vm:create:own',
+  'vm:manage:own',
+  'invoice:read:own',
+  'payment:create',
+  'payment:read:own',
   'billing:read:own',
   'billing:pay:own',
   'usage:read:own',
@@ -111,6 +131,15 @@ const ADMIN_PERMISSIONS: Permission[] = [
   'vm:stop:all',
   'vm:restart:all',
   'vm:suspend:all',
+  'vm:create:all',
+  'vm:manage:all',
+  'invoice:read:all',
+  'invoice:create',
+  'invoice:update',
+  'payment:read:all',
+  'payment:refund',
+  'docker:manage',
+  'admin:access',
   'billing:read:all',
   'billing:create',
   'billing:update',
@@ -130,6 +159,7 @@ const ADMIN_PERMISSIONS: Permission[] = [
 
 const SUPER_ADMIN_PERMISSIONS: Permission[] = [
   ...ADMIN_PERMISSIONS,
+  'admin:super',
   'user:create',
   'user:delete',
   'user:update:role',
