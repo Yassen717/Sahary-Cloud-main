@@ -179,7 +179,7 @@ export default function RootLayout({
             <SecurityMonitor />
             <div className="flex flex-col min-h-screen">
               <Header />
-              <main id="main-content" className="flex-grow pt-20" role="main" aria-label="Main content">
+              <main id="main-content" className="grow pt-20" role="main" aria-label="Main content">
                 {children}
               </main>
               <Footer />

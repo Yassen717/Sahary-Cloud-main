@@ -64,7 +64,7 @@ export function GettingStartedGuide() {
 
                             <CardHeader>
                                 <div className="flex items-start gap-4">
-                                    <div className="flex-shrink-0">
+                                    <div className="shrink-0">
                                         <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
                                             <Icon className="h-6 w-6 text-primary" />
                                         </div>
@@ -104,7 +104,7 @@ export function GettingStartedGuide() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <p className="text-muted-foreground">
-                        Our support team is available 24/7 to help you get started. Don't hesitate to reach out!
+                        Our support team is available 24/7 to help you get started. Don&apos;t hesitate to reach out!
                     </p>
                     <div className="flex flex-wrap gap-3">
                         <Button asChild variant="outline">

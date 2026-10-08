@@ -3,7 +3,7 @@
 import { useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { motion, useScroll, useTransform } from 'framer-motion';
+import { motion, useScroll, useTransform } from 'motion/react';
 import { Cloud, ChevronDown } from 'lucide-react';
 
 export default function HeroSection() {
@@ -95,7 +95,7 @@ export default function HeroSection() {
     <section ref={containerRef} className="relative -mt-20 min-h-screen flex items-center justify-center overflow-hidden">
       <canvas id="particles-canvas" className="absolute inset-0 z-0" />
       
-      <div className="absolute inset-0 bg-gradient-to-b from-primary/10 to-primary/20 dark:from-primary/20 dark:to-primary/30 z-10" />
+      <div className="absolute inset-0 bg-linear-to-b from-primary/10 to-primary/20 dark:from-primary/20 dark:to-primary/30 z-10" />
       
       <motion.div
         style={{ opacity, scale, y }}
@@ -108,8 +108,8 @@ export default function HeroSection() {
             transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
             className="relative w-24 h-24"
           >
-            <div className="absolute inset-0 rounded-full bg-gradient-to-r from-primary/80 to-primary blur-lg opacity-50" />
-            <div className="relative h-full w-full rounded-full bg-gradient-to-r from-primary/80 to-primary flex items-center justify-center">
+            <div className="absolute inset-0 rounded-full bg-linear-to-r from-primary/80 to-primary blur-lg opacity-50" />
+            <div className="relative h-full w-full rounded-full bg-linear-to-r from-primary/80 to-primary flex items-center justify-center">
               <Cloud className="h-12 w-12 text-white" />
             </div>
           </motion.div>
@@ -121,11 +121,11 @@ export default function HeroSection() {
           transition={{ duration: 0.8, delay: 0.2 }}
           className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6"
         >
-          <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/70">
+          <span className="bg-clip-text text-transparent bg-linear-to-r from-primary to-primary/70">
             Cloud Computing,
           </span>
           <br />
-          <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary/70 to-primary">
+          <span className="bg-clip-text text-transparent bg-linear-to-r from-primary/70 to-primary">
             Powered by the Sun
           </span>
         </motion.h1>

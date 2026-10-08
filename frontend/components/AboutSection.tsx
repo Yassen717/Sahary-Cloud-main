@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 import Image from "next/image";
 import { CheckCircle2 } from "lucide-react";
 
@@ -24,7 +24,7 @@ export default function AboutSection() {
                 className="object-cover rounded-2xl"
               />
             </div>
-            <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/60 to-transparent p-8">
+            <div className="absolute bottom-0 left-0 w-full bg-linear-to-t from-black/60 to-transparent p-8">
               <span className="text-white text-sm font-medium px-3 py-1 rounded-full bg-primary">
                 Sustainable Technology
               </span>
@@ -42,7 +42,7 @@ export default function AboutSection() {
             </h2>
 
             <p className="text-lg text-gray-600 dark:text-gray-400 mb-8">
-              At Sahary Cloud, we're pioneering the future of sustainable hosting in North Africa. By harnessing the abundant sunshine of Libya, we provide reliable and eco-friendly VPS solutions that reduce carbon emissions without compromising on performance or reliability.
+              At Sahary Cloud, we&apos;re pioneering the future of sustainable hosting in North Africa. By harnessing the abundant sunshine of Libya, we provide reliable and eco-friendly VPS solutions that reduce carbon emissions without compromising on performance or reliability.
             </p>
 
             <div className="space-y-4 mb-8">

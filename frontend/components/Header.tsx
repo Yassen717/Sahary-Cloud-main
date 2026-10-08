@@ -49,7 +49,7 @@ export default function Header() {
       className={cn(
         "fixed top-0 w-full z-50 transition-all duration-300",
         isScrolled
-          ? "bg-background/80 backdrop-blur-md border-b border-primary/10 shadow-sm py-2"
+          ? "bg-background/80 backdrop-blur-md border-b border-primary/10 shadow-xs py-2"
           : "bg-transparent border-b border-transparent py-4"
       )}
       role="banner"
@@ -57,10 +57,10 @@ export default function Header() {
     >
       <div className="container mx-auto px-4 flex justify-between items-center">
         <Link href="/" className="flex items-center gap-2" aria-label="Sahary Cloud home">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center transform rotate-12 hover:rotate-0 transition-transform duration-300">
+          <div className="h-10 w-10 rounded-xl bg-linear-to-br from-primary/80 to-primary flex items-center justify-center transform rotate-12 hover:rotate-0 transition-transform duration-300">
             <Cloud size={24} className="text-white" />
           </div>
-          <span className="font-bold text-xl md:text-2xl bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
+          <span className="font-bold text-xl md:text-2xl bg-linear-to-r from-primary to-primary/70 bg-clip-text text-transparent">
             Sahary Cloud
           </span>
         </Link>

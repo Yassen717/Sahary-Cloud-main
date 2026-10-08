@@ -174,7 +174,7 @@ export default function UsageTrackingPage() {
                   Budget Alert
                 </h3>
                 <p className="text-sm text-yellow-800 dark:text-yellow-500 mt-1">
-                  You've used {getBudgetPercentage().toFixed(0)}% of your monthly budget. 
+                  You&apos;ve used {getBudgetPercentage().toFixed(0)}% of your monthly budget. 
                   Consider optimizing your resources or adjusting your budget.
                 </p>
               </div>
@@ -217,10 +217,10 @@ export default function UsageTrackingPage() {
               <div key={index} className="flex-1 flex flex-col items-center group">
                 <div className="relative w-full">
                   <div
-                    className="w-full bg-primary rounded-t transition-all hover:bg-primary/80"
+                    className="w-full bg-primary rounded-t-sm transition-all hover:bg-primary/80"
                     style={{ height: `${(day.cost / 15) * 200}px` }}
                   />
-                  <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-black text-white text-xs px-2 py-1 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     ${day.cost.toFixed(2)}
                   </div>
                 </div>

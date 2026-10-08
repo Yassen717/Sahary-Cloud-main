@@ -137,7 +137,7 @@ export default function HostingDomainsPage() {
               <Globe className="h-5 w-5" />
               Domain Management
             </CardTitle>
-            <CardDescription>You don't have an active hosting account yet.</CardDescription>
+            <CardDescription>You don&apos;t have an active hosting account yet.</CardDescription>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
@@ -282,10 +282,10 @@ export default function HostingDomainsPage() {
                       DNS Verification Instructions
                     </div>
                     <p className="text-muted-foreground">
-                      Add the following TXT record to your domain's DNS settings, then click{' '}
+                      Add the following TXT record to your domain&apos;s DNS settings, then click{' '}
                       <strong>Verify</strong>.
                     </p>
-                    <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1 font-mono text-xs bg-background rounded border p-2">
+                    <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1 font-mono text-xs bg-background rounded-sm border p-2">
                       <span className="text-muted-foreground">Type</span>
                       <span className="col-span-2">TXT</span>
 
@@ -320,7 +320,7 @@ export default function HostingDomainsPage() {
                       <p className="text-muted-foreground">
                         To point your domain to our servers, also add an <strong>A record</strong>:
                       </p>
-                      <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1 font-mono text-xs bg-background rounded border p-2">
+                      <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1 font-mono text-xs bg-background rounded-sm border p-2">
                         <span className="text-muted-foreground">Type</span>
                         <span className="col-span-2">A</span>
 

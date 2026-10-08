@@ -1,8 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   // Enable image optimization for better performance
   images: {
     formats: ['image/avif', 'image/webp'],

@@ -585,7 +585,7 @@ export default function VMDetailsPage() {
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
               This action cannot be undone. This will permanently delete the VM
-              "{vm.name}" and all associated data.
+              &quot;{vm.name}&quot; and all associated data.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

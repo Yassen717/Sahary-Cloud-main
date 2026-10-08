@@ -36,7 +36,7 @@ export function UserProfileDropdown() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="focus:outline-none">
+      <DropdownMenuTrigger className="focus:outline-hidden">
         <Avatar className="h-9 w-9 cursor-pointer ring-2 ring-transparent hover:ring-primary/50 transition-all">
           <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${userName}`} />
           <AvatarFallback className="bg-primary text-primary-foreground">

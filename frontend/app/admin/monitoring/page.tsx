@@ -286,7 +286,7 @@ export default function SystemMonitoringPage() {
                                     return (
                                         <div key={log.id} className="flex items-start gap-3 p-3 border-l-4 rounded-lg hover:bg-muted/50 transition-all-smooth"
                                             style={{ borderLeftColor: log.level === 'error' ? 'rgb(239, 68, 68)' : log.level === 'warning' ? 'rgb(245, 158, 11)' : 'rgb(59, 130, 246)' }}>
-                                            <div className={`h-8 w-8 rounded-lg ${config.bg} flex items-center justify-center flex-shrink-0`}>
+                                            <div className={`h-8 w-8 rounded-lg ${config.bg} flex items-center justify-center shrink-0`}>
                                                 <Icon className={`h-4 w-4 ${config.color}`} />
                                             </div>
                                             <div className="flex-1 min-w-0">
