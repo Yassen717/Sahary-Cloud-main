@@ -97,7 +97,7 @@ export default function DashboardPage() {
     <div className="container mx-auto p-6 space-y-6">
       <div className="animate-fade-in">
         <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
-        <p className="text-muted-foreground">Welcome back! Here's your overview</p>
+        <p className="text-muted-foreground">Welcome back! Here&apos;s your overview</p>
       </div>
 
       {/* Stats Cards */}

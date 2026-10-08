@@ -10,7 +10,7 @@ import { Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9\s])\S+$/;
-const NAME_REGEX = /^[\p{L}][\p{L}\s'-]*$/u;
+const NAME_REGEX = new RegExp("^[\\p{L}][\\p{L}\\s'-]*$", "u");
 
 export default function RegisterPage() {
   const [formData, setFormData] = useState({

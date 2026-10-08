@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 // Allow the browser sendBeacon content-type
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 interface VitalPayload {
     name: string;

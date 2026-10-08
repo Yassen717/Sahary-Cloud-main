@@ -264,7 +264,7 @@ export default function CreateVMPage() {
                     id="custom"
                     checked={formData.customSpecs}
                     onChange={(e) => setFormData({ ...formData, customSpecs: e.target.checked, plan: '' })}
-                    className="rounded"
+                    className="rounded-sm"
                   />
                   <Label htmlFor="custom" className="cursor-pointer">
                     Customize specifications

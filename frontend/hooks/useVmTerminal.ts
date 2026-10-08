@@ -11,7 +11,7 @@ interface UseVmTerminalOptions {
 }
 
 interface UseVmTerminalReturn {
-    terminalRef: React.RefObject<HTMLDivElement>;
+    terminalRef: React.RefObject<HTMLDivElement | null>;
     connected: boolean;
     connecting: boolean;
     connect: () => void;

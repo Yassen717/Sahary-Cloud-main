@@ -207,7 +207,7 @@ export default function SolarDashboardPage() {
                 {production?.daily.map((data, index) => (
                   <div key={index} className="flex-1 flex flex-col items-center">
                     <div
-                      className="w-full bg-yellow-500 rounded-t transition-all hover:bg-yellow-600"
+                      className="w-full bg-yellow-500 rounded-t-sm transition-all hover:bg-yellow-600"
                       style={{ height: `${(data.production / 10) * 100}%` }}
                     />
                     <span className="text-xs text-muted-foreground mt-2">
@@ -229,7 +229,7 @@ export default function SolarDashboardPage() {
                 {production?.monthly.map((data, index) => (
                   <div key={index} className="flex-1 flex flex-col items-center">
                     <div
-                      className="w-full bg-green-500 rounded-t transition-all hover:bg-green-600"
+                      className="w-full bg-green-500 rounded-t-sm transition-all hover:bg-green-600"
                       style={{ height: `${(data.production / 500) * 100}%` }}
                     />
                     <span className="text-xs text-muted-foreground mt-2">

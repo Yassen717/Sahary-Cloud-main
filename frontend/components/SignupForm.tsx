@@ -4,7 +4,7 @@ import { useState } from "react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 import { useToast } from "@/hooks/use-toast";
 import emailjs from "@emailjs/browser";
 

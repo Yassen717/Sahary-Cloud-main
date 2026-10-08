@@ -255,13 +255,13 @@ export default function NotificationsPage() {
                             >
                                 <CardContent className="pt-6">
                                     <div className="flex items-start gap-4">
-                                        <div className={`h-10 w-10 rounded-lg ${config.bg} flex items-center justify-center flex-shrink-0`}>
+                                        <div className={`h-10 w-10 rounded-lg ${config.bg} flex items-center justify-center shrink-0`}>
                                             <Icon className={`h-5 w-5 ${config.color}`} />
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-start justify-between gap-4 mb-1">
                                                 <h3 className="font-semibold">{notification.title}</h3>
-                                                <div className="flex items-center gap-2 flex-shrink-0">
+                                                <div className="flex items-center gap-2 shrink-0">
                                                     {!notification.read && (
                                                         <Button
                                                             variant="ghost"

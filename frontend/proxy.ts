@@ -5,7 +5,7 @@ import type { NextRequest } from "next/server";
  * Decode a JWT payload without signature verification.
  * This is intentionally unverified — it is only used for UX routing decisions.
  * All real security enforcement happens on the backend API.
- * Works in Next.js Edge Runtime (no Buffer, uses atob).
+ * Uses atob (no Buffer) so it works in the Proxy Node.js runtime.
  */
 function decodeJWTPayload(token: string): Record<string, unknown> | null {
   try {
@@ -47,7 +47,7 @@ const protectedRoutes = [
 // Admin-only routes
 const adminRoutes = ["/admin"];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Check if the route is public
@@ -102,7 +102,7 @@ export function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-// Configure which routes to run middleware on
+// Configure which routes to run proxy on
 export const config = {
   matcher: [
     /*

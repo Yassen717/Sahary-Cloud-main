@@ -66,9 +66,9 @@ export function PlanCard({ plan, billingCycle, isCurrentPlan, onSelect, delay = 
                     {plan.features.map((feature, index) => (
                         <li key={index} className="flex items-start gap-2">
                             {feature.included ? (
-                                <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                                <Check className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
                             ) : (
-                                <X className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                                <X className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
                             )}
                             <span className={`text-sm ${!feature.included ? 'text-muted-foreground line-through' : ''}`}>
                                 {feature.name}

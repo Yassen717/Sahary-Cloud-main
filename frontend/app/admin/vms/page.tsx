@@ -226,7 +226,7 @@ export default function AdminVMsPage() {
                         <CardContent className="pt-6">
                             <div className="flex items-start justify-between gap-4">
                                 <div className="flex items-start gap-4 flex-1">
-                                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                                         <Server className="h-6 w-6 text-primary" />
                                     </div>
                                     <div className="flex-1 min-w-0">

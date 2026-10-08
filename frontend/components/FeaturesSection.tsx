@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion, type Variants } from "motion/react";
 import { Server, Cloud, ShieldCheck, Zap, Cpu, Clock, Globe, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -47,7 +47,7 @@ const features = [
   }
 ];
 
-const containerVariants = {
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
@@ -57,7 +57,7 @@ const containerVariants = {
   }
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { opacity: 0, y: 20 },
   visible: {
     opacity: 1,
@@ -72,7 +72,7 @@ const itemVariants = {
 export default function FeaturesSection() {
   return (
     <section id="features" className="py-20 bg-secondary/50 dark:bg-secondary/10 relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-primary/10 dark:from-primary/10 dark:to-primary/20" />
+      <div className="absolute inset-0 bg-linear-to-b from-primary/5 to-primary/10 dark:from-primary/10 dark:to-primary/20" />
       
       <div className="container mx-auto px-4 relative z-10">
         <motion.div 
@@ -82,7 +82,7 @@ export default function FeaturesSection() {
           transition={{ duration: 0.6 }}
           className="text-center mb-16"
         >
-          <h2 className="text-3xl md:text-5xl font-bold mb-4 bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
+          <h2 className="text-3xl md:text-5xl font-bold mb-4 bg-linear-to-r from-primary to-primary/70 bg-clip-text text-transparent">
             Why Choose Sahary Cloud
           </h2>
           <p className="text-xl text-gray-600 dark:text-gray-400 max-w-3xl mx-auto">
@@ -105,8 +105,8 @@ export default function FeaturesSection() {
               whileHover={{ scale: 1.05 }}
               className="relative group"
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-primary/10 to-primary/20 rounded-2xl transform group-hover:scale-105 transition-transform duration-300" />
-              <Card className="relative h-full border-none shadow-lg hover:shadow-xl transition-shadow duration-300 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm">
+              <div className="absolute inset-0 bg-linear-to-r from-primary/10 to-primary/20 rounded-2xl transform group-hover:scale-105 transition-transform duration-300" />
+              <Card className="relative h-full border-none shadow-lg hover:shadow-xl transition-shadow duration-300 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xs">
                 <CardHeader className="pt-8 flex flex-col items-center text-center">
                   <motion.div
                     whileHover={{ rotate: 360 }}
@@ -115,7 +115,7 @@ export default function FeaturesSection() {
                   >
                     {feature.icon}
                   </motion.div>
-                  <CardTitle className="text-xl bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
+                  <CardTitle className="text-xl bg-linear-to-r from-primary to-primary/70 bg-clip-text text-transparent">
                     {feature.title}
                   </CardTitle>
                 </CardHeader>

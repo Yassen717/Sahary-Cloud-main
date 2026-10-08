@@ -214,7 +214,7 @@ export default function ProfilePage() {
         <div className="absolute inset-0 gradient-green-subtle opacity-50"></div>
         <div className="relative flex items-center gap-6 p-6">
           <div className="relative group">
-            <div className="absolute inset-0 bg-gradient-to-r from-primary to-green-500 rounded-full blur opacity-75 group-hover:opacity-100 transition-all-smooth animate-pulse-slow"></div>
+            <div className="absolute inset-0 bg-linear-to-r from-primary to-green-500 rounded-full blur-sm opacity-75 group-hover:opacity-100 transition-all-smooth animate-pulse-slow"></div>
             <Avatar className="h-24 w-24 relative border-4 border-background transition-all-smooth group-hover:scale-110">
               <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${`${currentUser.firstName ?? ''} ${currentUser.lastName ?? ''}`.trim() || currentUser.email}`} />
               <AvatarFallback className="bg-primary text-primary-foreground text-3xl font-bold">
@@ -403,8 +403,8 @@ export default function ProfilePage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                <div className="flex items-start gap-4 py-4 border-b transition-all-smooth hover:bg-muted/50 px-2 rounded">
-                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <div className="flex items-start gap-4 py-4 border-b transition-all-smooth hover:bg-muted/50 px-2 rounded-sm">
+                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
                   </div>
                   <div className="flex-1">
@@ -417,8 +417,8 @@ export default function ProfilePage() {
                   </div>
                 </div>
 
-                <div className="flex items-start gap-4 py-4 border-b transition-all-smooth hover:bg-muted/50 px-2 rounded">
-                  <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
+                <div className="flex items-start gap-4 py-4 border-b transition-all-smooth hover:bg-muted/50 px-2 rounded-sm">
+                  <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center shrink-0">
                     <Activity className="h-5 w-5 text-green-600 dark:text-green-400" />
                   </div>
                   <div className="flex-1">

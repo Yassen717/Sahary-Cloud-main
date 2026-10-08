@@ -166,7 +166,7 @@ export default function SearchPage() {
                         <Card>
                             <CardContent className="py-12 text-center">
                                 <Search className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-                                <p className="text-muted-foreground font-medium">No results found for "{searchQuery}"</p>
+                                <p className="text-muted-foreground font-medium">No results found for &quot;{searchQuery}&quot;</p>
                                 <p className="text-sm text-muted-foreground mt-2">Try searching with different keywords</p>
                             </CardContent>
                         </Card>
@@ -174,7 +174,7 @@ export default function SearchPage() {
                         <>
                             <div className="flex items-center justify-between mb-4 animate-fade-in">
                                 <p className="text-sm text-muted-foreground">
-                                    Found {results.length} result{results.length !== 1 ? 's' : ''} for "{searchQuery}"
+                                    Found {results.length} result{results.length !== 1 ? 's' : ''} for &quot;{searchQuery}&quot;
                                 </p>
                             </div>
                             {results.map((result, index) => {
@@ -189,13 +189,13 @@ export default function SearchPage() {
                                     >
                                         <CardContent className="pt-6">
                                             <div className="flex items-start gap-4">
-                                                <div className={`h-10 w-10 rounded-lg ${config.bg} flex items-center justify-center flex-shrink-0`}>
+                                                <div className={`h-10 w-10 rounded-lg ${config.bg} flex items-center justify-center shrink-0`}>
                                                     <Icon className={`h-5 w-5 ${config.color}`} />
                                                 </div>
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-start justify-between gap-4 mb-1">
                                                         <h3 className="font-semibold">{result.title}</h3>
-                                                        <Badge variant="outline" className="text-xs capitalize flex-shrink-0">
+                                                        <Badge variant="outline" className="text-xs capitalize shrink-0">
                                                             {result.type}
                                                         </Badge>
                                                     </div>
