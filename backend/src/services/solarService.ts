@@ -236,6 +236,7 @@ class SolarService {
           averageEfficiency: 0,
           environmentalImpact: this.calculateEnvironmentalImpact(0, periodDays),
           dataPoints: 0,
+          period,
         };
       }
 

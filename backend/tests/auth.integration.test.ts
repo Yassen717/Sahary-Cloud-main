@@ -91,7 +91,8 @@ describe('Authentication API Integration Tests', () => {
         .post('/api/v1/auth/register')
         .send(testUser);
 
-      expect(response.status).toBe(400);
+      // Duplicate emails are surfaced as a conflict, not a generic 400.
+      expect(response.status).toBe(409);
       expect(response.body.success).toBe(false);
       expect(response.body.message).toContain('already exists');
     });
@@ -210,6 +211,13 @@ describe('Authentication API Integration Tests', () => {
   describe('Password Operations', () => {
     test('should change password', async () => {
       const newPassword = 'NewPassword123!';
+
+      // /change-password is gated by requireEmailVerification — the user must
+      // be verified first.
+      await prisma.user.update({
+        where: { id: userId },
+        data: { isVerified: true },
+      });
 
       const response = await request(app)
         .post('/api/v1/auth/change-password')
@@ -374,7 +382,10 @@ describe('Authentication API Integration Tests', () => {
 
       expect(response.status).toBe(401);
       expect(response.body.success).toBe(false);
-      expect(response.body.message).toContain('deactivated');
+      // Deactivated accounts get the same message as bad credentials so
+      // account state cannot be enumerated.
+      expect(response.body.message).toContain('Invalid email or password');
+      expect(response.body.message).not.toContain('deactivated');
     });
   });
 
