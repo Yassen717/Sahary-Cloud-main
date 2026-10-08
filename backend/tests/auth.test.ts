@@ -5,6 +5,7 @@ const app = require('../src/index');
 const { prisma } = require('../src/config/database');
 const AuthService = require('../src/services/authService').default;
 const JWTUtils = require('../src/utils/jwt').default;
+const redisService = require('../src/services/redisService');
 
 // Test data
 const testUser = {
@@ -122,10 +123,18 @@ describe('Authentication Service', () => {
         data: { isActive: false }
       });
 
+      // The error must be identical to a bad-credentials failure so account
+      // state cannot be enumerated; the real reason stays in the audit log.
       await expect(AuthService.login({
         email: testUser.email,
         password: testUser.password,
-      })).rejects.toThrow('Account is deactivated');
+      })).rejects.toThrow('Invalid email or password');
+
+      const audit = await prisma.auditLog.findFirst({
+        where: { action: 'LOGIN_FAILED' },
+      });
+      expect(audit).toBeTruthy();
+      expect(audit.newValues).toContain('deactivated');
     });
   });
 
@@ -148,7 +157,26 @@ describe('Authentication Service', () => {
       expect(newTokens).toBeDefined();
       expect(newTokens.accessToken).toBeDefined();
       expect(newTokens.refreshToken).toBeDefined();
-      expect(newTokens.accessToken).not.toBe(userTokens.accessToken);
+
+      // JWT iat has second granularity, so a fast refresh may legitimately
+      // return an identical access token string — assert the token is valid
+      // and bound to the same user instead of comparing strings.
+      const oldPayload = JWTUtils.decodeToken(userTokens.accessToken).payload;
+      const newPayload = JWTUtils.decodeToken(newTokens.accessToken).payload;
+      expect(newPayload.userId).toBe(oldPayload.userId);
+      await expect(
+        JWTUtils.verifyAccessToken(newTokens.accessToken)
+      ).resolves.toMatchObject({ userId: oldPayload.userId, type: 'access' });
+
+      // Rotation: with a blacklist store available the consumed refresh
+      // token is revoked and cannot be replayed. The service fails open when
+      // Redis is down (warnRedisBlacklistUnavailable), so only assert
+      // revocation when the store is actually reachable.
+      if (redisService.isReady()) {
+        await expect(
+          AuthService.refreshToken(userTokens.refreshToken)
+        ).rejects.toThrow('Token refresh failed');
+      }
     });
 
     test('should not refresh with invalid token', async () => {
@@ -199,17 +227,45 @@ describe('Authentication Service', () => {
 
       expect(result).toBeDefined();
       expect(result.message).toContain('reset link has been sent');
-      expect(result.resetToken).toBeDefined();
+      // The token is delivered by email only and is never part of the result.
+      expect(result.resetToken).toBeUndefined();
+
+      // A token is still issued — stored on the user record for the emailed
+      // link to consume.
+      const dbUser = await prisma.user.findUnique({
+        where: { email: testUser.email.toLowerCase() },
+        select: { passwordResetToken: true, passwordResetExpires: true },
+      });
+      expect(dbUser.passwordResetToken).toBeTruthy();
+      expect(dbUser.passwordResetExpires.getTime()).toBeGreaterThan(Date.now());
     });
 
     test('should reset password with valid token', async () => {
-      const resetResult = await AuthService.requestPasswordReset(testUser.email);
+      await AuthService.requestPasswordReset(testUser.email);
       const newPassword = 'ResetPassword123!';
 
+      // The service no longer returns the token; the emailed link carries the
+      // value stored on the user record.
+      const dbUser = await prisma.user.findUnique({
+        where: { email: testUser.email.toLowerCase() },
+        select: { passwordResetToken: true },
+      });
+
       await expect(AuthService.resetPassword(
-        resetResult.resetToken,
+        dbUser.passwordResetToken,
         newPassword
       )).resolves.not.toThrow();
+
+      // The token is single-use — it is cleared when consumed, so replaying
+      // it must fail.
+      const afterReset = await prisma.user.findUnique({
+        where: { email: testUser.email.toLowerCase() },
+        select: { passwordResetToken: true },
+      });
+      expect(afterReset.passwordResetToken).toBeNull();
+      await expect(
+        AuthService.resetPassword(dbUser.passwordResetToken, newPassword)
+      ).rejects.toThrow('Password reset failed');
 
       // Verify new password works
       const loginResult = await AuthService.login({
@@ -247,8 +303,18 @@ describe('Authentication Service', () => {
       const result = await AuthService.resendEmailVerification(testUser.email);
 
       expect(result).toBeDefined();
-      expect(result.message).toContain('resent');
-      expect(result.verificationToken).toBeDefined();
+      // Uniform anti-enumeration response; the token is emailed, never
+      // returned in the result.
+      expect(result.message).toBe('If the email exists and is unverified, a verification link has been sent');
+      expect(result.verificationToken).toBeUndefined();
+
+      // A fresh verification token was issued on the user record.
+      const dbUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { emailVerificationToken: true, emailVerificationExpires: true },
+      });
+      expect(dbUser.emailVerificationToken).toBeTruthy();
+      expect(dbUser.emailVerificationExpires.getTime()).toBeGreaterThan(Date.now());
     });
 
     test('should not resend verification for verified user', async () => {
@@ -258,8 +324,13 @@ describe('Authentication Service', () => {
         data: { isVerified: true }
       });
 
-      await expect(AuthService.resendEmailVerification(testUser.email))
-        .rejects.toThrow('Email is already verified');
+      // Verified, unverified and non-existent addresses all get the same
+      // response so account state cannot be enumerated.
+      const result = await AuthService.resendEmailVerification(testUser.email);
+      expect(result.message).toBe('If the email exists and is unverified, a verification link has been sent');
+
+      const unknown = await AuthService.resendEmailVerification('nobody@example.com');
+      expect(unknown.message).toBe(result.message);
     });
   });
 
