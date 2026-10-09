@@ -172,7 +172,7 @@ app.use(compression());
 
 const limiter = rateLimit({
   windowMs: Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS || '', 10) || 15 * 60 * 1000,
-  max: Number.parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '', 10) || 100,
+  max: Number.parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '', 10) || 1000,
   message: {
     error: 'Too many requests from this IP, please try again later.',
     retryAfter: Math.ceil(

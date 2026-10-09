@@ -15,7 +15,7 @@ if (!process.env.DOCKER_HOST && process.platform === 'win32') {
   process.env.DOCKER_HOST = 'npipe:////./pipe/docker_engine';
 }
 
-// The app mounts a global 100 req/15min limiter on /api/ keyed by client IP.
+// The app mounts a global 1000 req/15min limiter on /api/ keyed by client IP.
 // Every test request shares the same IP, so entire suites would blow through
 // that budget and fail with spurious 429s. Raise it for tests — the
 // per-route apiRateLimit (60/min) still exercises rate-limit assertions.
