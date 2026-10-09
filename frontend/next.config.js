@@ -1,3 +1,16 @@
+// Backend origins (http + ws/wss) allowed in CSP connect-src, derived from the public API env vars
+function backendConnectSources() {
+  const origins = new Set();
+  for (const value of [process.env.NEXT_PUBLIC_API_URL, process.env.NEXT_PUBLIC_BACKEND_URL]) {
+    try {
+      const url = new URL(value);
+      if (url.protocol === 'http:' || url.protocol === 'https:') origins.add(url.origin);
+    } catch {}
+  }
+  if (origins.size === 0) origins.add('http://localhost:3000');
+  return [...origins].flatMap((origin) => [origin, origin.replace(/^http/, 'ws')]);
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Enable image optimization for better performance
@@ -56,7 +69,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https: blob:",
               "font-src 'self' data:",
-              "connect-src 'self' http://localhost:3000 https:",
+              `connect-src 'self' ${backendConnectSources().join(' ')} https:`,
               "frame-ancestors 'none'",
               "base-uri 'self'",
               "form-action 'self'",
