@@ -21,6 +21,16 @@ export type ApiUpdateProfileRequest = Partial<
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api/v1";
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export class ApiClient {
   private baseURL: string;
   private token: string | null = null;
@@ -113,7 +123,7 @@ export class ApiClient {
         severity: "medium",
         details: `Rate limit exceeded for endpoint: ${endpoint}`,
       });
-      throw new Error("Too many requests. Please try again later.");
+      throw new ApiError("Too many requests. Please try again later.", 429);
     }
 
     const headers: HeadersInit = {
@@ -170,7 +180,13 @@ export class ApiClient {
         });
       }
 
-      throw new Error(this.extractErrorMessage(error, response.status));
+      const message = this.extractErrorMessage(error, response.status);
+      throw new ApiError(
+        response.status === 429 && message === "HTTP 429"
+          ? "Too many requests. Please wait a moment and try again."
+          : message,
+        response.status,
+      );
     }
 
     return response.json();
