@@ -416,6 +416,10 @@ export class ApiClient {
     return this.request("/billing/invoices");
   }
 
+  async getInvoice(id: string) {
+    return this.request(`/billing/invoices/${id}`);
+  }
+
   async getUsage() {
     return withCache(
       () => this.request("/billing/usage"),

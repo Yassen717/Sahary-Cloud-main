@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,8 @@ import {
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 
+type InvoiceStatus = 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELLED' | 'REFUNDED';
+
 interface InvoiceItem {
   description: string;
   quantity: number;
@@ -33,22 +36,23 @@ interface InvoiceItem {
 interface Invoice {
   id: string;
   invoiceNumber: string;
-  amount: number;
-  status: 'PAID' | 'PENDING' | 'OVERDUE';
+  status: InvoiceStatus;
   dueDate: string;
   issueDate: string;
-  paidAt?: string;
+  paidAt?: string | null;
   items: InvoiceItem[];
   subtotal: number;
   tax: number;
+  discount: number;
   total: number;
-  notes?: string;
+  customer?: { firstName: string; lastName: string; email: string };
 }
 
 export default function InvoiceDetailsPage() {
   const params = useParams();
   const router = useRouter();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [paying, setPaying] = useState(false);
@@ -59,33 +63,31 @@ export default function InvoiceDetailsPage() {
 
   const loadInvoice = async () => {
     try {
-      // Mock data - replace with actual API call
-      const mockInvoice: Invoice = {
-        id: params.id as string,
-        invoiceNumber: `INV-${String(params.id).padStart(6, '0')}`,
-        amount: 125.50,
-        status: 'PENDING',
-        dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        issueDate: new Date().toISOString(),
-        items: [
-          { description: 'VM - Standard Plan', quantity: 2, unitPrice: 10, totalPrice: 20 },
-          { description: 'VM - Premium Plan', quantity: 1, unitPrice: 20, totalPrice: 20 },
-          { description: 'Storage - 100GB', quantity: 1, unitPrice: 5, totalPrice: 5 },
-          { description: 'Bandwidth - 1TB', quantity: 1, unitPrice: 10, totalPrice: 10 },
-        ],
-        subtotal: 55,
-        tax: 5.50,
-        total: 60.50,
-        notes: 'Thank you for your business!',
-      };
-      
-      setInvoice(mockInvoice);
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to load invoice',
-        variant: 'destructive',
+      const response = await apiClient.getInvoice(params.id as string);
+      const data = response?.data?.invoice;
+      if (!data) throw new Error('Invoice not found');
+
+      setInvoice({
+        id: data.id,
+        invoiceNumber: data.invoiceNumber,
+        status: data.status,
+        issueDate: data.createdAt,
+        dueDate: data.dueDate,
+        paidAt: data.paidAt,
+        items: (data.items ?? []).map((item: any) => ({
+          description: item.description,
+          quantity: Number(item.quantity),
+          unitPrice: Number(item.unitPrice),
+          totalPrice: Number(item.totalPrice),
+        })),
+        subtotal: Number(data.subtotal),
+        tax: Number(data.tax),
+        discount: Number(data.discount),
+        total: Number(data.amount),
+        customer: data.user,
       });
+    } catch {
+      setInvoice(null);
     } finally {
       setLoading(false);
     }
@@ -193,6 +195,8 @@ export default function InvoiceDetailsPage() {
     );
   }
 
+  const customer = invoice.customer ?? user;
+
   return (
     <div className="container mx-auto p-6 max-w-4xl">
       <div className="mb-6 print:hidden">
@@ -255,8 +259,8 @@ export default function InvoiceDetailsPage() {
             <div>
               <h3 className="font-semibold mb-2">Bill To</h3>
               <div className="text-sm space-y-1">
-                <p className="font-medium">Customer Name</p>
-                <p className="text-muted-foreground">customer@example.com</p>
+                <p className="font-medium">{customer ? `${customer.firstName} ${customer.lastName}` : ''}</p>
+                <p className="text-muted-foreground">{customer?.email}</p>
               </div>
             </div>
           </div>
@@ -297,8 +301,14 @@ export default function InvoiceDetailsPage() {
                 <span className="text-muted-foreground">Subtotal:</span>
                 <span className="font-medium">${invoice.subtotal.toFixed(2)}</span>
               </div>
+              {invoice.discount > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Discount:</span>
+                  <span className="font-medium">-${invoice.discount.toFixed(2)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Tax (10%):</span>
+                <span className="text-muted-foreground">Tax:</span>
                 <span className="font-medium">${invoice.tax.toFixed(2)}</span>
               </div>
               <Separator />
@@ -309,19 +319,8 @@ export default function InvoiceDetailsPage() {
             </div>
           </div>
 
-          {/* Notes */}
-          {invoice.notes && (
-            <>
-              <Separator />
-              <div>
-                <h3 className="font-semibold mb-2">Notes</h3>
-                <p className="text-sm text-muted-foreground">{invoice.notes}</p>
-              </div>
-            </>
-          )}
-
           {/* Payment Button */}
-          {invoice.status !== 'PAID' && (
+          {['PENDING', 'OVERDUE'].includes(invoice.status) && (
             <>
               <Separator className="print:hidden" />
               <div className="flex justify-end print:hidden">
