@@ -38,10 +38,23 @@ interface HostingAccount {
   domains: HostingDomain[];
 }
 
+interface HostingPlan {
+  id: string;
+  name: string;
+  description?: string | null;
+  diskGB: number;
+  bandwidthGB: number;
+  maxDomains: number;
+  monthlyPrice: string | number;
+}
+
 export default function HostingDomainsPage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [account, setAccount] = useState<HostingAccount | null>(null);
+  const [plans, setPlans] = useState<HostingPlan[]>([]);
+  const [creatingPlanId, setCreatingPlanId] = useState<string | null>(null);
   const [newDomain, setNewDomain] = useState('');
   const [adding, setAdding] = useState(false);
   const [verifying, setVerifying] = useState<string | null>(null);
@@ -49,22 +62,48 @@ export default function HostingDomainsPage() {
   const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
-    loadAccount();
+    loadAccount().finally(() => setLoading(false));
   }, []);
+
+  const loadPlans = async () => {
+    try {
+      const res = await apiClient.getHostingPlans();
+      setPlans(res.data ?? []);
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to load hosting plans', variant: 'destructive' });
+    }
+  };
 
   const loadAccount = async () => {
     try {
-      setLoading(true);
       const res = await apiClient.getHostingAccount();
       setAccount(res.data);
     } catch (err: any) {
-      if (err.message?.includes('No hosting account')) {
+      if (err.status === 404) {
         setAccount(null);
+        await loadPlans();
       } else {
         toast({ title: 'Error', description: err.message || 'Failed to load hosting account', variant: 'destructive' });
       }
+    }
+  };
+
+  const refreshAccount = async () => {
+    setRefreshing(true);
+    await loadAccount();
+    setRefreshing(false);
+  };
+
+  const handleCreateAccount = async (planId: string) => {
+    try {
+      setCreatingPlanId(planId);
+      await apiClient.createHostingAccount(planId);
+      toast({ title: 'Hosting account created' });
+      await refreshAccount();
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to create hosting account', variant: 'destructive' });
     } finally {
-      setLoading(false);
+      setCreatingPlanId(null);
     }
   };
 
@@ -76,7 +115,7 @@ export default function HostingDomainsPage() {
       await apiClient.addHostingDomain(newDomain.trim().toLowerCase());
       toast({ title: 'Domain added', description: 'Add the DNS TXT record below to verify ownership.' });
       setNewDomain('');
-      await loadAccount();
+      await refreshAccount();
     } catch (err: any) {
       toast({ title: 'Error', description: err.message || 'Failed to add domain', variant: 'destructive' });
     } finally {
@@ -93,7 +132,7 @@ export default function HostingDomainsPage() {
       } else {
         toast({ title: 'Not yet verified', description: 'DNS record not found. Please wait for propagation and try again.', variant: 'destructive' });
       }
-      await loadAccount();
+      await refreshAccount();
     } catch (err: any) {
       toast({ title: 'Verification failed', description: err.message || 'DNS record not found', variant: 'destructive' });
     } finally {
@@ -106,7 +145,7 @@ export default function HostingDomainsPage() {
       setRemoving(domainId);
       await apiClient.removeHostingDomain(domainId);
       toast({ title: 'Domain removed' });
-      await loadAccount();
+      await refreshAccount();
     } catch (err: any) {
       toast({ title: 'Error', description: err.message || 'Failed to remove domain', variant: 'destructive' });
     } finally {
@@ -114,10 +153,14 @@ export default function HostingDomainsPage() {
     }
   };
 
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
+  const copyToClipboard = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      toast({ title: 'Copy failed', description: 'The clipboard is not available in this browser.', variant: 'destructive' });
+    }
   };
 
   if (loading) {
@@ -130,21 +173,57 @@ export default function HostingDomainsPage() {
 
   if (!account) {
     return (
-      <div className="container mx-auto max-w-3xl p-6">
+      <div className="container mx-auto max-w-3xl p-6 space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold leading-none tracking-tight flex items-center gap-2">
               <Globe className="h-5 w-5" />
               Domain Management
-            </CardTitle>
+            </h1>
             <CardDescription>You don&apos;t have an active hosting account yet.</CardDescription>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              Create a hosting account first to manage your domains.
+              Choose a plan below to create your hosting account and manage your domains.
             </p>
           </CardContent>
         </Card>
+
+        {plans.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No hosting plans are available right now.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {plans.map((plan) => (
+              <Card key={plan.id} className="flex flex-col">
+                <CardHeader>
+                  <CardTitle className="text-base">{plan.name}</CardTitle>
+                  <CardDescription>{plan.description}</CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-1 flex-col justify-between gap-4">
+                  <div className="space-y-3">
+                    <p className="text-2xl font-bold">
+                      ${Number(plan.monthlyPrice).toFixed(2)}
+                      <span className="text-sm font-normal text-muted-foreground"> / month</span>
+                    </p>
+                    <ul className="text-sm text-muted-foreground space-y-1">
+                      <li>{plan.diskGB} GB disk</li>
+                      <li>{plan.bandwidthGB} GB bandwidth / month</li>
+                      <li>Up to {plan.maxDomains} custom domain(s)</li>
+                    </ul>
+                  </div>
+                  <Button
+                    className="w-full"
+                    disabled={creatingPlanId !== null}
+                    onClick={() => handleCreateAccount(plan.id)}
+                  >
+                    {creatingPlanId === plan.id && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Create account
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -161,6 +240,7 @@ export default function HostingDomainsPage() {
         <p className="text-muted-foreground mt-1">
           Manage your hosting subdomain and custom domains.
         </p>
+        {refreshing && <p className="text-xs text-muted-foreground mt-1" role="status">Refreshing…</p>}
       </div>
 
       {/* Assigned subdomain */}
@@ -181,6 +261,7 @@ export default function HostingDomainsPage() {
           <Button
             size="sm"
             variant="ghost"
+            aria-label="Copy subdomain"
             onClick={() => copyToClipboard(account.domain, 'subdomain')}
           >
             {copied === 'subdomain' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
@@ -261,6 +342,7 @@ export default function HostingDomainsPage() {
                     <Button
                       size="sm"
                       variant="ghost"
+                      aria-label={`Remove ${d.domain}`}
                       className="text-destructive hover:text-destructive"
                       onClick={() => handleRemove(d.id)}
                       disabled={removing === d.id}
@@ -295,6 +377,7 @@ export default function HostingDomainsPage() {
                         size="icon"
                         variant="ghost"
                         className="h-5 w-5"
+                        aria-label={`Copy host for ${d.domain}`}
                         onClick={() => copyToClipboard(d.domain, `host-${d.id}`)}
                       >
                         {copied === `host-${d.id}` ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -306,6 +389,7 @@ export default function HostingDomainsPage() {
                         size="icon"
                         variant="ghost"
                         className="h-5 w-5"
+                        aria-label={`Copy TXT value for ${d.domain}`}
                         onClick={() => copyToClipboard(`sahary-verify=${d.verifyToken}`, `val-${d.id}`)}
                       >
                         {copied === `val-${d.id}` ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -336,6 +420,7 @@ export default function HostingDomainsPage() {
                             size="icon"
                             variant="ghost"
                             className="h-5 w-5"
+                            aria-label={`Copy server IP for ${d.domain}`}
                             onClick={() => copyToClipboard(process.env.NEXT_PUBLIC_SERVER_IP!, `ip-${d.id}`)}
                           >
                             {copied === `ip-${d.id}` ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}

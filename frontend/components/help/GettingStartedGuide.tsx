@@ -45,7 +45,7 @@ const steps = [
     },
 ];
 
-export function GettingStartedGuide() {
+export function GettingStartedGuide({ onViewFaqs }: { onViewFaqs: () => void }) {
     return (
         <div className="space-y-8">
             <div className="text-center max-w-2xl mx-auto">
@@ -107,11 +107,11 @@ export function GettingStartedGuide() {
                         Our support team is available 24/7 to help you get started. Don&apos;t hesitate to reach out!
                     </p>
                     <div className="flex flex-wrap gap-3">
-                        <Button asChild variant="outline">
-                            <Link href="/help#faqs">View FAQs</Link>
+                        <Button variant="outline" onClick={onViewFaqs}>
+                            View FAQs
                         </Button>
                         <Button asChild variant="outline">
-                            <Link href="#contact">Contact Support</Link>
+                            <Link href="/contact">Contact Support</Link>
                         </Button>
                     </div>
                 </CardContent>

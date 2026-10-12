@@ -1,421 +1,264 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { apiClient } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Slider } from '@/components/ui/slider';
+import { AdminNav } from '@/components/admin/AdminNav';
 import {
-    Sun,
+    AlertTriangle,
     Battery,
-    Thermometer,
+    CheckCircle2,
     Gauge,
-    Settings,
-    Wrench,
-    FileText,
-    Zap,
-    RefreshCw
+    Loader2,
+    RefreshCw,
+    Sun,
+    Zap
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
+interface SolarStatus {
+    status: string;
+    production: number;
+    consumption: number;
+    efficiency: number;
+    batteryLevel: number;
+    activeVMs: number;
+}
+
+interface SolarAlert {
+    id: string;
+    type: string;
+    severity: string;
+    message: string;
+    createdAt: string;
+}
+
 export default function SolarManagementPage() {
     const { toast } = useToast();
+    const [loading, setLoading] = useState(true);
+    const [reloadKey, setReloadKey] = useState(0);
+    const [status, setStatus] = useState<SolarStatus | null>(null);
+    const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
+    const [systemState, setSystemState] = useState<string | null>(null);
+    const [alerts, setAlerts] = useState<SolarAlert[]>([]);
+    const [collecting, setCollecting] = useState(false);
+    const [resolvingId, setResolvingId] = useState<string | null>(null);
 
-    // Sensor configuration
-    const [productionSensor, setProductionSensor] = useState([5.0]);
-    const [batterySensor, setBatterySensor] = useState([12.0]);
-    const [tempSensor, setTempSensor] = useState([25.0]);
-    const [irradianceSensor, setIrradianceSensor] = useState([800]);
+    useEffect(() => {
+        Promise.all([
+            apiClient.getSolarStatus(),
+            apiClient.getSolarBattery(),
+            apiClient.getSolarSystemState(),
+            apiClient.getSolarAlerts(),
+        ])
+            .then(([statusResponse, batteryResponse, stateResponse, alertsResponse]) => {
+                setStatus(statusResponse?.data ?? null);
+                setBatteryLevel(batteryResponse?.data?.level ?? null);
+                setSystemState(stateResponse?.data?.state ?? null);
+                setAlerts(alertsResponse?.data ?? []);
+            })
+            .catch((error: Error) => toast({
+                title: 'Error',
+                description: error.message || 'Failed to load solar data',
+                variant: 'destructive',
+            }))
+            .finally(() => setLoading(false));
+    }, [reloadKey, toast]);
 
-    // Solar panel configuration
-    const [panelCount, setPanelCount] = useState('24');
-    const [panelCapacity, setPanelCapacity] = useState('400');
-    const [batteryCapacity, setBatteryCapacity] = useState('100');
-    const [inverterEfficiency, setInverterEfficiency] = useState('95');
-
-    // Maintenance schedule
-    const [lastMaintenance, setLastMaintenance] = useState('2026-01-01');
-    const [nextMaintenance, setNextMaintenance] = useState('2026-04-01');
-
-    const handleCalibrateSensors = () => {
-        toast({
-            title: 'Sensors Calibrated',
-            description: 'All sensors have been recalibrated successfully.',
-        });
+    const handleCollect = async () => {
+        try {
+            setCollecting(true);
+            const response = await apiClient.collectSolarData();
+            toast(response?.data
+                ? { title: 'Solar data collected', description: 'A new reading was recorded.' }
+                : { title: 'Collection skipped', description: 'A collection is already in progress.' });
+            setReloadKey((key) => key + 1);
+        } catch (error) {
+            toast({
+                title: 'Error',
+                description: error instanceof Error ? error.message : 'Failed to collect solar data',
+                variant: 'destructive',
+            });
+        } finally {
+            setCollecting(false);
+        }
     };
 
-    const handleSaveConfig = () => {
-        toast({
-            title: 'Configuration Saved',
-            description: 'Solar system configuration has been updated.',
-        });
-    };
-
-    const handleScheduleMaintenance = () => {
-        toast({
-            title: 'Maintenance Scheduled',
-            description: `Next maintenance scheduled for ${nextMaintenance}`,
-        });
+    const handleResolve = async (alert: SolarAlert) => {
+        try {
+            setResolvingId(alert.id);
+            await apiClient.resolveSolarAlert(alert.id);
+            toast({ title: 'Alert resolved', description: alert.message });
+            setReloadKey((key) => key + 1);
+        } catch (error) {
+            toast({
+                title: 'Error',
+                description: error instanceof Error ? error.message : 'Failed to resolve alert',
+                variant: 'destructive',
+            });
+        } finally {
+            setResolvingId(null);
+        }
     };
 
     return (
         <div className="container mx-auto p-6 max-w-6xl">
-            <div className="mb-6 animate-fade-in">
-                <h1 className="text-3xl font-bold mb-2">Solar System Management</h1>
-                <p className="text-muted-foreground">Configure and maintain the solar energy system</p>
+            <div className="mb-6 flex flex-col md:flex-row md:items-start md:justify-between gap-4 animate-fade-in">
+                <div>
+                    <h1 className="text-3xl font-bold mb-2">Solar System Management</h1>
+                    <p className="text-muted-foreground">Monitor solar production, battery and active alerts</p>
+                </div>
+                <div className="flex gap-2">
+                    <Button
+                        variant="outline"
+                        onClick={() => setReloadKey((key) => key + 1)}
+                        aria-label="Refresh solar data"
+                    >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Refresh
+                    </Button>
+                    <Button
+                        onClick={handleCollect}
+                        disabled={collecting}
+                        aria-label="Collect solar data now"
+                    >
+                        {collecting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
+                        Collect now
+                    </Button>
+                </div>
             </div>
 
-            {/* System Overview Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                <Card className="hover-lift animate-fade-in">
-                    <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between">
-                            <CardTitle className="text-sm font-medium">Total Capacity</CardTitle>
-                            <Sun className="h-4 w-4 text-amber-500" />
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{(Number(panelCount) * Number(panelCapacity) / 1000).toFixed(1)} kW</div>
-                        <p className="text-xs text-muted-foreground mt-1">{panelCount} panels × {panelCapacity}W</p>
-                    </CardContent>
-                </Card>
+            <AdminNav />
 
-                <Card className="hover-lift animate-fade-in stagger-1">
-                    <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between">
-                            <CardTitle className="text-sm font-medium">Battery</CardTitle>
-                            <Battery className="h-4 w-4 text-green-500" />
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{batteryCapacity} kWh</div>
-                        <p className="text-xs text-muted-foreground mt-1">Storage capacity</p>
-                    </CardContent>
-                </Card>
-
-                <Card className="hover-lift animate-fade-in stagger-2">
-                    <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between">
-                            <CardTitle className="text-sm font-medium">Efficiency</CardTitle>
-                            <Gauge className="h-4 w-4 text-blue-500" />
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{inverterEfficiency}%</div>
-                        <p className="text-xs text-muted-foreground mt-1">Inverter efficiency</p>
-                    </CardContent>
-                </Card>
-
-                <Card className="hover-lift animate-fade-in stagger-3">
-                    <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between">
-                            <CardTitle className="text-sm font-medium">Next Service</CardTitle>
-                            <Wrench className="h-4 w-4 text-purple-500" />
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
-                            {Math.ceil((new Date(nextMaintenance).getTime() - Date.now()) / (1000 * 60 * 60 * 24))}d
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">{nextMaintenance}</p>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* Tabs */}
-            <Tabs defaultValue="sensors" className="space-y-4 animate-fade-in stagger-4">
-                <TabsList>
-                    <TabsTrigger value="sensors">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Sensor Calibration
-                    </TabsTrigger>
-                    <TabsTrigger value="config">
-                        <Sun className="h-4 w-4 mr-2" />
-                        System Config
-                    </TabsTrigger>
-                    <TabsTrigger value="maintenance">
-                        <Wrench className="h-4 w-4 mr-2" />
-                        Maintenance
-                    </TabsTrigger>
-                    <TabsTrigger value="reports">
-                        <FileText className="h-4 w-4 mr-2" />
-                        Reports
-                    </TabsTrigger>
-                </TabsList>
-
-                {/* Sensor Calibration Tab */}
-                <TabsContent value="sensors" className="space-y-4">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Sensor Calibration</CardTitle>
-                            <CardDescription>Adjust sensor readings and calibration offsets</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
-                            <div className="space-y-3">
+            {loading ? (
+                <div className="flex justify-center py-24">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                </div>
+            ) : (
+                <>
+                    {/* System Overview Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                        <Card className="hover-lift animate-fade-in">
+                            <CardHeader className="pb-3">
                                 <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <Zap className="h-4 w-4 text-amber-500" />
-                                        <Label>Production Sensor (Offset: ±{productionSensor[0]} kW)</Label>
-                                    </div>
-                                    <Badge variant="outline">Active</Badge>
+                                    <CardTitle className="text-sm font-medium">Production</CardTitle>
+                                    <Sun className="h-4 w-4 text-amber-500" />
                                 </div>
-                                <Slider
-                                    value={productionSensor}
-                                    onValueChange={setProductionSensor}
-                                    min={0}
-                                    max={10}
-                                    step={0.1}
-                                    className="transition-all-smooth"
-                                />
-                                <p className="text-xs text-muted-foreground">Adjust calibration offset for production readings</p>
-                            </div>
-
-                            <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <Battery className="h-4 w-4 text-green-500" />
-                                        <Label>Battery Level Sensor (Offset: ±{batterySensor[0]} V)</Label>
-                                    </div>
-                                    <Badge variant="outline">Active</Badge>
-                                </div>
-                                <Slider
-                                    value={batterySensor}
-                                    onValueChange={setBatterySensor}
-                                    min={0}
-                                    max={24}
-                                    step={0.1}
-                                    className="transition-all-smooth"
-                                />
-                                <p className="text-xs text-muted-foreground">Adjust battery voltage sensor calibration</p>
-                            </div>
-
-                            <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <Thermometer className="h-4 w-4 text-red-500" />
-                                        <Label>Temperature Sensor (Offset: ±{tempSensor[0]} °C)</Label>
-                                    </div>
-                                    <Badge variant="outline">Active</Badge>
-                                </div>
-                                <Slider
-                                    value={tempSensor}
-                                    onValueChange={setTempSensor}
-                                    min={0}
-                                    max={50}
-                                    step={0.5}
-                                    className="transition-all-smooth"
-                                />
-                                <p className="text-xs text-muted-foreground">Temperature offset calibration</p>
-                            </div>
-
-                            <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <Sun className="h-4 w-4 text-yellow-500" />
-                                        <Label>Solar Irradiance (Offset: ±{irradianceSensor[0]} W/m²)</Label>
-                                    </div>
-                                    <Badge variant="outline">Active</Badge>
-                                </div>
-                                <Slider
-                                    value={irradianceSensor}
-                                    onValueChange={setIrradianceSensor}
-                                    min={0}
-                                    max={1200}
-                                    step={10}
-                                    className="transition-all-smooth"
-                                />
-                                <p className="text-xs text-muted-foreground">Solar radiation sensor calibration</p>
-                            </div>
-
-                            <Button onClick={handleCalibrateSensors} className="w-full transition-all-smooth hover:scale-105">
-                                <RefreshCw className="h-4 w-4 mr-2" />
-                                Calibrate All Sensors
-                            </Button>
-                        </CardContent>
-                    </Card>
-                </TabsContent>
-
-                {/* System Configuration Tab */}
-                <TabsContent value="config" className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Solar Panel Configuration</CardTitle>
-                                <CardDescription>Panel specifications and setup</CardDescription>
                             </CardHeader>
-                            <CardContent className="space-y-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="panel-count">Number of Panels</Label>
-                                    <Input
-                                        id="panel-count"
-                                        type="number"
-                                        value={panelCount}
-                                        onChange={(e) => setPanelCount(e.target.value)}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="panel-capacity">Panel Capacity (W)</Label>
-                                    <Input
-                                        id="panel-capacity"
-                                        type="number"
-                                        value={panelCapacity}
-                                        onChange={(e) => setPanelCapacity(e.target.value)}
-                                    />
-                                </div>
-                                <div className="p-3 bg-primary/10 rounded-lg">
-                                    <p className="text-sm font-medium">Total System Capacity</p>
-                                    <p className="text-2xl font-bold text-primary">
-                                        {(Number(panelCount) * Number(panelCapacity) / 1000).toFixed(2)} kW
-                                    </p>
-                                </div>
+                            <CardContent>
+                                <div className="text-2xl font-bold">{status ? `${status.production.toFixed(2)} kWh` : '—'}</div>
+                                <p className="text-xs text-muted-foreground mt-1">Latest collection</p>
                             </CardContent>
                         </Card>
 
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Battery & Inverter</CardTitle>
-                                <CardDescription>Energy storage configuration</CardDescription>
+                        <Card className="hover-lift animate-fade-in stagger-1">
+                            <CardHeader className="pb-3">
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="text-sm font-medium">Consumption</CardTitle>
+                                    <Zap className="h-4 w-4 text-blue-500" />
+                                </div>
                             </CardHeader>
-                            <CardContent className="space-y-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="battery-capacity">Battery Capacity (kWh)</Label>
-                                    <Input
-                                        id="battery-capacity"
-                                        type="number"
-                                        value={batteryCapacity}
-                                        onChange={(e) => setBatteryCapacity(e.target.value)}
-                                    />
+                            <CardContent>
+                                <div className="text-2xl font-bold">{status ? `${status.consumption.toFixed(2)} kW` : '—'}</div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    {status ? `${status.activeVMs} running VMs` : 'Estimated from running VMs'}
+                                </p>
+                            </CardContent>
+                        </Card>
+
+                        <Card className="hover-lift animate-fade-in stagger-2">
+                            <CardHeader className="pb-3">
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="text-sm font-medium">Efficiency</CardTitle>
+                                    <Gauge className="h-4 w-4 text-green-500" />
                                 </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="inverter-efficiency">Inverter Efficiency (%)</Label>
-                                    <Input
-                                        id="inverter-efficiency"
-                                        type="number"
-                                        value={inverterEfficiency}
-                                        onChange={(e) => setInverterEfficiency(e.target.value)}
-                                    />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold">{status ? `${status.efficiency.toFixed(1)}%` : '—'}</div>
+                                <p className="text-xs text-muted-foreground mt-1">Consumption vs. production</p>
+                            </CardContent>
+                        </Card>
+
+                        <Card className="hover-lift animate-fade-in stagger-3">
+                            <CardHeader className="pb-3">
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="text-sm font-medium">Battery</CardTitle>
+                                    <Battery className="h-4 w-4 text-green-500" />
                                 </div>
-                                <div className="p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                                    <p className="text-sm font-medium">System Efficiency</p>
-                                    <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                                        {inverterEfficiency}%
-                                    </p>
-                                </div>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold">{batteryLevel !== null ? `${batteryLevel}%` : '—'}</div>
+                                <p className="text-xs text-muted-foreground mt-1">Current charge level</p>
                             </CardContent>
                         </Card>
                     </div>
 
-                    <div className="flex justify-end">
-                        <Button onClick={handleSaveConfig} className="transition-all-smooth hover:scale-105">
-                            Save Configuration
-                        </Button>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                        <Card className="lg:col-span-1">
+                            <CardHeader>
+                                <CardTitle>System State</CardTitle>
+                                <CardDescription>Current operating state reported by the alert monitor</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-muted-foreground">State</span>
+                                    <Badge variant={systemState === 'NORMAL' ? 'default' : 'destructive'}>
+                                        {systemState ?? 'unknown'}
+                                    </Badge>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-muted-foreground">Device status</span>
+                                    <span className="font-medium">{status?.status ?? 'unknown'}</span>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        <Card className="lg:col-span-2">
+                            <CardHeader>
+                                <CardTitle>Active Alerts</CardTitle>
+                                <CardDescription>
+                                    {alerts.length} unresolved alert{alerts.length !== 1 ? 's' : ''}
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                {alerts.length === 0 ? (
+                                    <div className="flex items-center gap-2 py-8 justify-center text-muted-foreground">
+                                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                        No active alerts
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {alerts.map((alert) => (
+                                            <div key={alert.id} className="flex items-center justify-between gap-4 p-4 border rounded-lg">
+                                                <div className="flex items-start gap-3 min-w-0">
+                                                    <AlertTriangle className={`h-5 w-5 mt-0.5 shrink-0 ${alert.severity === 'CRITICAL' ? 'text-red-500' : 'text-amber-500'}`} />
+                                                    <div className="min-w-0">
+                                                        <p className="font-medium">{alert.message}</p>
+                                                        <p className="text-sm text-muted-foreground">
+                                                            {alert.type} · {new Date(alert.createdAt).toLocaleString()}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    disabled={resolvingId === alert.id}
+                                                    onClick={() => handleResolve(alert)}
+                                                    aria-label={`Resolve alert ${alert.type}`}
+                                                >
+                                                    Resolve
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
                     </div>
-                </TabsContent>
-
-                {/* Maintenance Tab */}
-                <TabsContent value="maintenance" className="space-y-4">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Maintenance Schedule</CardTitle>
-                            <CardDescription>Track and plan system maintenance</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="last-maintenance">Last Maintenance</Label>
-                                    <Input
-                                        id="last-maintenance"
-                                        type="date"
-                                        value={lastMaintenance}
-                                        onChange={(e) => setLastMaintenance(e.target.value)}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="next-maintenance">Next Maintenance</Label>
-                                    <Input
-                                        id="next-maintenance"
-                                        type="date"
-                                        value={nextMaintenance}
-                                        onChange={(e) => setNextMaintenance(e.target.value)}
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="p-4 border rounded-lg space-y-3">
-                                <h4 className="font-semibold">Maintenance Checklist</h4>
-                                <div className="space-y-2 text-sm">
-                                    <div className="flex items-center gap-2">
-                                        <div className="h-4 w-4 rounded-full bg-green-500" />
-                                        <span>Solar panel cleaning - Completed</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="h-4 w-4 rounded-full bg-green-500" />
-                                        <span>Connection inspection - Completed</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="h-4 w-4 rounded-full bg-amber-500 animate-pulse-slow" />
-                                        <span>Battery health check - Pending</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="h-4 w-4 rounded-full bg-muted" />
-                                        <span>Inverter firmware update - Scheduled</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <Button onClick={handleScheduleMaintenance} className="w-full transition-all-smooth hover:scale-105">
-                                <Wrench className="h-4 w-4 mr-2" />
-                                Schedule Maintenance
-                            </Button>
-                        </CardContent>
-                    </Card>
-                </TabsContent>
-
-                {/* Reports Tab */}
-                <TabsContent value="reports" className="space-y-4">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>System Reports</CardTitle>
-                            <CardDescription>Performance and maintenance reports</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                            <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-all-smooth">
-                                <div className="flex items-center gap-3">
-                                    <FileText className="h-5 w-5 text-primary" />
-                                    <div>
-                                        <p className="font-medium">Monthly Production Report</p>
-                                        <p className="text-sm text-muted-foreground">December 2025</p>
-                                    </div>
-                                </div>
-                                <Button variant="outline" size="sm">Download</Button>
-                            </div>
-                            <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-all-smooth">
-                                <div className="flex items-center gap-3">
-                                    <FileText className="h-5 w-5 text-primary" />
-                                    <div>
-                                        <p className="font-medium">System Efficiency Analysis</p>
-                                        <p className="text-sm text-muted-foreground">Q4 2025</p>
-                                    </div>
-                                </div>
-                                <Button variant="outline" size="sm">Download</Button>
-                            </div>
-                            <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-all-smooth">
-                                <div className="flex items-center gap-3">
-                                    <FileText className="h-5 w-5 text-primary" />
-                                    <div>
-                                        <p className="font-medium">Maintenance History</p>
-                                        <p className="text-sm text-muted-foreground">All time</p>
-                                    </div>
-                                </div>
-                                <Button variant="outline" size="sm">Download</Button>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </TabsContent>
-            </Tabs>
+                </>
+            )}
         </div>
     );
 }

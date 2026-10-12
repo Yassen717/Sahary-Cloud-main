@@ -9,8 +9,12 @@ import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
-const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9\s])\S+$/;
-const NAME_REGEX = new RegExp("^[\\p{L}][\\p{L}\\s'-]*$", "u");
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^\-_.,~()[\]{}|+=:;'"\\/<>`!])\S+$/;
+const NAME_REGEX = new RegExp("^[\\p{L}][\\p{L}\\s'\u2019-]*$", "u");
+const isValidName = (name: string) => {
+  const value = name.trim();
+  return value.length >= 2 && value.length <= 50 && NAME_REGEX.test(value);
+};
 
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
@@ -35,14 +39,9 @@ export default function RegisterPage() {
     e.preventDefault();
     setError('');
 
-    if (
-      formData.firstName.trim().length < 2 ||
-      formData.lastName.trim().length < 2 ||
-      !NAME_REGEX.test(formData.firstName.trim()) ||
-      !NAME_REGEX.test(formData.lastName.trim())
-    ) {
+    if (!isValidName(formData.firstName) || !isValidName(formData.lastName)) {
       setError(
-        'Names must be at least 2 characters and contain only letters, spaces, hyphens, or apostrophes'
+        'Names must be 2-50 characters and contain only letters, spaces, hyphens, or apostrophes'
       );
       return;
     }
@@ -52,8 +51,8 @@ export default function RegisterPage() {
       return;
     }
 
-    if (formData.password.length < 8) {
-      setError('Password must be at least 8 characters');
+    if (formData.password.length < 8 || formData.password.length > 128) {
+      setError('Password must be between 8 and 128 characters');
       return;
     }
 

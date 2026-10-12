@@ -1,17 +1,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { apiClient } from '@/lib/api';
+import { useParams } from 'next/navigation';
+import { apiClient, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { BillingNav } from '@/components/billing/BillingNav';
 import { 
   Loader2, 
   Receipt, 
-  Download,
   Printer,
   ArrowLeft,
   CheckCircle,
@@ -48,93 +48,94 @@ interface Invoice {
   customer?: { firstName: string; lastName: string; email: string };
 }
 
+interface LoadError {
+  notFound: boolean;
+  message: string;
+}
+
+interface BackendInvoiceItem {
+  description: string;
+  quantity: string | number;
+  unitPrice: string | number;
+  totalPrice: string | number;
+}
+
 export default function InvoiceDetailsPage() {
   const params = useParams();
-  const router = useRouter();
+  const invoiceId = params.id as string;
   const { toast } = useToast();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [loadError, setLoadError] = useState<LoadError | null>(null);
   const [paying, setPaying] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    loadInvoice();
-  }, [params.id]);
+    apiClient.getInvoice(invoiceId)
+      .then((response) => {
+        const data = response?.data?.invoice;
+        if (!data) {
+          setInvoice(null);
+          setLoadError({ notFound: true, message: 'The requested invoice could not be found' });
+          return;
+        }
 
-  const loadInvoice = async () => {
-    try {
-      const response = await apiClient.getInvoice(params.id as string);
-      const data = response?.data?.invoice;
-      if (!data) throw new Error('Invoice not found');
-
-      setInvoice({
-        id: data.id,
-        invoiceNumber: data.invoiceNumber,
-        status: data.status,
-        issueDate: data.createdAt,
-        dueDate: data.dueDate,
-        paidAt: data.paidAt,
-        items: (data.items ?? []).map((item: any) => ({
-          description: item.description,
-          quantity: Number(item.quantity),
-          unitPrice: Number(item.unitPrice),
-          totalPrice: Number(item.totalPrice),
-        })),
-        subtotal: Number(data.subtotal),
-        tax: Number(data.tax),
-        discount: Number(data.discount),
-        total: Number(data.amount),
-        customer: data.user,
-      });
-    } catch {
-      setInvoice(null);
-    } finally {
-      setLoading(false);
-    }
-  };
+        setInvoice({
+          id: data.id,
+          invoiceNumber: data.invoiceNumber,
+          status: data.status,
+          issueDate: data.createdAt,
+          dueDate: data.dueDate,
+          paidAt: data.paidAt,
+          items: (data.items ?? []).map((item: BackendInvoiceItem) => ({
+            description: item.description,
+            quantity: Number(item.quantity),
+            unitPrice: Number(item.unitPrice),
+            totalPrice: Number(item.totalPrice),
+          })),
+          subtotal: Number(data.subtotal),
+          tax: Number(data.tax),
+          discount: Number(data.discount),
+          total: Number(data.amount),
+          customer: data.user,
+        });
+        setLoadError(null);
+      })
+      .catch((error: unknown) => {
+        setInvoice(null);
+        setLoadError({
+          notFound: error instanceof ApiError && (error.status === 404 || error.status === 400),
+          message: error instanceof Error ? error.message : 'Failed to load invoice',
+        });
+      })
+      .finally(() => setLoading(false));
+  }, [invoiceId, reloadKey]);
 
   const handlePayment = async () => {
     try {
       setPaying(true);
-      const response = await apiClient.payInvoice(params.id as string);
-      const paymentData = response?.data;
+      const response = await apiClient.payInvoice(invoiceId);
+      const checkoutUrl = response?.data?.checkoutUrl || response?.data?.url;
 
-      // If the backend returns a hosted checkout URL, hand off to it
-      const checkoutUrl = paymentData?.checkoutUrl || paymentData?.url;
       if (checkoutUrl) {
         window.location.href = checkoutUrl;
         return;
       }
 
       toast({
-        title: 'Success',
-        description:
-          response?.message ||
-          (paymentData?.clientSecret
-            ? 'Payment initiated. Complete the payment to settle this invoice.'
-            : 'Payment processed successfully'),
+        title: 'Online payment unavailable',
+        description: 'Card payment is not configured yet. Please contact billing support to settle this invoice.',
       });
-      await loadInvoice();
-    } catch (error: any) {
+    } catch (error) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to process payment',
+        description: error instanceof Error ? error.message : 'Failed to start payment',
         variant: 'destructive',
       });
     } finally {
       setPaying(false);
     }
-  };
-
-  const handleDownload = () => {
-    toast({
-      title: 'Download Started',
-      description: 'Your invoice PDF is being downloaded',
-    });
-  };
-
-  const handlePrint = () => {
-    window.print();
   };
 
   const getStatusBadge = (status: string) => {
@@ -176,19 +177,27 @@ export default function InvoiceDetailsPage() {
   if (!invoice) {
     return (
       <div className="container mx-auto p-6">
+        <BillingNav />
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <AlertCircle className="h-16 w-16 text-muted-foreground mb-4" />
-            <h3 className="text-xl font-semibold mb-2">Invoice Not Found</h3>
-            <p className="text-muted-foreground mb-4">
-              The requested invoice could not be found
-            </p>
-            <Button asChild>
-              <Link href="/billing">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Billing
-              </Link>
-            </Button>
+            <h3 className="text-xl font-semibold mb-2">
+              {loadError?.notFound ? 'Invoice Not Found' : 'Unable to Load Invoice'}
+            </h3>
+            <p className="text-muted-foreground mb-4">{loadError?.message}</p>
+            <div className="flex gap-2">
+              {!loadError?.notFound && (
+                <Button variant="outline" onClick={() => { setLoading(true); setReloadKey((key) => key + 1); }}>
+                  Try Again
+                </Button>
+              )}
+              <Button asChild>
+                <Link href="/billing">
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Back to Billing
+                </Link>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -199,6 +208,10 @@ export default function InvoiceDetailsPage() {
 
   return (
     <div className="container mx-auto p-6 max-w-4xl">
+      <div className="print:hidden">
+        <BillingNav />
+      </div>
+
       <div className="mb-6 print:hidden">
         <Button variant="ghost" asChild className="mb-4">
           <Link href="/billing">
@@ -223,13 +236,9 @@ export default function InvoiceDetailsPage() {
               </CardDescription>
             </div>
             <div className="flex gap-2 print:hidden">
-              <Button variant="outline" size="sm" onClick={handleDownload}>
-                <Download className="h-4 w-4 mr-2" />
-                Download
-              </Button>
-              <Button variant="outline" size="sm" onClick={handlePrint}>
+              <Button variant="outline" size="sm" onClick={() => window.print()}>
                 <Printer className="h-4 w-4 mr-2" />
-                Print
+                Print / Save as PDF
               </Button>
             </div>
           </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Dialog,
   DialogContent,
@@ -14,8 +15,6 @@ import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 
 const shortcuts = [
   { keys: ['Ctrl', 'K'], description: 'Open search' },
-  { keys: ['Ctrl', 'D'], description: 'Go to dashboard' },
-  { keys: ['Ctrl', 'P'], description: 'Go to profile' },
   { keys: ['Shift', '?'], description: 'Show keyboard shortcuts' },
   { keys: ['Esc'], description: 'Close modal/dialog' },
   { keys: ['Tab'], description: 'Navigate forward' },
@@ -26,6 +25,7 @@ const shortcuts = [
 
 export function KeyboardShortcutsDialog() {
   const [open, setOpen] = useState(false);
+  const router = useRouter();
 
   useKeyboardShortcuts([
     {
@@ -33,6 +33,15 @@ export function KeyboardShortcutsDialog() {
       shift: true,
       callback: () => setOpen(true),
       description: 'Show keyboard shortcuts',
+    },
+    {
+      key: 'k',
+      ctrl: true,
+      callback: () => {
+        setOpen(false);
+        router.push('/search');
+      },
+      description: 'Open search',
     },
   ]);
 

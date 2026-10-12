@@ -3,6 +3,7 @@ import { ReactNode } from 'react';
 import { LucideIcon } from 'lucide-react';
 
 interface SettingsSectionProps {
+    id?: string;
     icon: LucideIcon;
     title: string;
     description: string;
@@ -11,6 +12,7 @@ interface SettingsSectionProps {
 }
 
 export function SettingsSection({
+    id,
     icon: Icon,
     title,
     description,
@@ -19,7 +21,8 @@ export function SettingsSection({
 }: SettingsSectionProps) {
     return (
         <Card
-            className="animate-fade-in opacity-0 hover-lift"
+            id={id}
+            className="animate-fade-in opacity-0 hover-lift scroll-mt-24"
             style={{ animationDelay: `${delay}ms`, animationFillMode: 'forwards' }}
         >
             <CardHeader>

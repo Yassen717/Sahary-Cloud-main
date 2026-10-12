@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { apiClient, ApiClient } from '@/lib/api';
+import { apiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,17 +10,7 @@ import { Label } from '@/components/ui/label';
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
-const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9\s])\S+$/;
-
-// Password-reset methods are being added to ApiClient (lib/api.ts); the
-// intersection cast keeps this page compiling until that change lands.
-const authApi = apiClient as ApiClient & {
-  resetPassword: (
-    token: string,
-    password: string,
-    confirmPassword: string
-  ) => Promise<any>;
-};
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^\-_.,~()[\]{}|+=:;'"\\/<>`!])\S+$/;
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
@@ -41,8 +31,8 @@ function ResetPasswordForm() {
       return;
     }
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+    if (password.length < 8 || password.length > 128) {
+      setError('Password must be between 8 and 128 characters');
       return;
     }
 
@@ -56,7 +46,7 @@ function ResetPasswordForm() {
     setLoading(true);
 
     try {
-      await authApi.resetPassword(token as string, password, confirmPassword);
+      await apiClient.resetPassword(token as string, password, confirmPassword);
       setSuccess(true);
     } catch (err: any) {
       setError(err?.message || 'Password reset failed. The link may be invalid or expired.');

@@ -3,25 +3,17 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
-interface SolarChartProps {
-    data?: Array<{
-        time: string;
-        production: number;
-        consumption: number;
-    }>;
+export interface SolarChartPoint {
+    time: string;
+    production: number;
+    consumption: number;
 }
 
-const defaultData = [
-    { time: '00:00', production: 0, consumption: 2.4 },
-    { time: '04:00', production: 0, consumption: 1.8 },
-    { time: '08:00', production: 3.2, consumption: 3.5 },
-    { time: '12:00', production: 8.5, consumption: 4.2 },
-    { time: '16:00', production: 6.8, consumption: 5.1 },
-    { time: '20:00', production: 1.2, consumption: 3.8 },
-    { time: '23:59', production: 0, consumption: 2.9 },
-];
+interface SolarChartProps {
+    data?: SolarChartPoint[];
+}
 
-export function SolarChart({ data = defaultData }: SolarChartProps) {
+export function SolarChart({ data = [] }: SolarChartProps) {
     return (
         <Card className="animate-fade-in opacity-0 stagger-2">
             <CardHeader>
@@ -29,6 +21,11 @@ export function SolarChart({ data = defaultData }: SolarChartProps) {
                 <CardDescription>Energy metrics over the last 24 hours</CardDescription>
             </CardHeader>
             <CardContent>
+                {data.length === 0 ? (
+                    <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+                        No solar data recorded in the last 24 hours
+                    </div>
+                ) : (
                 <div className="h-[300px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -102,6 +99,7 @@ export function SolarChart({ data = defaultData }: SolarChartProps) {
                         </AreaChart>
                     </ResponsiveContainer>
                 </div>
+                )}
             </CardContent>
         </Card>
     );

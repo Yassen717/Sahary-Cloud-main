@@ -77,9 +77,10 @@ export default function SignupForm() {
     
     try {
       if (!EMAILJS_SERVICE_ID || !EMAILJS_TEMPLATE_ID || !EMAILJS_PUBLIC_KEY) {
+        console.error("EmailJS is not configured (NEXT_PUBLIC_EMAILJS_* env vars missing)");
         toast({
-          title: "Configuration Error",
-          description: "The contact form is not properly configured. Please set up EmailJS credentials.",
+          title: "Form unavailable",
+          description: "Online requests are temporarily unavailable. Please email us at info@saharycloud.ly.",
           variant: "destructive",
         });
         return;
@@ -212,7 +213,7 @@ export default function SignupForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>VPS Plan</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select a plan" />

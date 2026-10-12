@@ -16,12 +16,13 @@ import { useRouter } from 'next/navigation';
 export default function ProfilePage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { user: authUser, loading: sessionLoading, isAuthenticated } = useAuth();
+  const { user: authUser, loading: sessionLoading, isAuthenticated, logout } = useAuth();
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [activity, setActivity] = useState<any[] | null>(null);
 
   // Profile form state
   const [firstName, setFirstName] = useState('');
@@ -70,6 +71,14 @@ export default function ProfilePage() {
 
     loadProfile();
   }, [sessionLoading, isAuthenticated, authUser]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    apiClient
+      .getActivity({ limit: 20 })
+      .then((response) => setActivity(response?.data ?? []))
+      .catch(() => setActivity([]));
+  }, [isAuthenticated]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,11 +134,9 @@ export default function ProfilePage() {
       await apiClient.changePassword(oldPassword, newPassword, confirmPassword);
       toast({
         title: 'Success',
-        description: 'Password changed successfully',
+        description: 'Password changed successfully. Please sign in with your new password.',
       });
-      setOldPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
+      await logout();
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -191,6 +198,9 @@ export default function ProfilePage() {
       </div>
     );
   }
+
+  const formatAction = (action: string) =>
+    action.toLowerCase().replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
   const getInitials = (name: string) => {
     if (!name) return 'U';
@@ -402,40 +412,36 @@ export default function ProfilePage() {
               <CardDescription>View your recent account activity</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-start gap-4 py-4 border-b transition-all-smooth hover:bg-muted/50 px-2 rounded-sm">
-                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-medium">Account Created</p>
-                    <p className="text-sm text-muted-foreground">Your account was successfully created</p>
-                  </div>
-                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                    <Clock className="h-3 w-3" />
-                    Recently
-                  </div>
+              {activity === null ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-
-                <div className="flex items-start gap-4 py-4 border-b transition-all-smooth hover:bg-muted/50 px-2 rounded-sm">
-                  <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center shrink-0">
-                    <Activity className="h-5 w-5 text-green-600 dark:text-green-400" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-medium">Last Login</p>
-                    <p className="text-sm text-muted-foreground">You logged in to your account</p>
-                  </div>
-                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                    <Clock className="h-3 w-3" />
-                    Today
-                  </div>
-                </div>
-
+              ) : activity.length === 0 ? (
                 <div className="text-center py-8">
                   <Activity className="h-12 w-12 mx-auto text-muted-foreground/30 mb-3 animate-float" />
-                  <p className="text-muted-foreground text-sm">More activity details coming soon</p>
+                  <p className="text-muted-foreground text-sm">No account activity yet</p>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-4">
+                  {activity.map((item) => (
+                    <div key={item.id} className="flex items-start gap-4 py-4 border-b transition-all-smooth hover:bg-muted/50 px-2 rounded-sm">
+                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                        <Activity className="h-5 w-5 text-primary" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-medium">{formatAction(item.action)}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {[item.resource, item.ipAddress].filter(Boolean).join(' · ') || 'Account'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground whitespace-nowrap">
+                        <Clock className="h-3 w-3" />
+                        {new Date(item.timestamp).toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

@@ -15,7 +15,7 @@ export const faqs: FAQ[] = [
         question: 'How do I get started with Sahary Cloud?',
         answer: 'Getting started is easy! First, create an account by clicking "Sign Up" in the navigation. Once registered, you can access your dashboard where you can create your first VM, monitor solar production, and manage billing. We recommend starting with our Basic plan to test the platform.',
         relatedLinks: [
-            { title: 'Create Your First VM', href: '/help#first-vm' },
+            { title: 'Create Your First VM', href: '/vms/create' },
             { title: 'View Pricing Plans', href: '/#plans' },
         ]
     },
@@ -39,8 +39,7 @@ export const faqs: FAQ[] = [
         question: 'How do I create a new virtual machine?',
         answer: 'To create a VM, go to your Dashboard and click "Create VM" or navigate to the VMs page. Select your desired specifications (CPU, RAM, storage), choose an operating system, and select a pricing plan. Your VM will be ready in minutes. You can access it via SSH or our web-based console.',
         relatedLinks: [
-            { title: 'VM Management Guide', href: '/help#vm-guide' },
-            { title: 'Available OS Images', href: '/help#os-images' },
+            { title: 'Create a VM', href: '/vms/create' },
         ]
     },
     {
@@ -65,7 +64,7 @@ export const faqs: FAQ[] = [
         id: 'vm-5',
         category: 'vms',
         question: 'Are backups included?',
-        answer: 'Automatic daily backups are included with all plans. Backups are retained for 7 days on Basic plan, 14 days on Pro plan, and 30 days on Enterprise plan. You can also create manual snapshots at any time.',
+        answer: 'Automatic daily backups are included with all plans, including Basic, Standard, and Premium. Check the pricing section for the details included with each plan.',
     },
 
     // Solar Monitoring
@@ -76,7 +75,6 @@ export const faqs: FAQ[] = [
         answer: 'The Solar Dashboard shows real-time solar production, battery levels, system efficiency, and environmental impact metrics. You can view daily and monthly production charts, CO2 savings, and receive alerts for any system issues.',
         relatedLinks: [
             { title: 'Solar Dashboard', href: '/solar' },
-            { title: 'Environmental Impact', href: '/solar#impact' },
         ]
     },
     {
@@ -136,7 +134,7 @@ export const faqs: FAQ[] = [
         id: 'account-2',
         category: 'account',
         question: 'Can I enable two-factor authentication (2FA)?',
-        answer: 'Yes! We highly recommend enabling 2FA for additional security. Go to Settings > Security and enable two-factor authentication. You can use apps like Google Authenticator or Authy.',
+        answer: 'Two-factor authentication is coming soon and is not available yet. The status is shown in Settings > Security.',
         relatedLinks: [
             { title: 'Security Settings', href: '/settings#security' },
         ]
@@ -145,7 +143,7 @@ export const faqs: FAQ[] = [
         id: 'account-3',
         category: 'account',
         question: 'How do I update my profile information?',
-        answer: 'Navigate to your Profile page from the user menu in the header. You can update your name, email, phone number, and notification preferences. Changes are saved immediately.',
+        answer: 'Navigate to your Profile page from the user menu in the header. You can update your first and last name there. Your email address cannot be changed. Notification preferences are managed in Settings.',
         relatedLinks: [
             { title: 'Edit Profile', href: '/profile' },
         ]
@@ -153,8 +151,8 @@ export const faqs: FAQ[] = [
     {
         id: 'account-4',
         category: 'account',
-        question: 'How do I delete my account?',
-        answer: 'To delete your account, go to Settings > Account and scroll to the "Danger Zone". Please note that deleting your account will permanently remove all your VMs, data, and billing history. This action cannot be undone.',
+        question: 'How do I deactivate my account?',
+        answer: 'Go to Settings, scroll to the "Danger Zone", and choose "Deactivate Account". You will need to enter your password. You are signed out after deactivation, and we email you a link to reactivate your account within 72 hours.',
     },
 ];
 

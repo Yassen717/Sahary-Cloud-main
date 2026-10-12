@@ -3,37 +3,40 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
+import { BillingNav } from '@/components/billing/BillingNav';
 import { 
   Loader2, 
   TrendingUp,
   Server,
-  HardDrive,
   Network,
+  Cpu,
+  MemoryStick,
   DollarSign,
-  AlertTriangle,
-  ArrowLeft
 } from 'lucide-react';
-import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 
 interface VMUsage {
   id: string;
   name: string;
   cost: number;
-  cpu: number;
-  ram: number;
-  storage: number;
-  bandwidth: number;
+  cpuAverage: number;
+  ramAverageMB: number;
+  bandwidthGB: number;
 }
 
 interface UsageData {
-  vms: VMUsage[];
   totalCost: number;
-  projectedCost: number;
-  budget?: number;
-  dailyUsage: { date: string; cost: number }[];
+  vmCount: number;
+  bandwidthGB: number;
+  vms: VMUsage[];
+}
+
+interface BackendVMUsage {
+  vmId: string;
+  vmName: string;
+  totalCost: number;
+  totalBandwidth: number;
+  averages: { cpu: number; ram: number };
 }
 
 export default function UsageTrackingPage() {
@@ -42,51 +45,33 @@ export default function UsageTrackingPage() {
   const [usage, setUsage] = useState<UsageData | null>(null);
 
   useEffect(() => {
-    loadUsageData();
-  }, []);
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const loadUsageData = async () => {
-    try {
-      const response = await apiClient.getUsage();
-      const data = response?.data;
-
-      setUsage({
-        vms: (data?.vms || []).map((vm: any) => ({
-          id: vm.vmId ?? vm.id,
-          name: vm.vmName ?? vm.name,
-          cost: vm.totalCost ?? vm.cost ?? 0,
-          cpu: vm.averages?.cpu ?? vm.cpu ?? 0,
-          ram: vm.averages?.ram ?? vm.ram ?? 0,
-          storage: vm.averages?.storage ?? vm.storage ?? 0,
-          bandwidth: vm.totalBandwidth ?? vm.bandwidth ?? 0,
-        })),
-        totalCost: data?.totalCost ?? 0,
-        projectedCost: data?.projectedCost ?? data?.totalCost ?? 0,
-        budget: data?.budget,
-        dailyUsage: data?.dailyUsage || [],
-      });
-    } catch (error: any) {
-      toast({
+    apiClient.getUsage({ startDate: startOfMonth.toISOString() })
+      .then((response) => {
+        const data = response?.data;
+        setUsage({
+          totalCost: Number(data?.totalCost ?? 0),
+          vmCount: Number(data?.vmCount ?? 0),
+          bandwidthGB: Number(data?.totalBandwidth ?? 0),
+          vms: (data?.vms ?? []).map((vm: BackendVMUsage) => ({
+            id: vm.vmId,
+            name: vm.vmName,
+            cost: Number(vm.totalCost ?? 0),
+            cpuAverage: Number(vm.averages?.cpu ?? 0),
+            ramAverageMB: Number(vm.averages?.ram ?? 0),
+            bandwidthGB: Number(vm.totalBandwidth ?? 0),
+          })),
+        });
+      })
+      .catch((error: Error) => toast({
         title: 'Error',
         description: error.message || 'Failed to load usage data',
         variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getBudgetPercentage = () => {
-    if (!usage?.budget) return 0;
-    return (usage.projectedCost / usage.budget) * 100;
-  };
-
-  const getBudgetColor = () => {
-    const percentage = getBudgetPercentage();
-    if (percentage >= 90) return 'text-red-500';
-    if (percentage >= 75) return 'text-yellow-500';
-    return 'text-green-500';
-  };
+      }))
+      .finally(() => setLoading(false));
+  }, [toast]);
 
   if (loading) {
     return (
@@ -99,13 +84,6 @@ export default function UsageTrackingPage() {
   return (
     <div className="container mx-auto p-6">
       <div className="mb-6">
-        <Button variant="ghost" asChild className="mb-4">
-          <Link href="/billing">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Billing
-          </Link>
-        </Button>
-        
         <div className="flex items-center gap-4">
           <div className="p-3 bg-primary/10 rounded-lg">
             <TrendingUp className="h-8 w-8 text-primary" />
@@ -119,174 +97,95 @@ export default function UsageTrackingPage() {
         </div>
       </div>
 
+      <BillingNav />
+
       {/* Cost Overview */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Current Month</CardTitle>
+            <CardTitle className="text-sm font-medium">Cost This Month</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${usage?.totalCost.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">
-              Month to date
-            </p>
+            <div className="text-2xl font-bold">${usage ? usage.totalCost.toFixed(2) : '—'}</div>
+            <p className="text-xs text-muted-foreground">Since the start of the current month</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Projected Cost</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Bandwidth This Month</CardTitle>
+            <Network className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${usage?.projectedCost.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">
-              End of month estimate
-            </p>
+            <div className="text-2xl font-bold">{usage ? usage.bandwidthGB.toFixed(2) : '—'} GB</div>
+            <p className="text-xs text-muted-foreground">Total transferred</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Budget Status</CardTitle>
-            <AlertTriangle className={`h-4 w-4 ${getBudgetColor()}`} />
+            <CardTitle className="text-sm font-medium">Virtual Machines</CardTitle>
+            <Server className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${getBudgetColor()}`}>
-              {getBudgetPercentage().toFixed(0)}%
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {usage?.budget ? `of $${usage.budget} budget` : 'No budget set'}
-            </p>
+            <div className="text-2xl font-bold">{usage ? usage.vmCount : '—'}</div>
+            <p className="text-xs text-muted-foreground">Owned by your account</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Budget Alert */}
-      {usage?.budget && getBudgetPercentage() >= 75 && (
-        <Card className="mb-6 border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20">
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-500 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="font-semibold text-yellow-900 dark:text-yellow-400">
-                  Budget Alert
-                </h3>
-                <p className="text-sm text-yellow-800 dark:text-yellow-500 mt-1">
-                  You&apos;ve used {getBudgetPercentage().toFixed(0)}% of your monthly budget. 
-                  Consider optimizing your resources or adjusting your budget.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Budget Progress */}
-      {usage?.budget && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Budget Usage</CardTitle>
-            <CardDescription>Monthly budget tracking</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Projected: ${usage.projectedCost.toFixed(2)}</span>
-                <span>Budget: ${usage.budget.toFixed(2)}</span>
-              </div>
-              <Progress value={getBudgetPercentage()} className="h-3" />
-              <p className="text-xs text-muted-foreground">
-                ${(usage.budget - usage.projectedCost).toFixed(2)} remaining
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Daily Usage Chart */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>Daily Usage</CardTitle>
-          <CardDescription>Cost breakdown over the last 30 days</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="h-64 flex items-end justify-between gap-1">
-            {usage?.dailyUsage.map((day, index) => (
-              <div key={index} className="flex-1 flex flex-col items-center group">
-                <div className="relative w-full">
-                  <div
-                    className="w-full bg-primary rounded-t-sm transition-all hover:bg-primary/80"
-                    style={{ height: `${(day.cost / 15) * 200}px` }}
-                  />
-                  <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-black text-white text-xs px-2 py-1 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                    ${day.cost.toFixed(2)}
-                  </div>
-                </div>
-                {index % 5 === 0 && (
-                  <span className="text-xs text-muted-foreground mt-2 rotate-45 origin-left">
-                    {day.date}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
       {/* VM Cost Breakdown */}
       <Card>
         <CardHeader>
-          <CardTitle>VM Cost Breakdown</CardTitle>
-          <CardDescription>Individual VM costs for the current month</CardDescription>
+          <CardTitle>VM Usage Breakdown</CardTitle>
+          <CardDescription>Per-VM cost and average utilization for the current month</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {usage?.vms.map((vm) => (
-              <div key={vm.id} className="border rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <Server className="h-5 w-5 text-primary" />
-                    <div>
+          {!usage || usage.vms.length === 0 ? (
+            <p className="py-12 text-center text-muted-foreground">No usage recorded this month</p>
+          ) : (
+            <div className="space-y-4">
+              {usage.vms.map((vm) => (
+                <div key={vm.id} className="border rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <Server className="h-5 w-5 text-primary" />
                       <h3 className="font-semibold">{vm.name}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        {vm.cpu} vCPU • {vm.ram}GB RAM • {vm.storage}GB Storage
-                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold">${vm.cost.toFixed(2)}</p>
+                      <p className="text-xs text-muted-foreground">this month</p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-bold">${vm.cost.toFixed(2)}</p>
-                    <p className="text-xs text-muted-foreground">this month</p>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div className="flex items-center gap-2">
-                    <Server className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <p className="text-muted-foreground">Compute</p>
-                      <p className="font-medium">${(vm.cost * 0.6).toFixed(2)}</p>
+
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div className="flex items-center gap-2">
+                      <Cpu className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-muted-foreground">Avg CPU</p>
+                        <p className="font-medium">{vm.cpuAverage.toFixed(1)}%</p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <HardDrive className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <p className="text-muted-foreground">Storage</p>
-                      <p className="font-medium">${(vm.cost * 0.2).toFixed(2)}</p>
+                    <div className="flex items-center gap-2">
+                      <MemoryStick className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-muted-foreground">Avg RAM</p>
+                        <p className="font-medium">{vm.ramAverageMB.toFixed(0)} MB</p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Network className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <p className="text-muted-foreground">Bandwidth</p>
-                      <p className="font-medium">${(vm.cost * 0.2).toFixed(2)}</p>
+                    <div className="flex items-center gap-2">
+                      <Network className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-muted-foreground">Bandwidth</p>
+                        <p className="font-medium">{vm.bandwidthGB.toFixed(2)} GB</p>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

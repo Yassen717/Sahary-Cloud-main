@@ -18,7 +18,6 @@ import {
   ArrowLeft,
   Cpu,
   HardDrive,
-  Network,
   Activity,
   Clock,
   AlertCircle,
@@ -46,21 +45,23 @@ interface VM {
   cpu: number;
   ram: number;
   storage: number;
-  ipAddress?: string;
-  os?: string;
-  dockerImage?: string;
+  ipAddress?: string | null;
+  port?: number | null;
+  dockerImage?: string | null;
   dockerContainerId?: string | null;
+  startedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 interface VMStats {
-  cpuUsage: number;
-  ramUsage: number;
-  diskUsage: number;
-  networkIn: number;
-  networkOut: number;
-  uptime: number;
+  totalRecords: number;
+  totalCost: number;
+  averageCPU: number;
+  averageRAM: number;
+  totalBandwidth: number;
+  peakCPU: number;
+  peakRAM: number;
 }
 
 export default function VMDetailsPage() {
@@ -69,30 +70,49 @@ export default function VMDetailsPage() {
   const { toast } = useToast();
   const [vm, setVm] = useState<VM | null>(null);
   const [stats, setStats] = useState<VMStats | null>(null);
+  const [statsError, setStatsError] = useState(false);
+  const [logs, setLogs] = useState<string | null>(null);
+  const [logsMessage, setLogsMessage] = useState<string | null>(null);
+  const [logsError, setLogsError] = useState('');
+  const [logsLoading, setLogsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   useEffect(() => {
     loadVMDetails();
-    // Refresh stats every 30 seconds
     const interval = setInterval(loadVMDetails, 30000);
     return () => clearInterval(interval);
+  }, [params.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadStats = async () => {
+      try {
+        const response = await apiClient.getVMStats(params.id as string);
+        if (!cancelled) {
+          setStats(response.data);
+          setStatsError(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setStats(null);
+          setStatsError(true);
+        }
+      }
+    };
+    loadStats();
+    const interval = setInterval(loadStats, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [params.id]);
 
   const loadVMDetails = async () => {
     try {
       const response = await apiClient.getVM(params.id as string);
       setVm(response.data.vm);
-      // Mock stats for now - replace with actual API call when available
-      setStats({
-        cpuUsage: Math.random() * 100,
-        ramUsage: Math.random() * 100,
-        diskUsage: Math.random() * 100,
-        networkIn: Math.random() * 1000,
-        networkOut: Math.random() * 1000,
-        uptime: Math.floor(Math.random() * 86400),
-      });
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -101,6 +121,23 @@ export default function VMDetailsPage() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadLogs = async () => {
+    try {
+      setLogsLoading(true);
+      const response = await apiClient.getVMLogs(params.id as string, { tail: 200 });
+      const data = response.data ?? {};
+      setLogs(typeof data.logs === 'string' ? data.logs : null);
+      setLogsMessage(data.message ?? null);
+      setLogsError('');
+    } catch (error: any) {
+      setLogs(null);
+      setLogsMessage(null);
+      setLogsError(error.message || 'Failed to load logs');
+    } finally {
+      setLogsLoading(false);
     }
   };
 
@@ -162,19 +199,6 @@ export default function VMDetailsPage() {
     }
   };
 
-  const formatUptime = (seconds: number) => {
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return `${days}d ${hours}h ${minutes}m`;
-  };
-
-  const formatBytes = (bytes: number) => {
-    if (bytes < 1024) return `${bytes.toFixed(2)} B/s`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB/s`;
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB/s`;
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -204,6 +228,16 @@ export default function VMDetailsPage() {
       </div>
     );
   }
+
+  const ramPercent = (mb: number) => (vm.ram > 0 ? (mb / vm.ram) * 100 : 0);
+  const usageBars = stats
+    ? [
+        { label: 'Average CPU', value: stats.averageCPU, color: 'bg-primary' },
+        { label: 'Peak CPU', value: stats.peakCPU, color: 'bg-primary/60' },
+        { label: 'Average RAM', value: ramPercent(stats.averageRAM), color: 'bg-blue-500' },
+        { label: 'Peak RAM', value: ramPercent(stats.peakRAM), color: 'bg-blue-500/60' },
+      ]
+    : [];
 
   return (
     <div className="container mx-auto p-6">
@@ -291,7 +325,7 @@ export default function VMDetailsPage() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="overview" className="space-y-6">
+      <Tabs defaultValue="overview" className="space-y-6" onValueChange={(value) => value === 'logs' && loadLogs()}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="stats">Statistics</TabsTrigger>
@@ -313,11 +347,9 @@ export default function VMDetailsPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{vm.cpu} vCPU</div>
-                {stats && (
-                  <p className="text-xs text-muted-foreground">
-                    {stats.cpuUsage.toFixed(1)}% usage
-                  </p>
-                )}
+                <p className="text-xs text-muted-foreground">
+                  {statsError ? 'Usage unavailable' : stats ? `${stats.averageCPU.toFixed(1)}% average usage` : 'Loading usage…'}
+                </p>
               </CardContent>
             </Card>
 
@@ -328,11 +360,9 @@ export default function VMDetailsPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{vm.ram / 1024} GB</div>
-                {stats && (
-                  <p className="text-xs text-muted-foreground">
-                    {stats.ramUsage.toFixed(1)}% usage
-                  </p>
-                )}
+                <p className="text-xs text-muted-foreground">
+                  {statsError ? 'Usage unavailable' : stats ? `${ramPercent(stats.averageRAM).toFixed(1)}% average usage` : 'Loading usage…'}
+                </p>
               </CardContent>
             </Card>
 
@@ -343,25 +373,21 @@ export default function VMDetailsPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{vm.storage} GB</div>
-                {stats && (
-                  <p className="text-xs text-muted-foreground">
-                    {stats.diskUsage.toFixed(1)}% usage
-                  </p>
-                )}
+                <p className="text-xs text-muted-foreground">Allocated</p>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Uptime</CardTitle>
+                <CardTitle className="text-sm font-medium">Last Started</CardTitle>
                 <Clock className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {stats ? formatUptime(stats.uptime) : 'N/A'}
+                  {vm.startedAt ? new Date(vm.startedAt).toLocaleDateString() : 'Never'}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Since last restart
+                  {vm.startedAt ? new Date(vm.startedAt).toLocaleTimeString() : 'Not started yet'}
                 </p>
               </CardContent>
             </Card>
@@ -379,8 +405,8 @@ export default function VMDetailsPage() {
                   <p className="text-sm font-mono">{vm.id}</p>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">Operating System</p>
-                  <p className="text-sm">{vm.dockerImage || vm.os || 'Ubuntu 22.04 LTS'}</p>
+                  <p className="text-sm font-medium text-muted-foreground">Docker Image</p>
+                  <p className="text-sm">{vm.dockerImage ?? 'Not set'}</p>
                 </div>
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">IP Address</p>
@@ -408,82 +434,56 @@ export default function VMDetailsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Resource Usage</CardTitle>
-              <CardDescription>Real-time resource utilization metrics</CardDescription>
+              <CardDescription>Usage averages and peaks from recorded samples (refreshes every 30 seconds)</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {stats && (
-                <>
-                  <div>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-sm font-medium">CPU Usage</span>
-                      <span className="text-sm text-muted-foreground">{stats.cpuUsage.toFixed(1)}%</span>
-                    </div>
-                    <div className="w-full bg-secondary rounded-full h-2">
-                      <div
-                        className="bg-primary h-2 rounded-full transition-all"
-                        style={{ width: `${stats.cpuUsage}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-sm font-medium">RAM Usage</span>
-                      <span className="text-sm text-muted-foreground">{stats.ramUsage.toFixed(1)}%</span>
-                    </div>
-                    <div className="w-full bg-secondary rounded-full h-2">
-                      <div
-                        className="bg-blue-500 h-2 rounded-full transition-all"
-                        style={{ width: `${stats.ramUsage}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-sm font-medium">Disk Usage</span>
-                      <span className="text-sm text-muted-foreground">{stats.diskUsage.toFixed(1)}%</span>
-                    </div>
-                    <div className="w-full bg-secondary rounded-full h-2">
-                      <div
-                        className="bg-green-500 h-2 rounded-full transition-all"
-                        style={{ width: `${stats.diskUsage}%` }}
-                      />
-                    </div>
-                  </div>
-                </>
+              {statsError && (
+                <p className="text-sm text-muted-foreground">Unavailable: could not load VM statistics.</p>
               )}
+              {!statsError && !stats && (
+                <p className="text-sm text-muted-foreground">Loading statistics…</p>
+              )}
+              {usageBars.map((bar) => (
+                <div key={bar.label}>
+                  <div className="flex justify-between mb-2">
+                    <span className="text-sm font-medium">{bar.label}</span>
+                    <span className="text-sm text-muted-foreground">{bar.value.toFixed(1)}%</span>
+                  </div>
+                  <div className="w-full bg-secondary rounded-full h-2">
+                    <div
+                      className={`${bar.color} h-2 rounded-full transition-all`}
+                      style={{ width: `${Math.min(bar.value, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Network Traffic</CardTitle>
-              <CardDescription>Current network throughput</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Network className="h-4 w-4 text-green-500" />
-                    <span className="text-sm font-medium">Incoming</span>
+          {stats && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Recorded Totals</CardTitle>
+                <CardDescription>Totals across all recorded usage samples</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Samples</p>
+                    <p className="text-2xl font-bold">{stats.totalRecords}</p>
                   </div>
-                  <p className="text-2xl font-bold">
-                    {stats ? formatBytes(stats.networkIn) : 'N/A'}
-                  </p>
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Network className="h-4 w-4 text-blue-500" />
-                    <span className="text-sm font-medium">Outgoing</span>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Cost</p>
+                    <p className="text-2xl font-bold">${stats.totalCost.toFixed(2)}</p>
                   </div>
-                  <p className="text-2xl font-bold">
-                    {stats ? formatBytes(stats.networkOut) : 'N/A'}
-                  </p>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Bandwidth</p>
+                    <p className="text-2xl font-bold">{stats.totalBandwidth.toFixed(2)}</p>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         {/* Network Tab */}
@@ -491,57 +491,17 @@ export default function VMDetailsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Network Configuration</CardTitle>
-              <CardDescription>Network settings and connectivity information</CardDescription>
+              <CardDescription>Network settings assigned to this VM</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">Public IP Address</p>
+                  <p className="text-sm font-medium text-muted-foreground">IP Address</p>
                   <p className="text-lg font-mono">{vm.ipAddress || 'Not assigned'}</p>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">Private IP Address</p>
-                  <p className="text-lg font-mono">10.0.0.{Math.floor(Math.random() * 255)}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Gateway</p>
-                  <p className="text-lg font-mono">10.0.0.1</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">DNS Servers</p>
-                  <p className="text-lg font-mono">8.8.8.8, 8.8.4.4</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Open Ports</CardTitle>
-              <CardDescription>Currently configured firewall rules</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between items-center p-3 border rounded-lg">
-                  <div>
-                    <p className="font-medium">SSH</p>
-                    <p className="text-sm text-muted-foreground">Port 22</p>
-                  </div>
-                  <Badge>Open</Badge>
-                </div>
-                <div className="flex justify-between items-center p-3 border rounded-lg">
-                  <div>
-                    <p className="font-medium">HTTP</p>
-                    <p className="text-sm text-muted-foreground">Port 80</p>
-                  </div>
-                  <Badge>Open</Badge>
-                </div>
-                <div className="flex justify-between items-center p-3 border rounded-lg">
-                  <div>
-                    <p className="font-medium">HTTPS</p>
-                    <p className="text-sm text-muted-foreground">Port 443</p>
-                  </div>
-                  <Badge>Open</Badge>
+                  <p className="text-sm font-medium text-muted-foreground">Port</p>
+                  <p className="text-lg font-mono">{vm.port ?? 'Not set'}</p>
                 </div>
               </div>
             </CardContent>
@@ -560,18 +520,25 @@ export default function VMDetailsPage() {
         {/* Logs Tab */}
         <TabsContent value="logs" className="space-y-6">
           <Card>
-            <CardHeader>
-              <CardTitle>System Logs</CardTitle>
-              <CardDescription>Recent system events and logs</CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <div>
+                <CardTitle>Container Logs</CardTitle>
+                <CardDescription>Latest 200 lines from the VM container</CardDescription>
+              </div>
+              <Button size="sm" variant="outline" onClick={loadLogs} disabled={logsLoading}>
+                {logsLoading && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
+                Refresh
+              </Button>
             </CardHeader>
             <CardContent>
               <div className="bg-black text-green-400 p-4 rounded-lg font-mono text-sm h-96 overflow-y-auto">
-                <p>[{new Date().toISOString()}] VM started successfully</p>
-                <p>[{new Date().toISOString()}] Network interface initialized</p>
-                <p>[{new Date().toISOString()}] SSH service started on port 22</p>
-                <p>[{new Date().toISOString()}] System ready</p>
-                <p className="text-gray-500">...</p>
-                <p className="text-gray-500">Waiting for new events...</p>
+                {logsError ? (
+                  <p className="text-red-400">Logs unavailable: {logsError}</p>
+                ) : logs ? (
+                  <pre className="whitespace-pre-wrap">{logs}</pre>
+                ) : (
+                  <p className="text-gray-500">{logsLoading ? 'Loading logs…' : logsMessage ?? 'No logs available'}</p>
+                )}
               </div>
             </CardContent>
           </Card>

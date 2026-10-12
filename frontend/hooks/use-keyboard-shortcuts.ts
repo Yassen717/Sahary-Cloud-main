@@ -14,7 +14,14 @@ interface KeyboardShortcut {
 export function useKeyboardShortcuts(shortcuts: KeyboardShortcut[]) {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isEditable =
+        !!target &&
+        (target.isContentEditable ||
+          ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+
       shortcuts.forEach((shortcut) => {
+        if (isEditable && !shortcut.ctrl && !shortcut.alt) return;
         const ctrlMatch = shortcut.ctrl ? event.ctrlKey || event.metaKey : !event.ctrlKey && !event.metaKey;
         const shiftMatch = shortcut.shift ? event.shiftKey : !event.shiftKey;
         const altMatch = shortcut.alt ? event.altKey : !event.altKey;
@@ -39,8 +46,6 @@ export function useKeyboardShortcuts(shortcuts: KeyboardShortcut[]) {
 // Common keyboard shortcuts
 export const KEYBOARD_SHORTCUTS = {
   SEARCH: { key: 'k', ctrl: true, description: 'Open search' },
-  DASHBOARD: { key: 'd', ctrl: true, description: 'Go to dashboard' },
-  PROFILE: { key: 'p', ctrl: true, description: 'Go to profile' },
   HELP: { key: '?', shift: true, description: 'Show keyboard shortcuts' },
   ESCAPE: { key: 'Escape', description: 'Close modal/dialog' },
 };

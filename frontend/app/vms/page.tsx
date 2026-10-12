@@ -87,7 +87,7 @@ export default function VMsPage() {
         case 'date':
           return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         case 'status':
-          return a.status.localeCompare(b.status);
+          return (a.status ?? '').localeCompare(b.status ?? '');
         default:
           return 0;
       }
@@ -188,6 +188,8 @@ export default function VMsPage() {
               <Button
                 variant={viewMode === 'grid' ? 'default' : 'outline'}
                 size="icon"
+                aria-label="Grid view"
+                aria-pressed={viewMode === 'grid'}
                 onClick={() => setViewMode('grid')}
               >
                 <Grid3x3 className="h-4 w-4" />
@@ -195,6 +197,8 @@ export default function VMsPage() {
               <Button
                 variant={viewMode === 'list' ? 'default' : 'outline'}
                 size="icon"
+                aria-label="List view"
+                aria-pressed={viewMode === 'list'}
                 onClick={() => setViewMode('list')}
               >
                 <List className="h-4 w-4" />

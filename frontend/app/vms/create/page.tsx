@@ -39,8 +39,7 @@ const operatingSystems = [
   { id: 'ubuntu-22.04', name: 'Ubuntu 22.04 LTS', icon: '🐧', dockerImage: 'ubuntu:22.04' },
   { id: 'ubuntu-20.04', name: 'Ubuntu 20.04 LTS', icon: '🐧', dockerImage: 'ubuntu:20.04' },
   { id: 'debian-11', name: 'Debian 11', icon: '🌀', dockerImage: 'debian:11' },
-  { id: 'centos-8', name: 'CentOS 8', icon: '💠', dockerImage: 'centos:8' },
-  { id: 'fedora-38', name: 'Fedora 38', icon: '🎩', dockerImage: 'fedora:38' },
+  { id: 'alpine-3.19', name: 'Alpine 3.19', icon: '🏔️', dockerImage: 'alpine:3.19' },
 ];
 
 export default function CreateVMPage() {
@@ -61,6 +60,7 @@ export default function CreateVMPage() {
 
   const selectedPlan = plans.find(p => p.id === formData.plan);
   const selectedOS = operatingSystems.find(os => os.id === formData.os);
+  const minStorage = Math.max(10, Math.ceil(formData.ram) * 2);
 
   const calculatePrice = () => {
     if (formData.customSpecs) {
@@ -71,6 +71,7 @@ export default function CreateVMPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (step !== 3) return;
     
     if (!formData.name || !formData.os) {
       toast({
@@ -87,8 +88,8 @@ export default function CreateVMPage() {
         name: formData.name,
         dockerImage: selectedOS?.dockerImage,
         cpu: formData.customSpecs ? formData.cpu : selectedPlan?.cpu,
-        ram: (formData.customSpecs ? formData.ram : selectedPlan?.ram ?? 0) * 1024, // backend expects RAM in MB
-        storage: formData.customSpecs ? formData.storage : selectedPlan?.storage,
+        ram: (formData.customSpecs ? formData.ram : (selectedPlan?.ram ?? 0)) * 1024, // backend expects RAM in MB
+        storage: formData.customSpecs ? Math.max(formData.storage, minStorage) : selectedPlan?.storage,
       };
 
       const response = await apiClient.createVM(vmData);
@@ -295,7 +296,10 @@ export default function CreateVMPage() {
                         max="64"
                         step="2"
                         value={formData.ram}
-                        onChange={(e) => setFormData({ ...formData, ram: parseInt(e.target.value) })}
+                        onChange={(e) => {
+                          const ram = parseInt(e.target.value);
+                          setFormData({ ...formData, ram, storage: Math.max(formData.storage, Math.max(10, Math.ceil(ram) * 2)) });
+                        }}
                         className="w-full"
                       />
                     </div>
@@ -305,13 +309,16 @@ export default function CreateVMPage() {
                       <input
                         type="range"
                         id="storage"
-                        min="20"
+                        min={minStorage}
                         max="500"
                         step="10"
                         value={formData.storage}
                         onChange={(e) => setFormData({ ...formData, storage: parseInt(e.target.value) })}
                         className="w-full"
                       />
+                      <p className="text-xs text-muted-foreground">
+                        Minimum {minStorage} GB for {formData.ram} GB RAM
+                      </p>
                     </div>
                   </div>
                 )}

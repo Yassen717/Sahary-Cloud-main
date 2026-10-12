@@ -5,12 +5,10 @@ import { apiClient } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Loader2, 
-  Receipt, 
-  DollarSign,
-  Calendar,
-  Download,
+import { BillingNav } from '@/components/billing/BillingNav';
+import {
+  Loader2,
+  Receipt,
   CheckCircle,
   Clock,
   AlertCircle
@@ -18,64 +16,64 @@ import {
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 
+const PAGE_SIZE = 10;
+
 interface Invoice {
   id: string;
   invoiceNumber: string;
-  amount: number;
-  status: 'PAID' | 'PENDING' | 'OVERDUE';
+  amount: number | string;
+  status: 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELLED' | 'REFUNDED';
   dueDate: string;
-  paidAt?: string;
-  items: {
-    description: string;
-    amount: number;
-  }[];
+  paidAt?: string | null;
+}
+
+interface Pagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+interface InvoiceStats {
+  counts: { total: number; pending: number; paid: number; overdue: number };
+  amounts: { totalProcessed: number };
 }
 
 export default function BillingPage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [stats, setStats] = useState({
-    totalPaid: 0,
-    totalPending: 0,
-    totalOverdue: 0,
-    currentMonth: 0,
-  });
+  const [pagination, setPagination] = useState<Pagination | null>(null);
+  const [page, setPage] = useState(1);
+  const [stats, setStats] = useState<InvoiceStats | null>(null);
 
   useEffect(() => {
-    loadBillingData();
-  }, []);
-
-  const loadBillingData = async () => {
-    try {
-      const response = await apiClient.getInvoices();
-      const invoiceList: Invoice[] = response?.data || [];
-      setInvoices(invoiceList);
-
-      // Calculate stats
-      const paid = invoiceList.filter((i: Invoice) => i.status === 'PAID')
-        .reduce((sum: number, i: Invoice) => sum + Number(i.amount), 0);
-      const pending = invoiceList.filter((i: Invoice) => i.status === 'PENDING')
-        .reduce((sum: number, i: Invoice) => sum + Number(i.amount), 0);
-      const overdue = invoiceList.filter((i: Invoice) => i.status === 'OVERDUE')
-        .reduce((sum: number, i: Invoice) => sum + Number(i.amount), 0);
-      const currentMonth = invoiceList.filter((i: Invoice) => {
-        const invoiceDate = new Date(i.dueDate);
-        const now = new Date();
-        return invoiceDate.getMonth() === now.getMonth() &&
-               invoiceDate.getFullYear() === now.getFullYear();
-      }).reduce((sum: number, i: Invoice) => sum + Number(i.amount), 0);
-
-      setStats({ totalPaid: paid, totalPending: pending, totalOverdue: overdue, currentMonth });
-    } catch (error: any) {
-      toast({
+    apiClient.getInvoiceStats()
+      .then((response) => setStats(response?.data ?? null))
+      .catch((error: Error) => toast({
         title: 'Error',
-        description: error.message || 'Failed to load billing data',
+        description: error.message || 'Failed to load billing statistics',
         variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
+      }));
+  }, [toast]);
+
+  useEffect(() => {
+    apiClient.getInvoices({ page, limit: PAGE_SIZE })
+      .then((response) => {
+        setInvoices(response?.data ?? []);
+        setPagination(response?.pagination ?? null);
+      })
+      .catch((error: Error) => toast({
+        title: 'Error',
+        description: error.message || 'Failed to load invoices',
+        variant: 'destructive',
+      }))
+      .finally(() => setLoading(false));
+  }, [page, toast]);
+
+  const goToPage = (nextPage: number) => {
+    setLoading(true);
+    setPage(nextPage);
   };
 
   const getStatusBadge = (status: string) => {
@@ -106,14 +104,6 @@ export default function BillingPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    );
-  }
-
   return (
     <div className="container mx-auto p-6">
       <div className="mb-6">
@@ -130,6 +120,8 @@ export default function BillingPage() {
         </div>
       </div>
 
+      <BillingNav />
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
         <Card>
@@ -138,41 +130,43 @@ export default function BillingPage() {
             <CheckCircle className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${stats.totalPaid.toFixed(2)}</div>
+            <div className="text-2xl font-bold">
+              ${stats ? Number(stats.amounts.totalProcessed).toFixed(2) : '—'}
+            </div>
             <p className="text-xs text-muted-foreground">All time</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending</CardTitle>
+            <CardTitle className="text-sm font-medium">Pending Invoices</CardTitle>
             <Clock className="h-4 w-4 text-yellow-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${stats.totalPending.toFixed(2)}</div>
+            <div className="text-2xl font-bold">{stats ? stats.counts.pending : '—'}</div>
             <p className="text-xs text-muted-foreground">Awaiting payment</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Overdue</CardTitle>
+            <CardTitle className="text-sm font-medium">Overdue Invoices</CardTitle>
             <AlertCircle className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${stats.totalOverdue.toFixed(2)}</div>
+            <div className="text-2xl font-bold">{stats ? stats.counts.overdue : '—'}</div>
             <p className="text-xs text-muted-foreground">Past due date</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">This Month</CardTitle>
-            <Calendar className="h-4 w-4 text-blue-500" />
+            <CardTitle className="text-sm font-medium">Total Invoices</CardTitle>
+            <Receipt className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${stats.currentMonth.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">Current billing period</p>
+            <div className="text-2xl font-bold">{stats ? stats.counts.total : '—'}</div>
+            <p className="text-xs text-muted-foreground">All time</p>
           </CardContent>
         </Card>
       </div>
@@ -184,7 +178,11 @@ export default function BillingPage() {
           <CardDescription>View and manage all your invoices</CardDescription>
         </CardHeader>
         <CardContent>
-          {invoices.length === 0 ? (
+          {loading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+          ) : invoices.length === 0 ? (
             <div className="text-center py-12">
               <Receipt className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-xl font-semibold mb-2">No Invoices Yet</h3>
@@ -223,16 +221,41 @@ export default function BillingPage() {
                   </div>
                   <div className="flex gap-2 ml-4">
                     <Button variant="outline" size="sm" asChild>
-                      <Link href={`/billing/${invoice.id}`}>
+                      <Link href={`/billing/${invoice.id}`} aria-label={`View invoice ${invoice.invoiceNumber}`}>
                         View Details
                       </Link>
-                    </Button>
-                    <Button variant="outline" size="sm">
-                      <Download className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {pagination && pagination.totalPages > 1 && (
+            <div className="mt-6 flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                Page {pagination.page} of {pagination.totalPages}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label="Previous page"
+                  disabled={page <= 1}
+                  onClick={() => goToPage(page - 1)}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label="Next page"
+                  disabled={page >= pagination.totalPages}
+                  onClick={() => goToPage(page + 1)}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
