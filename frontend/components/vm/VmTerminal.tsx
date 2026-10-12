@@ -106,17 +106,16 @@ export default function VmTerminal({ vmId, containerId, status }: VmTerminalProp
 
             {/* xterm mount point */}
             <div
-                className="rounded-lg overflow-hidden border border-[#30363d] shadow-[0_0_24px_rgba(88,166,255,0.08)]"
+                className="h-[420px] rounded-lg overflow-hidden border border-[#30363d] shadow-[0_0_24px_rgba(88,166,255,0.08)]"
                 style={{
                     background: '#0d1117',
-                    minHeight: '420px',
+                    padding: '8px',
                 }}
             >
                 {/* xterm.js renders into this div */}
                 <div
                     ref={terminalRef}
-                    className="w-full h-full"
-                    style={{ minHeight: '420px', padding: '8px' }}
+                    className="w-full h-full overflow-hidden"
                 />
             </div>
         </div>
