@@ -12,6 +12,7 @@ interface UseVmTerminalOptions {
 
 interface UseVmTerminalReturn {
     terminalRef: React.RefObject<HTMLDivElement | null>;
+    ready: boolean;
     connected: boolean;
     connecting: boolean;
     connect: () => void;
@@ -43,8 +44,8 @@ export function useVmTerminal({
     const socketRef = useRef<Socket | null>(null);
     const termRef = useRef<import('@xterm/xterm').Terminal | null>(null);
     const fitAddonRef = useRef<import('@xterm/addon-fit').FitAddon | null>(null);
-    const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
+    const [ready, setReady] = useState(false);
     const [connected, setConnected] = useState(false);
     const [connecting, setConnecting] = useState(false);
 
@@ -52,12 +53,15 @@ export function useVmTerminal({
     useEffect(() => {
         if (typeof window === 'undefined') return;
 
-        let terminal: import('@xterm/xterm').Terminal;
-        let fitAddon: import('@xterm/addon-fit').FitAddon;
+        let cancelled = false;
+        let terminal: import('@xterm/xterm').Terminal | null = null;
+        let resizeObserver: ResizeObserver | null = null;
+        let disposables: Array<{ dispose: () => void }> = [];
 
         (async () => {
             const { Terminal } = await import('@xterm/xterm');
             const { FitAddon } = await import('@xterm/addon-fit');
+            if (cancelled) return;
 
             terminal = new Terminal({
                 cursorBlink: true,
@@ -91,32 +95,47 @@ export function useVmTerminal({
                 convertEol: true,
             });
 
-            fitAddon = new FitAddon();
+            const fitAddon = new FitAddon();
             terminal.loadAddon(fitAddon);
 
             if (terminalRef.current) {
                 terminal.open(terminalRef.current);
                 fitAddon.fit();
                 terminal.writeln('\x1b[90mSahary Cloud VM Console — click Connect to start a session\x1b[0m');
+                resizeObserver = new ResizeObserver(() => {
+                    try {
+                        fitAddon.fit();
+                    } catch (_) { }
+                });
+                resizeObserver.observe(terminalRef.current);
             }
+
+            disposables = [
+                terminal.onData((data) => {
+                    if (socketRef.current?.connected) {
+                        socketRef.current.emit('terminal:input', data);
+                    }
+                }),
+                terminal.onResize(({ cols, rows }) => {
+                    if (socketRef.current?.connected) {
+                        socketRef.current.emit('terminal:resize', { cols, rows });
+                    }
+                }),
+            ];
 
             termRef.current = terminal;
             fitAddonRef.current = fitAddon;
-
-            // Resize observer — refit xterm on container size changes
-            const ro = new ResizeObserver(() => {
-                try {
-                    fitAddon?.fit();
-                } catch (_) { }
-            });
-            if (terminalRef.current) ro.observe(terminalRef.current);
-            resizeObserverRef.current = ro;
+            setReady(true);
         })();
 
         return () => {
-            resizeObserverRef.current?.disconnect();
-            termRef.current?.dispose();
+            cancelled = true;
+            setReady(false);
+            resizeObserver?.disconnect();
+            disposables.forEach((disposable) => disposable.dispose());
+            terminal?.dispose();
             termRef.current = null;
+            fitAddonRef.current = null;
         };
     }, []);
 
@@ -143,6 +162,13 @@ export function useVmTerminal({
 
         socketRef.current = socket;
 
+        const release = () => {
+            socket.disconnect();
+            if (socketRef.current === socket) socketRef.current = null;
+            setConnected(false);
+            setConnecting(false);
+        };
+
         socket.on('connect', () => {
             termRef.current?.writeln('\r\n\x1b[32m✓ Connected to VM console\x1b[0m\r\n');
 
@@ -153,53 +179,35 @@ export function useVmTerminal({
         });
 
         socket.on('terminal:data', (data: string) => {
-            if (!connected) setConnected(true);
             termRef.current?.write(data);
         });
 
-        socket.on('terminal:error', (msg: string) => {
-            termRef.current?.writeln(`\r\n\x1b[31mError: ${msg}\x1b[0m`);
-            setConnected(false);
-            setConnecting(false);
-        });
-
-        socket.on('terminal:closed', () => {
-            termRef.current?.writeln('\r\n\x1b[90mSession closed.\x1b[0m');
-            setConnected(false);
-            setConnecting(false);
-        });
-
-        socket.on('connect_error', (err) => {
-            termRef.current?.writeln(`\r\n\x1b[31mConnection error: ${err.message}\x1b[0m`);
-            setConnected(false);
-            setConnecting(false);
-        });
-
-        socket.on('disconnect', () => {
-            setConnected(false);
-            setConnecting(false);
-        });
-
-        // Forward keystrokes from xterm → socket
-        termRef.current?.onData((data) => {
-            if (socket.connected) {
-                socket.emit('terminal:input', data);
-            }
-        });
-
-        // Forward resize events
-        termRef.current?.onResize(({ cols, rows }) => {
-            if (socket.connected) {
-                socket.emit('terminal:resize', { cols, rows });
-            }
-        });
-
-        // Mark as connected once the first data piece arrives
         socket.once('terminal:data', () => {
             setConnected(true);
             setConnecting(false);
         });
-    }, [vmId, containerId, connecting, connected]);
+
+        socket.on('terminal:error', (msg: string) => {
+            termRef.current?.writeln(`\r\n\x1b[31mError: ${msg}\x1b[0m`);
+            release();
+        });
+
+        socket.on('terminal:closed', () => {
+            termRef.current?.writeln('\r\n\x1b[90mSession closed.\x1b[0m');
+            release();
+        });
+
+        socket.on('connect_error', (err) => {
+            termRef.current?.writeln(`\r\n\x1b[31mConnection error: ${err.message}\x1b[0m`);
+            release();
+        });
+
+        socket.on('disconnect', () => {
+            if (socketRef.current === socket) socketRef.current = null;
+            setConnected(false);
+            setConnecting(false);
+        });
+    }, [vmId, containerId, connecting]);
 
     // ── Disconnect ───────────────────────────────────────────────────────────
     const disconnect = useCallback(() => {
@@ -219,11 +227,13 @@ export function useVmTerminal({
     useEffect(() => {
         return () => {
             socketRef.current?.disconnect();
+            socketRef.current = null;
         };
     }, []);
 
     return {
         terminalRef,
+        ready,
         connected,
         connecting,
         connect,

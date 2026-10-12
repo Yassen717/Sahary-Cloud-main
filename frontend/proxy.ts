@@ -19,16 +19,10 @@ function decodeJWTPayload(token: string): Record<string, unknown> | null {
   }
 }
 
-// Routes that don't require authentication
-const publicRoutes = [
-  "/",
-  "/login",
-  "/register",
-  "/test-api",
-  "/verify-email",
-  "/forgot-password",
-  "/reset-password",
-];
+function isTokenExpired(payload: Record<string, unknown> | null): boolean {
+  const exp = payload?.exp;
+  return typeof exp === "number" && exp * 1000 <= Date.now();
+}
 
 // Routes that require authentication
 const protectedRoutes = [
@@ -50,11 +44,6 @@ const adminRoutes = ["/admin"];
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Check if the route is public
-  const isPublicRoute = publicRoutes.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`),
-  );
-
   // Check if the route is protected (exact match or sub-path, so
   // "/solar" doesn't accidentally match "/solar-alerts", etc.)
   const isProtectedRoute = protectedRoutes.some(
@@ -68,9 +57,15 @@ export function proxy(request: NextRequest) {
 
   // Get token from cookies or headers
   const token = request.cookies.get("token")?.value;
+  const payload = token ? decodeJWTPayload(token) : null;
+  const hasValidAccessToken = !!payload && !isTokenExpired(payload);
+  // A refresh token means the client can silently obtain a new access token,
+  // so treat it as a session too instead of bouncing to /login.
+  const hasSession =
+    hasValidAccessToken || !!request.cookies.get("refreshToken")?.value;
 
-  // If it's a protected route and no token, redirect to login
-  if (isProtectedRoute && !token) {
+  // If it's a protected route and no session, redirect to login
+  if (isProtectedRoute && !hasSession) {
     const loginUrl = new URL("/login", request.url);
     // Save the original URL to redirect back after login
     loginUrl.searchParams.set("redirect", pathname);
@@ -79,23 +74,23 @@ export function proxy(request: NextRequest) {
 
   // If it's an admin route, check for admin role
   if (isAdminRoute) {
-    if (!token) {
+    if (!hasSession) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("redirect", pathname);
       return NextResponse.redirect(loginUrl);
     }
-    const payload = decodeJWTPayload(token);
     if (
-      !payload ||
-      !["ADMIN", "SUPER_ADMIN"].includes(payload.role as string)
+      hasValidAccessToken &&
+      !["ADMIN", "SUPER_ADMIN"].includes(payload?.role as string)
     ) {
       // Authenticated but not an admin — send to dashboard instead
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
   }
 
-  // If user is logged in and tries to access login/register, redirect to dashboard
-  if (token && (pathname === "/login" || pathname === "/register")) {
+  // If user is logged in and tries to access login/register, redirect to dashboard.
+  // Only trust an unexpired access token here so a stale cookie can't trap the user.
+  if (hasValidAccessToken && (pathname === "/login" || pathname === "/register")) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { apiClient, ApiClient } from '@/lib/api';
+import { apiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,35 +9,24 @@ import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
-// Password-reset methods are being added to ApiClient (lib/api.ts); the
-// intersection cast keeps this page compiling until that change lands.
-const authApi = apiClient as ApiClient & {
-  forgotPassword: (email: string) => Promise<any>;
-};
-
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [devToken, setDevToken] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setMessage('');
-    setDevToken('');
     setLoading(true);
 
     try {
-      const res = await authApi.forgotPassword(email);
+      const res = await apiClient.forgotPassword(email);
       setMessage(
         res?.message ||
           'If an account exists for that email, a password reset link has been sent. Check your email.'
       );
-      // Dev affordance: with SMTP unconfigured the backend returns the raw
-      // token so the flow can still be exercised.
-      if (res?.data?.resetToken) setDevToken(res.data.resetToken);
     } catch (err: any) {
       setError(err?.message || 'Failed to send password reset email.');
     } finally {
@@ -74,21 +63,6 @@ export default function ForgotPasswordPage() {
             {message && (
               <div className="p-3 text-sm text-green-700 bg-green-50 dark:bg-green-900/20 rounded-md">
                 {message}
-              </div>
-            )}
-
-            {devToken && (
-              <div className="p-3 text-sm bg-amber-50 dark:bg-amber-900/20 rounded-md space-y-2">
-                <p className="font-medium">
-                  Dev mode — no email was sent. Use this reset token:
-                </p>
-                <code className="block break-all text-xs">{devToken}</code>
-                <Link
-                  href={`/reset-password?token=${encodeURIComponent(devToken)}`}
-                  className="inline-block text-primary underline"
-                >
-                  Reset password with this token
-                </Link>
               </div>
             )}
 

@@ -3,11 +3,12 @@
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
 import { Button } from "./ui/button";
 import { Menu, X, Cloud } from "lucide-react";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth, isAdminRole } from "@/lib/auth-context";
 
 // Lazy load user profile dropdown
 const UserProfileDropdown = dynamic(
@@ -15,16 +16,35 @@ const UserProfileDropdown = dynamic(
   { ssr: false }
 );
 
+interface NavItem {
+  href: string;
+  label: string;
+}
+
+const publicNav: NavItem[] = [
+  { href: "/#features", label: "Features" },
+  { href: "/#about", label: "About" },
+  { href: "/#plans", label: "Plans" },
+  { href: "/help", label: "Help" },
+  { href: "/contact", label: "Contact" },
+];
+
+const appNav: NavItem[] = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/vms", label: "VMs" },
+  { href: "/dashboard/hosting", label: "Hosting" },
+  { href: "/solar", label: "Solar" },
+  { href: "/billing", label: "Billing" },
+  { href: "/help", label: "Help" },
+];
+
+const adminNavItem: NavItem = { href: "/admin", label: "Admin" };
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const { isAuthenticated, user, logout } = useAuth();
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const { isAuthenticated, user, loading, logout } = useAuth();
+  const pathname = usePathname();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -35,6 +55,21 @@ export default function Header() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  const [lastPathname, setLastPathname] = useState(pathname);
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
+    setIsOpen(false);
+  }
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen]);
+
   const toggleMenu = () => {
     setIsOpen(!isOpen);
   };
@@ -43,6 +78,22 @@ export default function Header() {
     setIsOpen(false);
     await logout();
   };
+
+  const navItems = isAuthenticated
+    ? [...appNav, ...(isAdminRole(user?.role) ? [adminNavItem] : [])]
+    : publicNav;
+
+  const isActive = (href: string) => {
+    if (href.startsWith("/#")) return false;
+    if (href === "/dashboard") return pathname === "/dashboard";
+    return pathname === href || pathname.startsWith(`${href}/`);
+  };
+
+  const navLinkClass = (href: string) =>
+    cn(
+      "hover:text-primary transition-colors",
+      isActive(href) && "text-primary font-medium"
+    );
 
   return (
     <header 
@@ -65,49 +116,25 @@ export default function Header() {
           </span>
         </Link>
 
-        <div className="hidden md:flex items-center gap-6">
+        <div className="hidden lg:flex items-center gap-6">
           <nav aria-label="Primary navigation">
             <ul className="flex items-center gap-6" role="list">
-              <li>
-                <Link href="#features" className="hover:text-primary transition-colors">
-                  Features
-                </Link>
-              </li>
-              <li>
-                <Link href="#about" className="hover:text-primary transition-colors">
-                  About
-                </Link>
-              </li>
-              <li>
-                <Link href="#plans" className="hover:text-primary transition-colors">
-                  Plans
-                </Link>
-              </li>
-              <li>
-                <Link href="/help" className="hover:text-primary transition-colors">
-                  Help
-                </Link>
-              </li>
-              {isAuthenticated && (
-                <li>
-                  <Link href="/dashboard" className="hover:text-primary transition-colors">
-                    Dashboard
+              {navItems.map((item) => (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    className={navLinkClass(item.href)}
+                    aria-current={isActive(item.href) ? "page" : undefined}
+                  >
+                    {item.label}
                   </Link>
                 </li>
-              )}
+              ))}
             </ul>
           </nav>
           <ThemeToggle />
-          {!mounted ? (
-            // Show loading state during SSR
-            <>
-              <Button asChild variant="outline" className="mr-2">
-                <Link href="/login">Login</Link>
-              </Button>
-              <Button asChild className="bg-primary hover:bg-primary/90">
-                <Link href="/register">Sign Up</Link>
-              </Button>
-            </>
+          {loading ? (
+            <div className="h-9 w-9 rounded-full bg-muted animate-pulse" aria-hidden="true" />
           ) : isAuthenticated ? (
             <UserProfileDropdown />
           ) : (
@@ -122,7 +149,7 @@ export default function Header() {
           )}
         </div>
 
-        <div className="md:hidden flex items-center gap-4">
+        <div className="lg:hidden flex items-center gap-4">
           <ThemeToggle />
           <Button 
             variant="outline" 
@@ -141,9 +168,7 @@ export default function Header() {
       {isOpen && (
         <div 
           id="mobile-menu"
-          className="md:hidden absolute top-full left-0 w-full bg-background/95 backdrop-blur-md border-b border-primary/10 shadow-lg py-4"
-          role="dialog"
-          aria-label="Mobile navigation menu"
+          className="lg:hidden absolute top-full left-0 w-full bg-background/95 backdrop-blur-md border-b border-primary/10 shadow-lg py-4 max-h-[calc(100vh-5rem)] overflow-y-auto"
         >
           <nav className="container mx-auto px-4" aria-label="Mobile navigation">
             <ul className="flex flex-col gap-4" role="list">
@@ -154,54 +179,30 @@ export default function Header() {
                       {`${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase() || user.email?.[0]?.toUpperCase() || 'U'}
                     </div>
                     <div>
-                      <p className="font-medium">{`${user.firstName} ${user.lastName}`.trim() || user.email}</p>
+                      <p className="font-medium">{`${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || user.email}</p>
                       <p className="text-xs text-muted-foreground">{user.email}</p>
                     </div>
                   </div>
                 </li>
               )}
-              <li>
-                <Link
-                  href="#features"
-                  className="block py-2 hover:text-primary transition-colors"
-                  onClick={() => setIsOpen(false)}
-                >
-                  Features
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#about"
-                  className="block py-2 hover:text-primary transition-colors"
-                  onClick={() => setIsOpen(false)}
-                >
-                  About
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#plans"
-                  className="block py-2 hover:text-primary transition-colors"
-                  onClick={() => setIsOpen(false)}
-                >
-                  Plans
-                </Link>
-              </li>
+              {navItems.map((item) => (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    className={cn("block py-2", navLinkClass(item.href))}
+                    aria-current={isActive(item.href) ? "page" : undefined}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    {item.label}
+                  </Link>
+                </li>
+              ))}
               {isAuthenticated && (
                 <>
                   <li>
                     <Link
-                      href="/dashboard"
-                      className="block py-2 hover:text-primary transition-colors"
-                      onClick={() => setIsOpen(false)}
-                    >
-                      Dashboard
-                    </Link>
-                  </li>
-                  <li>
-                    <Link
                       href="/profile"
-                      className="block py-2 hover:text-primary transition-colors"
+                      className={cn("block py-2", navLinkClass("/profile"))}
                       onClick={() => setIsOpen(false)}
                     >
                       Profile
@@ -210,7 +211,7 @@ export default function Header() {
                   <li>
                     <Link
                       href="/settings"
-                      className="block py-2 hover:text-primary transition-colors"
+                      className={cn("block py-2", navLinkClass("/settings"))}
                       onClick={() => setIsOpen(false)}
                     >
                       Settings
@@ -218,7 +219,7 @@ export default function Header() {
                   </li>
                 </>
               )}
-              {!isAuthenticated ? (
+              {loading ? null : !isAuthenticated ? (
                 <>
                   <li>
                     <Button

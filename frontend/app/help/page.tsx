@@ -1,13 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-    Search,
     Rocket,
     Server,
     Sun,
@@ -23,8 +21,10 @@ import { FAQSection } from '@/components/help/FAQSection';
 import { GettingStartedGuide } from '@/components/help/GettingStartedGuide';
 import { faqCategories } from '@/lib/help-data';
 
+const TAB_VALUES = ['faqs', 'guides', 'docs', 'contact'];
+
 export default function HelpPage() {
-    const [searchQuery, setSearchQuery] = useState('');
+    const [tab, setTab] = useState('faqs');
 
     const iconMap = {
         Rocket: Rocket,
@@ -33,6 +33,16 @@ export default function HelpPage() {
         CreditCard: CreditCard,
         Shield: Shield,
     };
+
+    useEffect(() => {
+        const syncTabFromHash = () => {
+            const hash = window.location.hash.slice(1);
+            if (TAB_VALUES.includes(hash)) setTab(hash);
+        };
+        syncTabFromHash();
+        window.addEventListener('hashchange', syncTabFromHash);
+        return () => window.removeEventListener('hashchange', syncTabFromHash);
+    }, []);
 
     return (
         <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -46,7 +56,7 @@ export default function HelpPage() {
             </div>
 
             {/* Main Content */}
-            <Tabs defaultValue="faqs" className="space-y-8">
+            <Tabs value={tab} onValueChange={setTab} className="space-y-8">
                 <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 lg:w-auto">
                     <TabsTrigger value="faqs" className="gap-2">
                         <HelpCircle className="h-4 w-4" />
@@ -75,7 +85,7 @@ export default function HelpPage() {
                             return (
                                 <Card
                                     key={category.id}
-                                    className="hover-lift cursor-pointer group"
+                                    className="hover-lift group"
                                 >
                                     <CardHeader>
                                         <div className="flex items-center gap-3">
@@ -104,7 +114,7 @@ export default function HelpPage() {
 
                 {/* Getting Started Tab */}
                 <TabsContent value="guides" className="animate-fade-in">
-                    <GettingStartedGuide />
+                    <GettingStartedGuide onViewFaqs={() => setTab('faqs')} />
                 </TabsContent>
 
                 {/* Documentation Tab */}
@@ -135,7 +145,7 @@ export default function HelpPage() {
                                     <li>• Performance optimization</li>
                                 </ul>
                                 <Button className="w-full mt-4" variant="outline" asChild>
-                                    <Link href="/help#vm-docs">Read VM Docs</Link>
+                                    <Link href="/vms">Manage VMs</Link>
                                 </Button>
                             </CardContent>
                         </Card>
@@ -203,8 +213,8 @@ export default function HelpPage() {
                                     <li>• Solar data API</li>
                                     <li>• Billing API</li>
                                 </ul>
-                                <Button className="w-full mt-4" variant="outline" asChild>
-                                    <Link href="/help#api-docs">View API Docs</Link>
+                                <Button className="w-full mt-4" variant="outline" disabled>
+                                    API docs coming soon
                                 </Button>
                             </CardContent>
                         </Card>
@@ -230,7 +240,9 @@ export default function HelpPage() {
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <Button className="w-full">Start Chat</Button>
+                                <Button className="w-full" asChild>
+                                    <Link href="/contact">Start Chat</Link>
+                                </Button>
                             </CardContent>
                         </Card>
 
@@ -243,7 +255,9 @@ export default function HelpPage() {
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <Button className="w-full" variant="outline">Create Ticket</Button>
+                                <Button className="w-full" variant="outline" asChild>
+                                    <Link href="/contact">Create Ticket</Link>
+                                </Button>
                             </CardContent>
                         </Card>
 
@@ -272,15 +286,9 @@ export default function HelpPage() {
                                 Join our community to connect with other Sahary Cloud users and stay updated.
                             </p>
                             <div className="flex flex-wrap gap-3">
-                                <Badge variant="outline" className="cursor-pointer hover:bg-primary/10">
-                                    Discord Community
-                                </Badge>
-                                <Badge variant="outline" className="cursor-pointer hover:bg-primary/10">
-                                    Twitter Updates
-                                </Badge>
-                                <Badge variant="outline" className="cursor-pointer hover:bg-primary/10">
-                                    Blog & Tutorials
-                                </Badge>
+                                <Badge variant="outline">Discord Community</Badge>
+                                <Badge variant="outline">Twitter Updates</Badge>
+                                <Badge variant="outline">Blog & Tutorials</Badge>
                             </div>
                         </CardContent>
                     </Card>

@@ -59,7 +59,7 @@ export function AlertCard({ alert, onResolve, delay = 0 }: AlertCardProps) {
                 <div className="flex items-start justify-between gap-4">
                     <div className="flex items-start gap-3 flex-1">
                         <div className={`h-10 w-10 rounded-lg ${config.bg} flex items-center justify-center shrink-0`}>
-                            <Icon className={`h-5 w-5 ${config.icon}`} />
+                            <Icon className={`h-5 w-5 ${config.color}`} />
                         </div>
                         <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">

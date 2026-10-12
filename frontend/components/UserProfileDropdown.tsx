@@ -1,6 +1,6 @@
 'use client';
 
-import { useAuth } from '@/lib/auth-context';
+import { useAuth, isAdminRole } from '@/lib/auth-context';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { User, Settings, LogOut, LayoutDashboard } from 'lucide-react';
+import { User, Settings, LogOut, LayoutDashboard, CreditCard, Shield } from 'lucide-react';
 import Link from 'next/link';
 
 export function UserProfileDropdown() {
@@ -36,7 +36,7 @@ export function UserProfileDropdown() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="focus:outline-hidden">
+      <DropdownMenuTrigger className="rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary" aria-label="Open user menu">
         <Avatar className="h-9 w-9 cursor-pointer ring-2 ring-transparent hover:ring-primary/50 transition-all">
           <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${userName}`} />
           <AvatarFallback className="bg-primary text-primary-foreground">
@@ -65,11 +65,25 @@ export function UserProfileDropdown() {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
+          <Link href="/billing" className="cursor-pointer">
+            <CreditCard className="mr-2 h-4 w-4" />
+            <span>Billing</span>
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <Link href="/settings" className="cursor-pointer">
             <Settings className="mr-2 h-4 w-4" />
             <span>Settings</span>
           </Link>
         </DropdownMenuItem>
+        {isAdminRole(user.role) && (
+          <DropdownMenuItem asChild>
+            <Link href="/admin" className="cursor-pointer">
+              <Shield className="mr-2 h-4 w-4" />
+              <span>Admin</span>
+            </Link>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="cursor-pointer text-red-600 focus:text-red-600"

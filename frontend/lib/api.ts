@@ -21,6 +21,20 @@ export type ApiUpdateProfileRequest = Partial<
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api/v1";
 
+type QueryParams = Record<string, string | number | boolean | undefined | null>;
+
+function toQuery(params?: QueryParams): string {
+  if (!params) return "";
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      search.set(key, String(value));
+    }
+  }
+  const query = search.toString();
+  return query ? `?${query}` : "";
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -220,6 +234,8 @@ export class ApiClient {
 
   // Auth methods
   async login(email: string, password: string) {
+    // Drop any cached data from a previous user in this tab
+    cache.clear();
     const response = await this.request("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -258,6 +274,7 @@ export class ApiClient {
       // Network/server failure — local auth state is still cleared below.
     } finally {
       this.clearToken();
+      cache.clear();
     }
   }
 
@@ -324,6 +341,10 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ token }),
     });
+  }
+
+  async getActivity(params?: QueryParams) {
+    return this.request(`/auth/activity${toQuery(params)}`);
   }
 
   async getSessions() {
@@ -394,16 +415,36 @@ export class ApiClient {
     return result;
   }
 
+  private async vmAction(id: string, action: "start" | "stop" | "restart") {
+    const result = await this.request(`/vms/${id}/${action}`, {
+      method: "POST",
+    });
+    cache.invalidate("vms:list");
+    return result;
+  }
+
   async startVM(id: string) {
-    return this.request(`/vms/${id}/start`, { method: "POST" });
+    return this.vmAction(id, "start");
   }
 
   async stopVM(id: string) {
-    return this.request(`/vms/${id}/stop`, { method: "POST" });
+    return this.vmAction(id, "stop");
   }
 
   async restartVM(id: string) {
-    return this.request(`/vms/${id}/restart`, { method: "POST" });
+    return this.vmAction(id, "restart");
+  }
+
+  async getVMStats(id: string) {
+    return this.request(`/vms/${id}/stats`);
+  }
+
+  async getVMLogs(id: string, params?: QueryParams) {
+    return this.request(`/vms/${id}/container/logs${toQuery(params)}`);
+  }
+
+  async getAllVMs(params?: QueryParams) {
+    return this.request(`/vms/all${toQuery(params)}`);
   }
 
   // Solar methods
@@ -427,19 +468,53 @@ export class ApiClient {
     return this.request("/solar/environmental-impact");
   }
 
+  async getSolarHistory(params?: QueryParams) {
+    return this.request(`/solar/history${toQuery(params)}`);
+  }
+
+  async getSolarStatistics(params?: QueryParams) {
+    return this.request(`/solar/statistics${toQuery(params)}`);
+  }
+
+  // Solar admin methods (ADMIN / SUPER_ADMIN only)
+  async getSolarAlerts() {
+    return this.request("/solar/alerts");
+  }
+
+  async resolveSolarAlert(id: string) {
+    return this.request(`/solar/alerts/${id}/resolve`, { method: "PUT" });
+  }
+
+  async getSolarBattery() {
+    return this.request("/solar/battery");
+  }
+
+  async getSolarSystemState() {
+    return this.request("/solar/system-state");
+  }
+
+  async collectSolarData() {
+    return this.request("/solar/collect", { method: "POST" });
+  }
+
   // Billing methods
-  async getInvoices() {
-    return this.request("/billing/invoices");
+  async getInvoices(params?: QueryParams) {
+    return this.request(`/billing/invoices${toQuery(params)}`);
+  }
+
+  async getInvoiceStats() {
+    return this.request("/billing/invoices/stats");
   }
 
   async getInvoice(id: string) {
     return this.request(`/billing/invoices/${id}`);
   }
 
-  async getUsage() {
+  async getUsage(params?: QueryParams) {
+    const query = toQuery(params);
     return withCache(
-      () => this.request("/billing/usage"),
-      () => "billing:usage",
+      () => this.request(`/billing/usage${query}`),
+      () => `billing:usage${query}`,
       { ttl: 5 * 60 * 1000 }, // 5 minutes
     )();
   }
@@ -448,13 +523,41 @@ export class ApiClient {
     return this.request(`/payments/intent/${id}`, { method: "POST" });
   }
 
+  async getPayments(params?: QueryParams) {
+    return this.request(`/payments${toQuery(params)}`);
+  }
+
+  async getPaymentStats() {
+    return this.request("/payments/stats");
+  }
+
   // Admin methods
-  async getUsers() {
-    return this.request("/admin/users");
+  async getUsers(params?: QueryParams) {
+    return this.request(`/admin/users${toQuery(params)}`);
   }
 
   async getStats() {
     return this.request("/admin/dashboard/stats");
+  }
+
+  async getSystemResources() {
+    return this.request("/admin/system/resources");
+  }
+
+  async getSystemHealth() {
+    return this.request("/admin/system/health");
+  }
+
+  async getRevenueAnalytics(params?: QueryParams) {
+    return this.request(`/admin/analytics/revenue${toQuery(params)}`);
+  }
+
+  async getUserGrowthAnalytics(params?: QueryParams) {
+    return this.request(`/admin/analytics/users${toQuery(params)}`);
+  }
+
+  async getMonitoringDashboard() {
+    return this.request("/monitoring/dashboard");
   }
 
   async updateUserStatus(id: string, status: string) {

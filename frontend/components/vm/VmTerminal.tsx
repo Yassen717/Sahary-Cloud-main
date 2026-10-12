@@ -17,19 +17,19 @@ interface VmTerminalProps {
 
 export default function VmTerminal({ vmId, containerId, status }: VmTerminalProps) {
     const isRunning = status?.toLowerCase() === 'running';
-    const { terminalRef, connected, connecting, connect, disconnect, clear } = useVmTerminal({
+    const { terminalRef, ready, connected, connecting, connect, disconnect, clear } = useVmTerminal({
         vmId,
         containerId,
         status,
     });
 
-    // Auto-connect when the component mounts and VM is running
+    // Auto-connect once the terminal is initialised and the VM is running
     useEffect(() => {
-        if (isRunning) {
+        if (isRunning && ready) {
             connect();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isRunning]);
+    }, [isRunning, ready]);
 
     return (
         <div className="flex flex-col gap-3">

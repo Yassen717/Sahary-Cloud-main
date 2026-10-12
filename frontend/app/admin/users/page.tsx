@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { AdminNav } from '@/components/admin/AdminNav';
 import {
   Select,
   SelectContent,
@@ -27,8 +28,6 @@ import {
   Loader2, 
   Users,
   Search,
-  UserCheck,
-  UserX,
   Shield,
   Mail,
   Calendar,
@@ -36,7 +35,6 @@ import {
   Ban,
   CheckCircle
 } from 'lucide-react';
-import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import {
   DropdownMenu,
@@ -47,93 +45,94 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-interface User {
+const PAGE_SIZE = 20;
+
+type StatusFilter = 'all' | 'active' | 'suspended' | 'pending';
+type UserStatus = Exclude<StatusFilter, 'all'>;
+
+const STATUS_QUERY: Record<StatusFilter, Record<string, string>> = {
+  all: {},
+  active: { isActive: 'true', isVerified: 'true' },
+  suspended: { isActive: 'false' },
+  pending: { isActive: 'true', isVerified: 'false' },
+};
+
+interface AdminUser {
   id: string;
   email: string;
   firstName: string;
   lastName: string;
-  role: 'user' | 'admin';
-  status: 'active' | 'suspended' | 'pending';
+  role: string;
+  isActive: boolean;
+  isVerified: boolean;
   createdAt: string;
-  lastLogin?: string;
-  vmsCount: number;
+  _count?: { virtualMachines: number; invoices: number };
 }
+
+interface Pagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+const getUserStatus = (user: AdminUser): UserStatus => {
+  if (!user.isActive) return 'suspended';
+  if (!user.isVerified) return 'pending';
+  return 'active';
+};
 
 export default function UsersManagementPage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
-  const [users, setUsers] = useState<User[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [pagination, setPagination] = useState<Pagination | null>(null);
+  const [page, setPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
+  const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [reloadKey, setReloadKey] = useState(0);
+  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [actionType, setActionType] = useState<'suspend' | 'activate' | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
-    loadUsers();
-  }, []);
+    const timer = setTimeout(() => {
+      setSearch(searchQuery.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
-    filterUsers();
-  }, [users, searchQuery, roleFilter, statusFilter]);
-
-  const loadUsers = async () => {
-    try {
-      const response = await apiClient.getUsers();
-      const apiUsers: any[] = response?.data || [];
-
-      setUsers(apiUsers.map((u: any) => ({
-        id: u.id,
-        email: u.email,
-        firstName: u.firstName ?? '',
-        lastName: u.lastName ?? '',
-        role: String(u.role ?? '').toUpperCase().includes('ADMIN') ? 'admin' : 'user',
-        status:
-          u.status ??
-          (u.isActive === false
-            ? 'suspended'
-            : u.isVerified === false
-              ? 'pending'
-              : 'active'),
-        createdAt: u.createdAt,
-        lastLogin: u.lastLogin,
-        vmsCount: u._count?.vms ?? u.vmsCount ?? 0,
-      })));
-    } catch (error: any) {
-      toast({
+    apiClient.getUsers({
+      page,
+      limit: PAGE_SIZE,
+      search: search || undefined,
+      role: roleFilter === 'all' ? undefined : roleFilter,
+      ...STATUS_QUERY[statusFilter],
+    })
+      .then((response) => {
+        setUsers(response?.data ?? []);
+        setPagination(response?.pagination ?? null);
+      })
+      .catch((error: Error) => toast({
         title: 'Error',
         description: error.message || 'Failed to load users',
         variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
+      }))
+      .finally(() => setLoading(false));
+  }, [page, search, roleFilter, statusFilter, reloadKey, toast]);
+
+  const handleRoleChange = (value: string) => {
+    setRoleFilter(value);
+    setPage(1);
   };
 
-  const filterUsers = () => {
-    let filtered = [...users];
-
-    // Search filter
-    if (searchQuery) {
-      filtered = filtered.filter(user =>
-        user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        `${user.firstName} ${user.lastName}`.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    }
-
-    // Role filter
-    if (roleFilter !== 'all') {
-      filtered = filtered.filter(user => user.role === roleFilter);
-    }
-
-    // Status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(user => user.status === statusFilter);
-    }
-
-    setFilteredUsers(filtered);
+  const handleStatusChange = (value: StatusFilter) => {
+    setStatusFilter(value);
+    setPage(1);
   };
 
   const handleUserAction = async () => {
@@ -141,21 +140,20 @@ export default function UsersManagementPage() {
 
     try {
       setActionLoading(true);
-      const newStatus = actionType === 'suspend' ? 'suspended' : 'active';
-      await apiClient.updateUserStatus(selectedUser.id, newStatus);
-      
+      await apiClient.updateUserStatus(selectedUser.id, actionType === 'suspend' ? 'suspended' : 'active');
+
       toast({
         title: 'Success',
         description: `User ${actionType === 'suspend' ? 'suspended' : 'activated'} successfully`,
       });
-      
-      await loadUsers();
+
       setSelectedUser(null);
       setActionType(null);
-    } catch (error: any) {
+      setReloadKey((key) => key + 1);
+    } catch (error) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to update user status',
+        description: error instanceof Error ? error.message : 'Failed to update user status',
         variant: 'destructive',
       });
     } finally {
@@ -163,7 +161,7 @@ export default function UsersManagementPage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: UserStatus) => {
     switch (status) {
       case 'active':
         return (
@@ -185,29 +183,22 @@ export default function UsersManagementPage() {
             Pending
           </Badge>
         );
-      default:
-        return <Badge>{status}</Badge>;
     }
   };
 
   const getRoleBadge = (role: string) => {
-    return role === 'admin' ? (
+    if (role === 'USER') {
+      return <Badge variant="outline">User</Badge>;
+    }
+    return (
       <Badge variant="outline" className="border-primary text-primary">
         <Shield className="h-3 w-3 mr-1" />
-        Admin
+        {role === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin'}
       </Badge>
-    ) : (
-      <Badge variant="outline">User</Badge>
     );
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    );
-  }
+  const totalUsers = pagination?.total ?? 0;
 
   return (
     <div className="container mx-auto p-6">
@@ -225,6 +216,8 @@ export default function UsersManagementPage() {
         </div>
       </div>
 
+      <AdminNav />
+
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
         <Card>
@@ -233,43 +226,7 @@ export default function UsersManagementPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{users.length}</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Users</CardTitle>
-            <UserCheck className="h-4 w-4 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {users.filter(u => u.status === 'active').length}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Suspended</CardTitle>
-            <UserX className="h-4 w-4 text-red-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {users.filter(u => u.status === 'suspended').length}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Admins</CardTitle>
-            <Shield className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {users.filter(u => u.role === 'admin').length}
-            </div>
+            <div className="text-2xl font-bold">{totalUsers.toLocaleString()}</div>
           </CardContent>
         </Card>
       </div>
@@ -282,25 +239,27 @@ export default function UsersManagementPage() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search by email or name..."
+                aria-label="Search users"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
               />
             </div>
 
-            <Select value={roleFilter} onValueChange={setRoleFilter}>
-              <SelectTrigger className="w-full md:w-[180px]">
+            <Select value={roleFilter} onValueChange={handleRoleChange}>
+              <SelectTrigger className="w-full md:w-[180px]" aria-label="Filter by role">
                 <SelectValue placeholder="Filter by role" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Roles</SelectItem>
-                <SelectItem value="user">User</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="USER">User</SelectItem>
+                <SelectItem value="ADMIN">Admin</SelectItem>
+                <SelectItem value="SUPER_ADMIN">Super Admin</SelectItem>
               </SelectContent>
             </Select>
 
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full md:w-[180px]">
+            <Select value={statusFilter} onValueChange={(value) => handleStatusChange(value as StatusFilter)}>
+              <SelectTrigger className="w-full md:w-[180px]" aria-label="Filter by status">
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
               <SelectContent>
@@ -319,92 +278,124 @@ export default function UsersManagementPage() {
         <CardHeader>
           <CardTitle>Users List</CardTitle>
           <CardDescription>
-            {filteredUsers.length} user{filteredUsers.length !== 1 ? 's' : ''} found
+            {totalUsers} user{totalUsers !== 1 ? 's' : ''} found
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {filteredUsers.map((user) => (
-              <div
-                key={user.id}
-                className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent transition-colors"
-              >
-                <div className="flex items-center gap-4 flex-1">
-                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                    <Users className="h-6 w-6 text-primary" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-semibold">{`${user.firstName} ${user.lastName}`.trim()}</h3>
-                      {getRoleBadge(user.role)}
-                      {getStatusBadge(user.status)}
+          {loading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+          ) : users.length === 0 ? (
+            <p className="py-12 text-center text-muted-foreground">No users match the current filters</p>
+          ) : (
+            <div className="space-y-4">
+              {users.map((user) => {
+                const status = getUserStatus(user);
+                return (
+                  <div
+                    key={user.id}
+                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent transition-colors"
+                  >
+                    <div className="flex items-center gap-4 flex-1">
+                      <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Users className="h-6 w-6 text-primary" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="font-semibold">{`${user.firstName} ${user.lastName}`.trim()}</h3>
+                          {getRoleBadge(user.role)}
+                          {getStatusBadge(status)}
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Mail className="h-3 w-3" />
+                            {user.email}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            Joined {new Date(user.createdAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-muted-foreground">VMs</p>
+                        <p className="text-2xl font-bold">{user._count?.virtualMachines ?? 0}</p>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Mail className="h-3 w-3" />
-                        {user.email}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        Joined {new Date(user.createdAt).toLocaleDateString()}
-                      </span>
-                      {user.lastLogin && (
-                        <span>
-                          Last login: {new Date(user.lastLogin).toLocaleString()}
-                        </span>
-                      )}
-                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" aria-label={`Actions for ${user.email}`}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        {status === 'active' ? (
+                          <DropdownMenuItem
+                            className="text-red-600"
+                            onClick={() => {
+                              setSelectedUser(user);
+                              setActionType('suspend');
+                            }}
+                          >
+                            <Ban className="h-4 w-4 mr-2" />
+                            Suspend User
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            className="text-green-600"
+                            onClick={() => {
+                              setSelectedUser(user);
+                              setActionType('activate');
+                            }}
+                          >
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            Activate User
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm text-muted-foreground">VMs</p>
-                    <p className="text-2xl font-bold">{user.vmsCount}</p>
-                  </div>
-                </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon">
-                      <MoreVertical className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem>View Details</DropdownMenuItem>
-                    <DropdownMenuItem>View VMs</DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    {user.status === 'active' ? (
-                      <DropdownMenuItem
-                        className="text-red-600"
-                        onClick={() => {
-                          setSelectedUser(user);
-                          setActionType('suspend');
-                        }}
-                      >
-                        <Ban className="h-4 w-4 mr-2" />
-                        Suspend User
-                      </DropdownMenuItem>
-                    ) : (
-                      <DropdownMenuItem
-                        className="text-green-600"
-                        onClick={() => {
-                          setSelectedUser(user);
-                          setActionType('activate');
-                        }}
-                      >
-                        <CheckCircle className="h-4 w-4 mr-2" />
-                        Activate User
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                );
+              })}
+            </div>
+          )}
+
+          {pagination && pagination.totalPages > 1 && (
+            <div className="mt-6 flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                Page {pagination.page} of {pagination.totalPages}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label="Previous page"
+                  disabled={page <= 1}
+                  onClick={() => setPage(page - 1)}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label="Next page"
+                  disabled={page >= pagination.totalPages}
+                  onClick={() => setPage(page + 1)}
+                >
+                  Next
+                </Button>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {/* Confirmation Dialog */}
-      <AlertDialog open={!!selectedUser && !!actionType} onOpenChange={() => {
+      <AlertDialog open={!!selectedUser && !!actionType} onOpenChange={(open) => {
+        if (open) return;
         setSelectedUser(null);
         setActionType(null);
       }}>
@@ -420,9 +411,13 @@ export default function UsersManagementPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={actionLoading}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleUserAction}
+              disabled={actionLoading}
+              onClick={(event) => {
+                event.preventDefault();
+                handleUserAction();
+              }}
               className={actionType === 'suspend' ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : ''}
             >
               {actionLoading ? (

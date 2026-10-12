@@ -6,8 +6,10 @@ import Link from 'next/link';
 import { apiClient } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 import { Loader2, Server, Zap, DollarSign, Activity, Play, Square, Globe, ChevronRight } from 'lucide-react';
 import { StatsCard } from '@/components/dashboard/StatsCard';
+import type { SolarChartPoint } from '@/components/dashboard/SolarChart';
 
 // Lazy load heavy chart component
 const SolarChart = dynamic(
@@ -29,12 +31,21 @@ const SolarChart = dynamic(
   }
 );
 
+const toChartData = (records: any[] = []): SolarChartPoint[] =>
+  [...records].reverse().map((record) => ({
+    time: new Date(record.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    production: Number(record.production) || 0,
+    consumption: Number(record.consumption) || 0,
+  }));
 
 export default function DashboardPage() {
+  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [vms, setVms] = useState<any[]>([]);
   const [solarStatus, setSolarStatus] = useState<any>(null);
+  const [solarHistory, setSolarHistory] = useState<SolarChartPoint[]>([]);
   const [usage, setUsage] = useState<any>(null);
+  const [actionVmId, setActionVmId] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -42,26 +53,50 @@ export default function DashboardPage() {
   }, []);
 
   const loadDashboardData = async () => {
+    setError('');
+
+    const [vmsResult, solarResult, usageResult, historyResult] = await Promise.allSettled([
+      apiClient.getVMs(),
+      apiClient.getSolarStatus(),
+      apiClient.getUsage(),
+      apiClient.getSolarHistory(),
+    ]);
+
+    if (vmsResult.status === 'fulfilled') setVms(vmsResult.value.data || []);
+    if (solarResult.status === 'fulfilled') setSolarStatus(solarResult.value.data);
+    if (usageResult.status === 'fulfilled') setUsage(usageResult.value.data);
+    if (historyResult.status === 'fulfilled') setSolarHistory(toChartData(historyResult.value.data));
+
+    const failures = [vmsResult, solarResult, usageResult, historyResult].filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failures.length === 4) {
+      setError(failures[0].reason?.message || 'فشل تحميل البيانات');
+      console.error('Dashboard error:', failures[0].reason);
+    } else if (failures.length > 0) {
+      toast({
+        title: 'Some data failed to load',
+        description: failures[0].reason?.message,
+        variant: 'destructive',
+      });
+    }
+
+    setLoading(false);
+  };
+
+  const handleVmAction = async (vm: any) => {
     try {
-      setLoading(true);
-
-      // Load VMs
-      const vmsData = await apiClient.getVMs();
-      setVms(vmsData.data || []);
-
-      // Load Solar Status
-      const solarData = await apiClient.getSolarStatus();
-      setSolarStatus(solarData.data);
-
-      // Load Usage
-      const usageData = await apiClient.getUsage();
-      setUsage(usageData.data);
-
+      setActionVmId(vm.id);
+      if (vm.status === 'RUNNING') {
+        await apiClient.stopVM(vm.id);
+      } else {
+        await apiClient.startVM(vm.id);
+      }
+      await loadDashboardData();
     } catch (err: any) {
-      setError(err.message || 'فشل تحميل البيانات');
-      console.error('Dashboard error:', err);
+      toast({ title: 'Error', description: err.message || 'VM action failed', variant: 'destructive' });
     } finally {
-      setLoading(false);
+      setActionVmId(null);
     }
   };
 
@@ -113,17 +148,15 @@ export default function DashboardPage() {
           icon={Server}
           iconColor="text-primary"
           delay={0}
-          trend={runningVMs > 0 ? { value: 12, isPositive: true } : undefined}
         />
 
         <StatsCard
           title="Solar Production"
-          value={`${solarStatus?.production || 0} kW`}
-          description={`${solarStatus?.efficiency || 0}% efficiency`}
+          value={solarStatus ? `${(solarStatus.production ?? 0).toFixed(2)} kW` : '—'}
+          description={solarStatus ? `${(solarStatus.efficiency ?? 0).toFixed(1)}% efficiency` : 'Unavailable'}
           icon={Zap}
           iconColor="text-yellow-500"
           delay={100}
-          trend={{ value: 8, isPositive: true }}
         />
 
         <StatsCard
@@ -133,13 +166,12 @@ export default function DashboardPage() {
           icon={DollarSign}
           iconColor="text-green-500"
           delay={200}
-          trend={{ value: 3, isPositive: false }}
         />
 
         <StatsCard
-          title="System Status"
-          value={`${solarStatus?.batteryLevel || 0}%`}
-          description="Battery Level"
+          title="Battery Level"
+          value={solarStatus?.batteryLevel != null ? `${solarStatus.batteryLevel}%` : '—'}
+          description={solarStatus?.status ? `System ${solarStatus.status}` : 'Status unavailable'}
           icon={Activity}
           iconColor="text-blue-500"
           delay={300}
@@ -147,7 +179,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Solar Chart */}
-      <SolarChart />
+      <SolarChart data={solarHistory} />
 
       {/* Quick navigation */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
@@ -180,8 +212,8 @@ export default function DashboardPage() {
               <p className="text-muted-foreground mb-4">
                 No VMs found. Create your first VM to get started.
               </p>
-              <Button className="transition-all-smooth hover:scale-105">
-                Create VM
+              <Button asChild className="transition-all-smooth hover:scale-105">
+                <Link href="/vms/create">Create VM</Link>
               </Button>
             </div>
           ) : (
@@ -228,6 +260,8 @@ export default function DashboardPage() {
                         variant={vm.status === 'RUNNING' ? 'destructive' : 'default'}
                         className="flex-1 transition-all-smooth hover:scale-105"
                         aria-label={vm.status === 'RUNNING' ? `Stop ${vm.name}` : `Start ${vm.name}`}
+                        disabled={actionVmId !== null}
+                        onClick={() => handleVmAction(vm)}
                       >
                         {vm.status === 'RUNNING' ? (
                           <>
@@ -245,9 +279,9 @@ export default function DashboardPage() {
                         size="sm"
                         variant="outline"
                         className="flex-1 transition-all-smooth hover:scale-105"
-                        aria-label={`Manage ${vm.name}`}
+                        asChild
                       >
-                        Manage
+                        <Link href={`/vms/${vm.id}`} aria-label={`Manage ${vm.name}`}>Manage</Link>
                       </Button>
                     </div>
                   </CardContent>

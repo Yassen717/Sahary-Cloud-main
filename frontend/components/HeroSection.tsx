@@ -93,7 +93,7 @@ export default function HeroSection() {
 
   return (
     <section ref={containerRef} className="relative -mt-20 min-h-screen flex items-center justify-center overflow-hidden">
-      <canvas id="particles-canvas" className="absolute inset-0 z-0" />
+      <canvas id="particles-canvas" className="absolute inset-0 z-0 h-full w-full" />
       
       <div className="absolute inset-0 bg-linear-to-b from-primary/10 to-primary/20 dark:from-primary/20 dark:to-primary/30 z-10" />
       

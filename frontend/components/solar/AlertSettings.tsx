@@ -1,37 +1,60 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Battery, Zap, Thermometer, Mail, Bell } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
+const STORAGE_KEY = 'solarAlertSettings';
+
+interface AlertSettingsValues {
+    lowProductionEnabled: boolean;
+    lowBatteryEnabled: boolean;
+    highTempEnabled: boolean;
+    maintenanceEnabled: boolean;
+    productionThreshold: number;
+    batteryThreshold: number;
+    tempThreshold: number;
+    emailNotifications: boolean;
+    pushNotifications: boolean;
+}
+
+const defaultSettings: AlertSettingsValues = {
+    lowProductionEnabled: true,
+    lowBatteryEnabled: true,
+    highTempEnabled: true,
+    maintenanceEnabled: true,
+    productionThreshold: 30,
+    batteryThreshold: 20,
+    tempThreshold: 75,
+    emailNotifications: true,
+    pushNotifications: false,
+};
+
 export function AlertSettings() {
     const { toast } = useToast();
+    const [settings, setSettings] = useState<AlertSettingsValues>(defaultSettings);
 
-    // Alert toggles
-    const [lowProductionEnabled, setLowProductionEnabled] = useState(true);
-    const [lowBatteryEnabled, setLowBatteryEnabled] = useState(true);
-    const [highTempEnabled, setHighTempEnabled] = useState(true);
-    const [maintenanceEnabled, setMaintenanceEnabled] = useState(true);
+    useEffect(() => {
+        try {
+            const stored = window.localStorage.getItem(STORAGE_KEY);
+            if (stored) setSettings({ ...defaultSettings, ...JSON.parse(stored) });
+        } catch (_) { }
+    }, []);
 
-    // Thresholds
-    const [productionThreshold, setProductionThreshold] = useState([30]);
-    const [batteryThreshold, setBatteryThreshold] = useState([20]);
-    const [tempThreshold, setTempThreshold] = useState([75]);
-
-    // Notification preferences
-    const [emailNotifications, setEmailNotifications] = useState(true);
-    const [pushNotifications, setPushNotifications] = useState(false);
+    const update = <K extends keyof AlertSettingsValues>(key: K, value: AlertSettingsValues[K]) => {
+        setSettings((prev) => ({ ...prev, [key]: value }));
+    };
 
     const handleSave = () => {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
         toast({
-            title: 'Settings Saved',
-            description: 'Alert settings have been updated successfully.',
+            title: 'Settings saved in this browser',
+            description: 'These preferences are stored locally and are not sent to the server.',
         });
     };
 
@@ -56,8 +79,8 @@ export function AlertSettings() {
                         </div>
                         <Switch
                             id="low-production"
-                            checked={lowProductionEnabled}
-                            onCheckedChange={setLowProductionEnabled}
+                            checked={settings.lowProductionEnabled}
+                            onCheckedChange={(value) => update('lowProductionEnabled', value)}
                         />
                     </div>
 
@@ -73,8 +96,8 @@ export function AlertSettings() {
                         </div>
                         <Switch
                             id="low-battery"
-                            checked={lowBatteryEnabled}
-                            onCheckedChange={setLowBatteryEnabled}
+                            checked={settings.lowBatteryEnabled}
+                            onCheckedChange={(value) => update('lowBatteryEnabled', value)}
                         />
                     </div>
 
@@ -90,8 +113,8 @@ export function AlertSettings() {
                         </div>
                         <Switch
                             id="high-temp"
-                            checked={highTempEnabled}
-                            onCheckedChange={setHighTempEnabled}
+                            checked={settings.highTempEnabled}
+                            onCheckedChange={(value) => update('highTempEnabled', value)}
                         />
                     </div>
 
@@ -107,8 +130,8 @@ export function AlertSettings() {
                         </div>
                         <Switch
                             id="maintenance"
-                            checked={maintenanceEnabled}
-                            onCheckedChange={setMaintenanceEnabled}
+                            checked={settings.maintenanceEnabled}
+                            onCheckedChange={(value) => update('maintenanceEnabled', value)}
                         />
                     </div>
                 </CardContent>
@@ -122,48 +145,48 @@ export function AlertSettings() {
                 </CardHeader>
                 <CardContent className="space-y-6">
                     <div className="space-y-3">
-                        <Label>Production Threshold ({productionThreshold[0]}% below expected)</Label>
+                        <Label>Production Threshold ({settings.productionThreshold}% below expected)</Label>
                         <Slider
-                            value={productionThreshold}
-                            onValueChange={setProductionThreshold}
+                            value={[settings.productionThreshold]}
+                            onValueChange={([value]) => update('productionThreshold', value)}
                             max={50}
                             step={5}
-                            disabled={!lowProductionEnabled}
+                            disabled={!settings.lowProductionEnabled}
                             className="transition-all-smooth"
                         />
                         <p className="text-xs text-muted-foreground">
-                            Alert when production is {productionThreshold[0]}% below expected levels
+                            Alert when production is {settings.productionThreshold}% below expected levels
                         </p>
                     </div>
 
                     <div className="space-y-3">
-                        <Label>Battery Level Threshold ({batteryThreshold[0]}%)</Label>
+                        <Label>Battery Level Threshold ({settings.batteryThreshold}%)</Label>
                         <Slider
-                            value={batteryThreshold}
-                            onValueChange={setBatteryThreshold}
+                            value={[settings.batteryThreshold]}
+                            onValueChange={([value]) => update('batteryThreshold', value)}
                             max={50}
                             step={5}
-                            disabled={!lowBatteryEnabled}
+                            disabled={!settings.lowBatteryEnabled}
                             className="transition-all-smooth"
                         />
                         <p className="text-xs text-muted-foreground">
-                            Alert when battery level drops below {batteryThreshold[0]}%
+                            Alert when battery level drops below {settings.batteryThreshold}%
                         </p>
                     </div>
 
                     <div className="space-y-3">
-                        <Label>Temperature Threshold ({tempThreshold[0]}°C)</Label>
+                        <Label>Temperature Threshold ({settings.tempThreshold}°C)</Label>
                         <Slider
-                            value={tempThreshold}
-                            onValueChange={setTempThreshold}
+                            value={[settings.tempThreshold]}
+                            onValueChange={([value]) => update('tempThreshold', value)}
                             min={60}
                             max={90}
                             step={5}
-                            disabled={!highTempEnabled}
+                            disabled={!settings.highTempEnabled}
                             className="transition-all-smooth"
                         />
                         <p className="text-xs text-muted-foreground">
-                            Alert when panel temperature exceeds {tempThreshold[0]}°C
+                            Alert when panel temperature exceeds {settings.tempThreshold}°C
                         </p>
                     </div>
                 </CardContent>
@@ -188,8 +211,8 @@ export function AlertSettings() {
                         </div>
                         <Switch
                             id="email-notif"
-                            checked={emailNotifications}
-                            onCheckedChange={setEmailNotifications}
+                            checked={settings.emailNotifications}
+                            onCheckedChange={(value) => update('emailNotifications', value)}
                         />
                     </div>
 
@@ -205,15 +228,18 @@ export function AlertSettings() {
                         </div>
                         <Switch
                             id="push-notif"
-                            checked={pushNotifications}
-                            onCheckedChange={setPushNotifications}
+                            checked={settings.pushNotifications}
+                            onCheckedChange={(value) => update('pushNotifications', value)}
                         />
                     </div>
                 </CardContent>
             </Card>
 
             {/* Save Button */}
-            <div className="flex justify-end animate-fade-in stagger-3">
+            <div className="flex items-center justify-end gap-4 animate-fade-in stagger-3">
+                <p className="text-sm text-muted-foreground">
+                    Settings are stored in this browser only and are not sent to the server.
+                </p>
                 <Button onClick={handleSave} className="transition-all-smooth hover:scale-105">
                     Save Settings
                 </Button>

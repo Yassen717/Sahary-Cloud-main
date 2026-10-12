@@ -4,18 +4,12 @@ import { Inter } from 'next/font/google';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider } from '@/lib/auth-context';
-import { initErrorTracking } from '@/lib/error-tracking';
 import Script from 'next/script';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { KeyboardShortcutsDialog } from '@/components/keyboard-shortcuts-dialog';
 import { SecurityMonitor } from '@/components/security-monitor';
 import WebVitalsReporter from '@/components/web-vitals-reporter';
-
-// Initialize error tracking
-if (typeof window !== 'undefined') {
-  initErrorTracking();
-}
 
 
 const inter = Inter({ subsets: ['latin'] });
@@ -49,14 +43,6 @@ export const metadata: Metadata = {
     title: 'Sahary Cloud - Solar-Powered Cloud Solutions in Libya',
     description: 'Experience the future of sustainable cloud computing with Sahary Cloud. Our solar-powered VPS solutions in Libya offer reliable, eco-friendly, and cost-effective hosting.',
     siteName: 'Sahary Cloud',
-    images: [
-      {
-        url: '/assets/og-image.jpg', // Create this image
-        width: 1200,
-        height: 630,
-        alt: 'Sahary Cloud - Solar-Powered Hosting'
-      }
-    ]
   },
 
   // Twitter Card
@@ -64,7 +50,6 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Sahary Cloud - Solar-Powered Cloud Solutions',
     description: 'Sustainable, solar-powered VPS hosting in Libya. Eco-friendly and cost-effective.',
-    images: ['/assets/og-image.jpg'],
     creator: '@saharycloud' // Update with actual Twitter handle
   },
 
@@ -154,7 +139,7 @@ export default function RootLayout({
               name: 'Sahary Cloud',
               description: 'Solar-powered cloud hosting solutions in Libya',
               url: process.env.NEXT_PUBLIC_APP_URL || 'https://saharycloud.com',
-              logo: `${process.env.NEXT_PUBLIC_APP_URL || 'https://saharycloud.com'}/assets/logo.png`,
+              logo: `${process.env.NEXT_PUBLIC_APP_URL || 'https://saharycloud.com'}/icon.svg`,
               sameAs: [
                 // Add your social media URLs
                 // 'https://twitter.com/saharycloud',

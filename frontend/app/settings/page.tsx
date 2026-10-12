@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import {
     Palette,
     Bell,
@@ -28,24 +30,113 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useTheme } from 'next-themes';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/lib/auth-context';
+import { apiClient } from '@/lib/api';
+
+type NotificationPrefs = { email: boolean; sms: boolean; marketing: boolean };
+type Session = { sessionId: string; ipAddress: string | null; userAgent: string | null; createdAt: string; current: boolean };
+
+const PREFS_KEY = 'sahary-notification-prefs';
+const DEFAULT_PREFS: NotificationPrefs = { email: true, sms: false, marketing: true };
+
+const readStoredPrefs = (): NotificationPrefs => {
+    try {
+        return { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') };
+    } catch {
+        return DEFAULT_PREFS;
+    }
+};
+
+const ComingSoon = () => <Badge variant="secondary">Coming soon</Badge>;
 
 export default function SettingsPage() {
     const { theme, setTheme } = useTheme();
     const { toast } = useToast();
+    const { logout } = useAuth();
+    const [mounted, setMounted] = useState(false);
 
-    // Notification preferences
-    const [emailNotifications, setEmailNotifications] = useState(true);
-    const [smsNotifications, setSmsNotifications] = useState(false);
-    const [marketingEmails, setMarketingEmails] = useState(true);
+    // Notification preferences (stored on this device only)
+    const [prefs, setPrefs] = useState<NotificationPrefs>(DEFAULT_PREFS);
 
-    // Security settings
-    const [twoFactorAuth, setTwoFactorAuth] = useState(false);
+    // Sessions
+    const [sessions, setSessions] = useState<Session[] | null>(null);
+    const [sessionsLoading, setSessionsLoading] = useState(false);
+
+    // Deactivate account
+    const [deactivateOpen, setDeactivateOpen] = useState(false);
+    const [deactivatePassword, setDeactivatePassword] = useState('');
+    const [deactivating, setDeactivating] = useState(false);
+
+    useEffect(() => {
+        setPrefs(readStoredPrefs());
+        setMounted(true);
+    }, []);
 
     const handleSaveSettings = () => {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
         toast({
             title: 'Settings Saved',
-            description: 'Your preferences have been updated successfully.',
+            description: 'Preferences saved on this device.',
         });
+    };
+
+    const loadSessions = async () => {
+        setSessionsLoading(true);
+        try {
+            const res = await apiClient.getSessions();
+            setSessions(res?.data?.sessions ?? []);
+        } catch (error: any) {
+            toast({ title: 'Error', description: error.message || 'Failed to load sessions', variant: 'destructive' });
+        } finally {
+            setSessionsLoading(false);
+        }
+    };
+
+    const handleToggleSessions = () => {
+        if (sessions) {
+            setSessions(null);
+        } else {
+            loadSessions();
+        }
+    };
+
+    const handleRevokeSession = async (sessionId: string) => {
+        try {
+            await apiClient.revokeSession(sessionId);
+            setSessions((prev) => prev?.filter((session) => session.sessionId !== sessionId) ?? null);
+            toast({ title: 'Session revoked', description: 'That device has been signed out.' });
+        } catch (error: any) {
+            toast({ title: 'Error', description: error.message || 'Failed to revoke session', variant: 'destructive' });
+        }
+    };
+
+    const handleSignOutAll = async () => {
+        try {
+            await apiClient.revokeAllSessions();
+        } catch (error: any) {
+            toast({ title: 'Error', description: error.message || 'Failed to sign out sessions', variant: 'destructive' });
+            return;
+        }
+        toast({ title: 'Signed out', description: 'All sessions have been revoked.' });
+        await logout();
+    };
+
+    const handleDeactivate = async (e: React.MouseEvent) => {
+        e.preventDefault();
+        setDeactivating(true);
+        try {
+            await apiClient.deactivateAccount(deactivatePassword);
+            setDeactivateOpen(false);
+            toast({
+                title: 'Account deactivated',
+                description: 'Check your email for the link to reactivate within 72 hours.',
+            });
+            await logout();
+        } catch (error: any) {
+            toast({ title: 'Error', description: error.message || 'Failed to deactivate account', variant: 'destructive' });
+        } finally {
+            setDeactivating(false);
+        }
     };
 
     return (
@@ -70,7 +161,7 @@ export default function SettingsPage() {
                         </div>
                         <div className="flex gap-2">
                             <Button
-                                variant={theme === 'light' ? 'default' : 'outline'}
+                                variant={mounted && theme === 'light' ? 'default' : 'outline'}
                                 size="sm"
                                 onClick={() => setTheme('light')}
                                 className="transition-all-smooth"
@@ -78,7 +169,7 @@ export default function SettingsPage() {
                                 Light
                             </Button>
                             <Button
-                                variant={theme === 'dark' ? 'default' : 'outline'}
+                                variant={mounted && theme === 'dark' ? 'default' : 'outline'}
                                 size="sm"
                                 onClick={() => setTheme('dark')}
                                 className="transition-all-smooth"
@@ -93,7 +184,7 @@ export default function SettingsPage() {
                 <SettingsSection
                     icon={Bell}
                     title="Notifications"
-                    description="Manage how you receive notifications"
+                    description="Manage how you receive notifications. Preferences are saved on this device."
                     delay={100}
                 >
                     <div className="space-y-4">
@@ -109,8 +200,8 @@ export default function SettingsPage() {
                             </div>
                             <Switch
                                 id="email-notifications"
-                                checked={emailNotifications}
-                                onCheckedChange={setEmailNotifications}
+                                checked={prefs.email}
+                                onCheckedChange={(email) => setPrefs((p) => ({ ...p, email }))}
                                 className="transition-all-smooth"
                             />
                         </div>
@@ -127,8 +218,8 @@ export default function SettingsPage() {
                             </div>
                             <Switch
                                 id="sms-notifications"
-                                checked={smsNotifications}
-                                onCheckedChange={setSmsNotifications}
+                                checked={prefs.sms}
+                                onCheckedChange={(sms) => setPrefs((p) => ({ ...p, sms }))}
                                 className="transition-all-smooth"
                             />
                         </div>
@@ -145,8 +236,8 @@ export default function SettingsPage() {
                             </div>
                             <Switch
                                 id="marketing-emails"
-                                checked={marketingEmails}
-                                onCheckedChange={setMarketingEmails}
+                                checked={prefs.marketing}
+                                onCheckedChange={(marketing) => setPrefs((p) => ({ ...p, marketing }))}
                                 className="transition-all-smooth"
                             />
                         </div>
@@ -155,6 +246,7 @@ export default function SettingsPage() {
 
                 {/* Security Settings */}
                 <SettingsSection
+                    id="security"
                     icon={Shield}
                     title="Security"
                     description="Manage your account security"
@@ -163,21 +255,66 @@ export default function SettingsPage() {
                     <div className="space-y-4">
                         <div className="flex items-center justify-between">
                             <div className="space-y-0.5">
-                                <Label htmlFor="two-factor">Two-Factor Authentication</Label>
+                                <div className="flex items-center gap-2">
+                                    <Label htmlFor="two-factor">Two-Factor Authentication</Label>
+                                    <ComingSoon />
+                                </div>
                                 <p className="text-sm text-muted-foreground">Add an extra layer of security</p>
                             </div>
-                            <Switch
-                                id="two-factor"
-                                checked={twoFactorAuth}
-                                onCheckedChange={setTwoFactorAuth}
-                                className="transition-all-smooth"
-                            />
+                            <Switch id="two-factor" disabled />
                         </div>
 
-                        <div className="pt-4 border-t">
-                            <Button variant="outline" className="transition-all-smooth hover:scale-105">
-                                View Active Sessions
-                            </Button>
+                        <div className="pt-4 border-t space-y-4">
+                            <div className="flex items-center justify-between gap-4">
+                                <div className="space-y-0.5">
+                                    <Label>Active Sessions</Label>
+                                    <p className="text-sm text-muted-foreground">Devices currently signed in to your account</p>
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    onClick={handleToggleSessions}
+                                    disabled={sessionsLoading}
+                                    className="transition-all-smooth"
+                                >
+                                    {sessions ? 'Hide Active Sessions' : sessionsLoading ? 'Loading...' : 'View Active Sessions'}
+                                </Button>
+                            </div>
+
+                            {sessions && (
+                                <div className="space-y-3">
+                                    {sessions.length === 0 && (
+                                        <p className="text-sm text-muted-foreground">No active sessions found.</p>
+                                    )}
+                                    {sessions.map((session) => (
+                                        <div key={session.sessionId} className="flex items-center justify-between gap-4 p-3 rounded-lg border">
+                                            <div className="min-w-0 space-y-0.5">
+                                                <p className="text-sm font-medium truncate">{session.userAgent || 'Unknown device'}</p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {session.ipAddress || 'Unknown IP'} · Signed in {new Date(session.createdAt).toLocaleString()}
+                                                </p>
+                                            </div>
+                                            {session.current ? (
+                                                <Badge variant="outline">This device</Badge>
+                                            ) : (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => handleRevokeSession(session.sessionId)}
+                                                    className="transition-all-smooth"
+                                                >
+                                                    Revoke
+                                                </Button>
+                                            )}
+                                        </div>
+                                    ))}
+                                    <div className="flex items-center justify-between gap-4">
+                                        <p className="text-xs text-muted-foreground">Signing out all sessions also signs you out on this device.</p>
+                                        <Button variant="destructive" size="sm" onClick={handleSignOutAll} className="transition-all-smooth">
+                                            Sign out all sessions
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </SettingsSection>
@@ -193,9 +330,12 @@ export default function SettingsPage() {
                         <div className="p-4 rounded-lg border bg-muted/50">
                             <p className="text-sm text-muted-foreground">No payment methods added yet</p>
                         </div>
-                        <Button variant="outline" className="transition-all-smooth hover:scale-105">
-                            Add Payment Method
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button variant="outline" disabled>
+                                Add Payment Method
+                            </Button>
+                            <ComingSoon />
+                        </div>
                     </div>
                 </SettingsSection>
 
@@ -212,9 +352,10 @@ export default function SettingsPage() {
                                 <Label>Language</Label>
                                 <p className="text-sm text-muted-foreground">Choose your preferred language</p>
                             </div>
-                            <Button variant="outline" size="sm" className="transition-all-smooth">
-                                English
-                            </Button>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-muted-foreground">English</span>
+                                <ComingSoon />
+                            </div>
                         </div>
 
                         <div className="flex items-center justify-between">
@@ -222,9 +363,10 @@ export default function SettingsPage() {
                                 <Label>Timezone</Label>
                                 <p className="text-sm text-muted-foreground">Your local timezone</p>
                             </div>
-                            <Button variant="outline" size="sm" className="transition-all-smooth">
-                                UTC+0
-                            </Button>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-muted-foreground">UTC+0</span>
+                                <ComingSoon />
+                            </div>
                         </div>
                     </div>
                 </SettingsSection>
@@ -238,31 +380,48 @@ export default function SettingsPage() {
                 >
                     <div className="space-y-4 p-4 rounded-lg border-2 border-destructive/50 bg-destructive/5">
                         <div className="space-y-2">
-                            <h4 className="font-semibold text-destructive">Delete Account</h4>
+                            <h4 className="font-semibold text-destructive">Deactivate Account</h4>
                             <p className="text-sm text-muted-foreground">
-                                Permanently delete your account and all associated data. This action cannot be undone.
+                                Deactivate your account and sign out. You can reactivate it within 72 hours using the link we email you.
                             </p>
                         </div>
-                        <AlertDialog>
+                        <AlertDialog
+                            open={deactivateOpen}
+                            onOpenChange={(open) => {
+                                setDeactivateOpen(open);
+                                if (!open) setDeactivatePassword('');
+                            }}
+                        >
                             <AlertDialogTrigger asChild>
                                 <Button variant="destructive" className="transition-all-smooth hover:scale-105">
-                                    Delete Account
+                                    Deactivate Account
                                 </Button>
                             </AlertDialogTrigger>
                             <AlertDialogContent className="animate-scale-in">
                                 <AlertDialogHeader>
-                                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                                    <AlertDialogTitle>Deactivate your account?</AlertDialogTitle>
                                     <AlertDialogDescription>
-                                        This action cannot be undone. This will permanently delete your account
-                                        and remove all your data from our servers.
+                                        You will be signed out and your account will be deactivated. Enter your password to confirm.
                                     </AlertDialogDescription>
                                 </AlertDialogHeader>
+                                <div className="space-y-2">
+                                    <Label htmlFor="deactivate-password">Password</Label>
+                                    <Input
+                                        id="deactivate-password"
+                                        type="password"
+                                        value={deactivatePassword}
+                                        onChange={(e) => setDeactivatePassword(e.target.value)}
+                                        disabled={deactivating}
+                                    />
+                                </div>
                                 <AlertDialogFooter>
-                                    <AlertDialogCancel className="transition-all-smooth">Cancel</AlertDialogCancel>
+                                    <AlertDialogCancel className="transition-all-smooth" disabled={deactivating}>Cancel</AlertDialogCancel>
                                     <AlertDialogAction
+                                        onClick={handleDeactivate}
+                                        disabled={!deactivatePassword || deactivating}
                                         className="bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-all-smooth"
                                     >
-                                        Yes, delete my account
+                                        {deactivating ? 'Deactivating...' : 'Deactivate account'}
                                     </AlertDialogAction>
                                 </AlertDialogFooter>
                             </AlertDialogContent>

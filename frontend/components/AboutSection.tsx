@@ -6,7 +6,7 @@ import { CheckCircle2 } from "lucide-react";
 
 export default function AboutSection() {
   return (
-    <section id="about" className="py-20">
+    <section id="about" className="py-20 overflow-x-clip">
       <div className="container mx-auto px-4">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           <motion.div
@@ -16,11 +16,12 @@ export default function AboutSection() {
             transition={{ duration: 0.7 }}
             className="relative rounded-2xl overflow-hidden"
           >
-            <div className="aspect-w-4 aspect-h-3 relative h-[400px] md:h-[500px]">
+            <div className="relative h-[400px] md:h-[500px]">
               <Image
                 src="/assets/images/Solar-eng.webp"
                 alt="Solar panels in Libya"
                 fill
+                sizes="(min-width: 1024px) 50vw, 100vw"
                 className="object-cover rounded-2xl"
               />
             </div>

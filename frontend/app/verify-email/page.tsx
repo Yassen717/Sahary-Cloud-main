@@ -2,20 +2,13 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { apiClient, ApiClient } from '@/lib/api';
+import { apiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-
-// Email-verification methods are being added to ApiClient (lib/api.ts);
-// the intersection cast keeps this page compiling until that change lands.
-const authApi = apiClient as ApiClient & {
-  verifyEmail: (token: string) => Promise<any>;
-  resendVerification: (email: string) => Promise<any>;
-};
 
 function VerifyEmailForm() {
   const searchParams = useSearchParams();
@@ -32,12 +25,11 @@ function VerifyEmailForm() {
   const [resendLoading, setResendLoading] = useState(false);
   const [resendMessage, setResendMessage] = useState('');
   const [resendError, setResendError] = useState('');
-  const [devToken, setDevToken] = useState('');
 
   useEffect(() => {
     if (!token || attemptedRef.current) return;
     attemptedRef.current = true;
-    authApi
+    apiClient
       .verifyEmail(token)
       .then(() => setStatus('success'))
       .catch((err: any) => {
@@ -52,18 +44,13 @@ function VerifyEmailForm() {
     e.preventDefault();
     setResendError('');
     setResendMessage('');
-    setDevToken('');
     setResendLoading(true);
 
     try {
-      const res = await authApi.resendVerification(email);
+      const res = await apiClient.resendVerification(email);
       setResendMessage(
         res?.message || 'Verification email sent — please check your inbox.'
       );
-      // Dev affordance: with SMTP unconfigured the backend returns the raw
-      // token so the flow can still be exercised.
-      const token = res?.data?.verificationToken ?? res?.data?.resetToken;
-      if (token) setDevToken(token);
     } catch (err: any) {
       setResendError(err?.message || 'Failed to resend verification email.');
     } finally {
@@ -147,21 +134,6 @@ function VerifyEmailForm() {
               {resendMessage && (
                 <div className="p-3 text-sm text-green-700 bg-green-50 dark:bg-green-900/20 rounded-md">
                   {resendMessage}
-                </div>
-              )}
-
-              {devToken && (
-                <div className="p-3 text-sm bg-amber-50 dark:bg-amber-900/20 rounded-md space-y-2">
-                  <p className="font-medium">
-                    Dev mode — no email was sent. Use this verification token:
-                  </p>
-                  <code className="block break-all text-xs">{devToken}</code>
-                  <Link
-                    href={`/verify-email?token=${encodeURIComponent(devToken)}`}
-                    className="inline-block text-primary underline"
-                  >
-                    Verify with this token
-                  </Link>
                 </div>
               )}
 

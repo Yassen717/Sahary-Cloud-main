@@ -16,32 +16,71 @@ import {
 import { useToast } from '@/hooks/use-toast';
 
 interface SolarStatus {
-  currentProduction: number;
+  production: number;
+  consumption: number;
   batteryLevel: number;
-  currentConsumption: number;
-  availablePower: number;
   efficiency: number;
   status: string;
 }
 
-interface ProductionData {
-  daily: { time: string; production: number }[];
-  monthly: { month: string; production: number }[];
+interface SolarStatistics {
+  totalProduction: number;
+  totalConsumption: number;
+  environmentalImpact: {
+    co2Saved: number;
+    treesEquivalent: number;
+    solarEnergyUsed: number;
+  };
 }
 
-interface EnvironmentalImpact {
-  co2Saved: number;
-  treesEquivalent: number;
-  cleanEnergyPercentage: number;
-  traditionalEnergyComparison: number;
+interface ProductionBucket {
+  label: string;
+  production: number;
 }
+
+const bucketProduction = (
+  records: Array<{ timestamp: string; production: number }>,
+  keyOf: (date: Date) => string,
+  labelOf: (date: Date) => string,
+): ProductionBucket[] => {
+  const buckets = new Map<string, ProductionBucket>();
+  for (const record of records) {
+    const date = new Date(record.timestamp);
+    const key = keyOf(date);
+    const bucket = buckets.get(key) ?? { label: labelOf(date), production: 0 };
+    bucket.production += Number(record.production) || 0;
+    buckets.set(key, bucket);
+  }
+  return [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, bucket]) => bucket);
+};
+
+const BarChart = ({ buckets, color, emptyText }: { buckets: ProductionBucket[]; color: string; emptyText: string }) => {
+  if (buckets.length === 0) {
+    return <div className="h-80 flex items-center justify-center text-sm text-muted-foreground">{emptyText}</div>;
+  }
+  const max = Math.max(...buckets.map((bucket) => bucket.production), 0);
+  return (
+    <div className="h-80 flex items-end justify-between gap-2">
+      {buckets.map((bucket, index) => (
+        <div key={index} className="flex-1 flex flex-col items-center h-full justify-end" title={`${bucket.production.toFixed(2)} kWh`}>
+          <div
+            className={`w-full ${color} rounded-t-sm transition-all`}
+            style={{ height: `${max > 0 ? (bucket.production / max) * 100 : 0}%` }}
+          />
+          <span className="text-xs text-muted-foreground mt-2">{bucket.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 export default function SolarDashboardPage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<SolarStatus | null>(null);
-  const [production, setProduction] = useState<ProductionData | null>(null);
-  const [impact, setImpact] = useState<EnvironmentalImpact | null>(null);
+  const [statistics, setStatistics] = useState<SolarStatistics | null>(null);
+  const [hourly, setHourly] = useState<ProductionBucket[]>([]);
+  const [daily, setDaily] = useState<ProductionBucket[]>([]);
 
   useEffect(() => {
     loadSolarData();
@@ -51,47 +90,42 @@ export default function SolarDashboardPage() {
   }, []);
 
   const loadSolarData = async () => {
-    try {
-      const [statusData, productionData, impactData] = await Promise.all([
-        apiClient.getSolarStatus(),
-        apiClient.getSolarProduction(),
-        apiClient.getEnvironmentalImpact(),
-      ]);
+    const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const [statusResult, statisticsResult, dayResult, weekResult] = await Promise.allSettled([
+      apiClient.getSolarStatus(),
+      apiClient.getSolarStatistics({ period: 'day' }),
+      apiClient.getSolarHistory(),
+      apiClient.getSolarHistory({ startDate: weekStart }),
+    ]);
 
-      const statusPayload = statusData?.data ?? {};
-      const productionPayload = productionData?.data ?? {};
-      const impactPayload = impactData?.data?.environmentalImpact ?? {};
+    if (statusResult.status === 'fulfilled') setStatus(statusResult.value.data ?? null);
+    if (statisticsResult.status === 'fulfilled') setStatistics(statisticsResult.value.data ?? null);
+    if (dayResult.status === 'fulfilled') {
+      setHourly(bucketProduction(
+        dayResult.value.data ?? [],
+        (date) => date.toISOString().slice(0, 13),
+        (date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      ));
+    }
+    if (weekResult.status === 'fulfilled') {
+      setDaily(bucketProduction(
+        weekResult.value.data ?? [],
+        (date) => date.toISOString().slice(0, 10),
+        (date) => date.toLocaleDateString([], { month: 'short', day: 'numeric' }),
+      ));
+    }
 
-      setStatus({
-        currentProduction: statusPayload.currentProduction ?? statusPayload.production ?? 0,
-        batteryLevel: statusPayload.batteryLevel ?? 0,
-        currentConsumption: statusPayload.currentConsumption ?? statusPayload.consumption ?? 0,
-        availablePower:
-          statusPayload.availablePower ??
-          Math.max((statusPayload.production ?? 0) - (statusPayload.consumption ?? 0), 0),
-        efficiency: statusPayload.efficiency ?? 0,
-        status: statusPayload.status ?? 'unknown',
-      });
-      setProduction({
-        daily: productionPayload.daily ?? [],
-        monthly: productionPayload.monthly ?? [],
-      });
-      setImpact({
-        co2Saved: impactPayload.co2Saved ?? 0,
-        treesEquivalent: impactPayload.treesEquivalent ?? 0,
-        cleanEnergyPercentage: impactPayload.cleanEnergyPercentage ?? 0,
-        traditionalEnergyComparison:
-          impactPayload.traditionalEnergyComparison ?? impactPayload.solarEnergyUsed ?? 0,
-      });
-    } catch (error: any) {
+    const failed = [statusResult, statisticsResult, dayResult, weekResult].find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failed) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to load solar data',
+        description: failed.reason?.message || 'Failed to load solar data',
         variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   const getBatteryColor = (level: number) => {
@@ -100,6 +134,12 @@ export default function SolarDashboardPage() {
     if (level >= 20) return 'text-orange-500';
     return 'text-red-500';
   };
+
+  const impact = statistics?.environmentalImpact;
+  const cleanEnergyPercentage =
+    statistics && statistics.totalConsumption > 0
+      ? (Math.min(statistics.totalProduction, statistics.totalConsumption) / statistics.totalConsumption) * 100
+      : 0;
 
   if (loading) {
     return (
@@ -134,7 +174,7 @@ export default function SolarDashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {status?.currentProduction.toFixed(2) || 0} kW
+              {status ? `${(status.production ?? 0).toFixed(2)} kW` : '—'}
             </div>
             <p className="text-xs text-muted-foreground">
               Real-time solar generation
@@ -145,11 +185,11 @@ export default function SolarDashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Battery Level</CardTitle>
-            <Battery className={`h-4 w-4 ${getBatteryColor(status?.batteryLevel || 0)}`} />
+            <Battery className={`h-4 w-4 ${getBatteryColor(status?.batteryLevel ?? 0)}`} />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {status?.batteryLevel.toFixed(0) || 0}%
+              {status?.batteryLevel != null ? `${status.batteryLevel.toFixed(0)}%` : '—'}
             </div>
             <p className="text-xs text-muted-foreground">
               Energy storage capacity
@@ -164,7 +204,7 @@ export default function SolarDashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {status?.currentConsumption.toFixed(2) || 0} kW
+              {status ? `${(status.consumption ?? 0).toFixed(2)} kW` : '—'}
             </div>
             <p className="text-xs text-muted-foreground">
               Active power usage
@@ -179,7 +219,7 @@ export default function SolarDashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {status?.efficiency.toFixed(1) || 0}%
+              {status ? `${(status.efficiency ?? 0).toFixed(1)}%` : '—'}
             </div>
             <p className="text-xs text-muted-foreground">
               Overall system performance
@@ -199,45 +239,29 @@ export default function SolarDashboardPage() {
         <TabsContent value="production" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Daily Production</CardTitle>
-              <CardDescription>Solar energy generation over the last 24 hours</CardDescription>
+              <CardTitle>Hourly Production</CardTitle>
+              <CardDescription>Energy produced per hour (kWh) over the last 24 hours</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="h-80 flex items-end justify-between gap-2">
-                {production?.daily.map((data, index) => (
-                  <div key={index} className="flex-1 flex flex-col items-center">
-                    <div
-                      className="w-full bg-yellow-500 rounded-t-sm transition-all hover:bg-yellow-600"
-                      style={{ height: `${(data.production / 10) * 100}%` }}
-                    />
-                    <span className="text-xs text-muted-foreground mt-2">
-                      {data.time}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <BarChart
+                buckets={hourly}
+                color="bg-yellow-500 hover:bg-yellow-600"
+                emptyText="No production data recorded in the last 24 hours"
+              />
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>Monthly Production</CardTitle>
-              <CardDescription>Solar energy generation over the last 12 months</CardDescription>
+              <CardTitle>Daily Production</CardTitle>
+              <CardDescription>Energy produced per day (kWh) over the last 7 days, from the 500 most recent samples</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="h-80 flex items-end justify-between gap-2">
-                {production?.monthly.map((data, index) => (
-                  <div key={index} className="flex-1 flex flex-col items-center">
-                    <div
-                      className="w-full bg-green-500 rounded-t-sm transition-all hover:bg-green-600"
-                      style={{ height: `${(data.production / 500) * 100}%` }}
-                    />
-                    <span className="text-xs text-muted-foreground mt-2">
-                      {data.month}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <BarChart
+                buckets={daily}
+                color="bg-green-500 hover:bg-green-600"
+                emptyText="No production data recorded in the last 7 days"
+              />
             </CardContent>
           </Card>
         </TabsContent>
@@ -251,14 +275,14 @@ export default function SolarDashboardPage() {
                   <Leaf className="h-5 w-5 text-green-500" />
                   CO₂ Emissions Saved
                 </CardTitle>
-                <CardDescription>Carbon footprint reduction</CardDescription>
+                <CardDescription>Carbon footprint reduction today</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="text-4xl font-bold text-green-500">
-                  {impact?.co2Saved.toFixed(2) || 0} kg
+                  {(impact?.co2Saved ?? 0).toFixed(2)} kg
                 </div>
                 <p className="text-sm text-muted-foreground mt-2">
-                  Equivalent to planting {impact?.treesEquivalent || 0} trees
+                  Equivalent to planting {impact?.treesEquivalent ?? 0} trees
                 </p>
               </CardContent>
             </Card>
@@ -273,10 +297,10 @@ export default function SolarDashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-4xl font-bold text-blue-500">
-                  {impact?.cleanEnergyPercentage.toFixed(1) || 0}%
+                  {cleanEnergyPercentage.toFixed(1)}%
                 </div>
                 <p className="text-sm text-muted-foreground mt-2">
-                  Of total energy consumption
+                  Of total energy consumption covered by solar today
                 </p>
               </CardContent>
             </Card>
@@ -297,19 +321,19 @@ export default function SolarDashboardPage() {
                     </p>
                   </div>
                   <div className="text-2xl font-bold text-green-500">
-                    {impact?.treesEquivalent || 0}
+                    {impact?.treesEquivalent ?? 0}
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
-                    <p className="font-medium">Traditional Energy Saved</p>
+                    <p className="font-medium">Solar Energy Used</p>
                     <p className="text-sm text-muted-foreground">
                       Compared to grid power
                     </p>
                   </div>
                   <div className="text-2xl font-bold text-blue-500">
-                    {impact?.traditionalEnergyComparison.toFixed(1) || 0} kWh
+                    {(impact?.solarEnergyUsed ?? 0).toFixed(1)} kWh
                   </div>
                 </div>
 
@@ -321,7 +345,7 @@ export default function SolarDashboardPage() {
                     </p>
                   </div>
                   <div className="text-2xl font-bold text-yellow-500">
-                    {impact?.cleanEnergyPercentage.toFixed(1) || 0}%
+                    {cleanEnergyPercentage.toFixed(1)}%
                   </div>
                 </div>
               </div>
@@ -341,13 +365,13 @@ export default function SolarDashboardPage() {
                 <div className="flex justify-between mb-2">
                   <span className="text-sm font-medium">System Efficiency</span>
                   <span className="text-sm text-muted-foreground">
-                    {status?.efficiency.toFixed(1)}%
+                    {(status?.efficiency ?? 0).toFixed(1)}%
                   </span>
                 </div>
                 <div className="w-full bg-secondary rounded-full h-2">
                   <div
                     className="bg-green-500 h-2 rounded-full transition-all"
-                    style={{ width: `${status?.efficiency}%` }}
+                    style={{ width: `${Math.min(status?.efficiency ?? 0, 100)}%` }}
                   />
                 </div>
               </div>
@@ -356,7 +380,7 @@ export default function SolarDashboardPage() {
                 <div className="flex justify-between mb-2">
                   <span className="text-sm font-medium">Battery Level</span>
                   <span className="text-sm text-muted-foreground">
-                    {status?.batteryLevel.toFixed(0)}%
+                    {(status?.batteryLevel ?? 0).toFixed(0)}%
                   </span>
                 </div>
                 <div className="w-full bg-secondary rounded-full h-2">
@@ -367,22 +391,22 @@ export default function SolarDashboardPage() {
                       (status?.batteryLevel || 0) >= 20 ? 'bg-orange-500' :
                       'bg-red-500'
                     }`}
-                    style={{ width: `${status?.batteryLevel}%` }}
+                    style={{ width: `${status?.batteryLevel ?? 0}%` }}
                   />
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between mb-2">
-                  <span className="text-sm font-medium">Available Power</span>
+                  <span className="text-sm font-medium">Surplus Production</span>
                   <span className="text-sm text-muted-foreground">
-                    {status?.availablePower.toFixed(2)} kW
+                    {Math.max((status?.production ?? 0) - (status?.consumption ?? 0), 0).toFixed(2)} kW
                   </span>
                 </div>
                 <div className="w-full bg-secondary rounded-full h-2">
                   <div
                     className="bg-blue-500 h-2 rounded-full transition-all"
-                    style={{ width: `${Math.min((status?.availablePower || 0) / 10 * 100, 100)}%` }}
+                    style={{ width: `${Math.min(Math.max((status?.production ?? 0) - (status?.consumption ?? 0), 0) / 10 * 100, 100)}%` }}
                   />
                 </div>
               </div>
@@ -399,17 +423,17 @@ export default function SolarDashboardPage() {
                 <div className="p-4 border rounded-lg text-center">
                   <Sun className="h-8 w-8 text-yellow-500 mx-auto mb-2" />
                   <p className="text-sm text-muted-foreground">Production</p>
-                  <p className="text-2xl font-bold">{status?.currentProduction.toFixed(2)} kW</p>
+                  <p className="text-2xl font-bold">{(status?.production ?? 0).toFixed(2)} kW</p>
                 </div>
                 <div className="p-4 border rounded-lg text-center">
                   <Battery className="h-8 w-8 text-green-500 mx-auto mb-2" />
                   <p className="text-sm text-muted-foreground">Storage</p>
-                  <p className="text-2xl font-bold">{status?.batteryLevel.toFixed(0)}%</p>
+                  <p className="text-2xl font-bold">{(status?.batteryLevel ?? 0).toFixed(0)}%</p>
                 </div>
                 <div className="p-4 border rounded-lg text-center">
                   <Zap className="h-8 w-8 text-blue-500 mx-auto mb-2" />
                   <p className="text-sm text-muted-foreground">Consumption</p>
-                  <p className="text-2xl font-bold">{status?.currentConsumption.toFixed(2)} kW</p>
+                  <p className="text-2xl font-bold">{(status?.consumption ?? 0).toFixed(2)} kW</p>
                 </div>
               </div>
             </CardContent>

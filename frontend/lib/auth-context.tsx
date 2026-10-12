@@ -33,14 +33,22 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+export function isAdminRole(role?: string | null) {
+  return role === "ADMIN" || role === "SUPER_ADMIN";
+}
+
+/** Only allow same-origin relative paths as post-login redirect targets. */
+export function getSafeRedirect(target?: string | null): string | null {
+  if (!target || !target.startsWith("/") || target.startsWith("//") || target.startsWith("/\\")) {
+    return null;
+  }
+  return target;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
-
-  useEffect(() => {
-    checkSession();
-  }, []);
 
   const checkSession = async () => {
     try {
@@ -60,6 +68,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- state is only set after the async session check resolves
+    checkSession();
+  }, []);
+
   const login = async (
     email: string,
     password: string,
@@ -72,11 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(response.data.user);
     }
     await checkSession();
-    if (redirectTo) {
-      router.push(redirectTo);
-    } else {
-      router.push("/dashboard");
-    }
+    router.push(getSafeRedirect(redirectTo) ?? "/dashboard");
   };
 
   const register = async (userData: ApiRegisterRequest) => {
