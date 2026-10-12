@@ -3,7 +3,7 @@ const express = require('express');
 const AuthController = require('../controllers/authController');
 const { validate } = require('../middlewares/validation');
 const {
-  authenticate, requireEmailVerification, requireSuperAdmin,
+  authenticate, optionalAuth, requireEmailVerification, requireSuperAdmin,
 } = require('../middlewares/auth');
 const {
   authRateLimit,
@@ -138,7 +138,7 @@ router.post('/refresh', apiRateLimit(), AuthController.refreshToken);
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
  */
-router.post('/logout', apiRateLimit(), authenticate, AuthController.logout);
+router.post('/logout', apiRateLimit(), optionalAuth, AuthController.logout);
 
 /**
  * @route   POST /api/v1/auth/change-password

@@ -198,26 +198,29 @@ class AuthController {
   }
 
   static async logout(req: AuthRequest, res: Response): Promise<void> {
+    const accessToken = req.token || req.headers.authorization?.replace('Bearer ', '') || req.cookies?.token;
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken || null;
+    const redisClient = redisService.isReady() ? redisService.getClient() : null;
+
     try {
-      const accessToken = req.token || req.headers.authorization?.replace('Bearer ', '') || req.cookies?.token;
-      const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken || null;
-      const redisClient = redisService.isReady() ? redisService.getClient() : null;
-      await AuthService.logout(accessToken, redisClient, refreshToken);
-
-      res.clearCookie('token');
-      res.clearCookie('refreshToken');
-
-      res.status(200).json({
-        success: true,
-        message: 'Logout successful',
-      });
+      if (req.user && accessToken) {
+        await AuthService.logout(accessToken, redisClient, refreshToken);
+      } else if (refreshToken && redisClient) {
+        // Expired/revoked access token: still revoke the refresh token so the session cannot be resumed
+        await JWTUtils.blacklistToken(refreshToken, redisClient);
+      }
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: 'Logout failed',
-        message: error.message,
-      });
+      console.warn('Logout cleanup failed:', error?.message);
     }
+
+    // Always clear auth cookies so a stale or revoked session can never trap the client
+    res.clearCookie('token');
+    res.clearCookie('refreshToken');
+
+    res.status(200).json({
+      success: true,
+      message: 'Logout successful',
+    });
   }
 
   static async changePassword(req: AuthRequest, res: Response): Promise<void> {
