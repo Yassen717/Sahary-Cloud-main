@@ -147,8 +147,8 @@ export class SecurityMiddleware {
     // accounts, while a per IP+email cap bounds targeted floods without letting
     // an attacker lock out an account globally (DoS via `auth:{email}` keys).
     const ipLimiter = SecurityMiddleware.createAdvancedRateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 20,
+      windowMs: Number.parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || '', 10) || 15 * 60 * 1000,
+      max: Number.parseInt(process.env.AUTH_RATE_LIMIT_MAX || '', 10) || 20,
       message: 'Too many authentication attempts from this IP, please try again later',
       skipSuccessfulRequests: true,
       keyGenerator: (req: AuthRequest) => `auth:${getClientIp(req)}`,

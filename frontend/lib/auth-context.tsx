@@ -8,7 +8,7 @@ import {
   ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
-import { apiClient, type ApiRegisterRequest } from "./api";
+import { apiClient, ApiError, type ApiRegisterRequest } from "./api";
 
 interface User {
   id: string;
@@ -50,9 +50,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setUser(null);
       }
-    } catch {
-      // 401 or network error — user is not logged in
-      setUser(null);
+    } catch (error) {
+      // Only an explicit 401/403 means logged out; 429 and network errors keep the known session
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }

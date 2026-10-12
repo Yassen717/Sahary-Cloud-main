@@ -87,7 +87,9 @@ export const envSchema = Joi.object({
   UPLOAD_PATH: Joi.string().default('./uploads'),
 
   RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(900000),
-  RATE_LIMIT_MAX_REQUESTS: Joi.number().integer().min(1).default(100),
+  RATE_LIMIT_MAX_REQUESTS: Joi.number().integer().min(1).default(1000),
+  AUTH_RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(900000),
+  AUTH_RATE_LIMIT_MAX: Joi.number().integer().min(1).default(20),
 
   USAGE_COLLECTION_INTERVAL: Joi.number().integer().min(0).default(300000),
 

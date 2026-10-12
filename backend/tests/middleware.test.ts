@@ -383,6 +383,26 @@ describe('Security Middleware', () => {
       expect(response.status).toBe(429);
       expect(response.body.error).toBe('Rate limit exceeded');
     });
+
+    test('auth limiter reads AUTH_RATE_LIMIT_MAX and does not count successful logins', async () => {
+      process.env.AUTH_RATE_LIMIT_MAX = '2';
+      try {
+        const app = express();
+        app.use(express.json());
+        app.post('/login', SecurityMiddleware.authRateLimit(), (req, res) => {
+          res.status(req.body.ok ? 200 : 401).json({ success: !!req.body.ok });
+        });
+
+        for (let i = 0; i < 3; i++) {
+          expect((await request(app).post('/login').send({ ok: true })).status).toBe(200);
+        }
+        expect((await request(app).post('/login').send({ ok: false })).status).toBe(401);
+        expect((await request(app).post('/login').send({ ok: false })).status).toBe(401);
+        expect((await request(app).post('/login').send({ ok: false })).status).toBe(429);
+      } finally {
+        delete process.env.AUTH_RATE_LIMIT_MAX;
+      }
+    });
   });
 
   describe('request size limiting', () => {
