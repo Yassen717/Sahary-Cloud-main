@@ -1,4 +1,5 @@
 import { prisma } from '../config/database';
+import { handleHostingWebhookEvent, processStripeEvent } from './stripeWebhookService';
 import type {
   BillingGroupBy,
   BillingVmSummary,
@@ -1204,13 +1205,6 @@ class BillingService {
     }
   }
 
-  /**
-   * NOTE: webhook event dedup is in-memory only — it resets on restart and is
-   * scoped to this process. Replace with a persistent store (DB/Redis) before
-   * running multiple instances.
-   */
-  private static processedWebhookEventIds = new Set<string>();
-
   static parseGatewayResponse(raw: string | null | undefined): Record<string, any> {
     try {
       const parsed = JSON.parse(raw || '{}');
@@ -1742,39 +1736,28 @@ class BillingService {
   }
 
   static async handleWebhook(event: any): Promise<Record<string, unknown>> {
-    try {
-      // Event-level dedup: Stripe retries deliveries, so the same event.id can
-      // arrive multiple times and must only be processed once.
-      const eventId = typeof event?.id === 'string' ? event.id : undefined;
-      if (eventId) {
-        if (this.processedWebhookEventIds.has(eventId)) {
-          return { handled: true, duplicate: true, eventId };
-        }
-        this.processedWebhookEventIds.add(eventId);
-        // Bound memory usage once the set grows large.
-        if (this.processedWebhookEventIds.size > 10000) {
-          this.processedWebhookEventIds.clear();
-        }
-      }
+    // Persistent idempotency (contract P3): claim -> dispatch -> mark runs
+    // through the stripe_webhook_events ledger so each event id is processed
+    // exactly once even across restarts, and handler failures stay
+    // re-claimable for Stripe's retry deliveries.
+    return processStripeEvent(event, (e) => BillingService.dispatchStripeEvent(e));
+  }
 
-      switch (event.type) {
-        case 'payment_intent.succeeded':
-          return await this.handlePaymentSuccess(event.data.object, eventId);
-        case 'payment_intent.payment_failed':
-          return await this.handlePaymentFailure(event.data.object);
-        case 'charge.refunded':
-          return await this.handleRefund(event.data.object);
-        case 'customer.subscription.created':
-        case 'customer.subscription.updated':
-        case 'customer.subscription.deleted':
-          return await this.handleSubscriptionChange(event);
-        default:
-          console.log(`Unhandled event type: ${event.type}`);
-          return { handled: false, eventType: event.type };
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(`Failed to handle webhook: ${message}`);
+  /**
+   * Routes a claimed Stripe event. The legacy invoice-payment handlers keep
+   * their exact behavior; subscription/checkout/invoice lifecycle events go
+   * to the hosting handlers in stripeWebhookService.
+   */
+  private static async dispatchStripeEvent(event: any): Promise<Record<string, unknown>> {
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        return this.handlePaymentSuccess(event.data.object, event.id);
+      case 'payment_intent.payment_failed':
+        return this.handlePaymentFailure(event.data.object);
+      case 'charge.refunded':
+        return this.handleRefund(event.data.object);
+      default:
+        return handleHostingWebhookEvent(event);
     }
   }
 
@@ -2065,18 +2048,9 @@ class BillingService {
   }
 
   static async handleSubscriptionChange(event: any): Promise<Record<string, unknown>> {
-    try {
-      console.log(`Subscription event: ${event.type}`);
-
-      return {
-        handled: true,
-        eventType: event.type,
-        message: 'Subscription event logged',
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(`Failed to handle subscription change: ${message}`);
-    }
+    // Kept as a public entry point (PaymentService delegates here); the real
+    // subscription lifecycle handling now lives in stripeWebhookService.
+    return handleHostingWebhookEvent(event);
   }
 
   static async getPaymentById(paymentId: string, userId: string | null = null): Promise<Record<string, unknown> | null> {

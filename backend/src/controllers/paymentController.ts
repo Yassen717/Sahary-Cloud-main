@@ -128,13 +128,29 @@ class PaymentController {
   }
 
   static async handleWebhook(req: PaymentRequest, res: PaymentResponse): Promise<void> {
+    let event: unknown;
     try {
       const signature = normalizeWebhookSignature(req.headers);
       const payload = normalizeWebhookPayload(req.body);
 
       // Buffer payloads are passed straight through to
       // stripe.webhooks.constructEvent at runtime.
-      const event = PaymentService.verifyWebhookSignature(payload as string, signature);
+      event = PaymentService.verifyWebhookSignature(payload as string, signature);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      // Missing webhook secret is a server misconfiguration — answer 500 so
+      // Stripe keeps retrying while ops fixes it. A bad signature or malformed
+      // payload is the sender's problem — 400, and Stripe drops it.
+      const isConfigError = /secret not configured/i.test(message);
+      res.status(isConfigError ? 500 : 400).json({
+        success: false,
+        error: 'Webhook signature verification failed',
+        message,
+      });
+      return;
+    }
+
+    try {
       const result = await PaymentService.handleWebhook(event as never);
 
       res.status(200).json({
@@ -144,7 +160,10 @@ class PaymentController {
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(400).json({
+      // Handler failures MUST be 500, not 400/2xx: a non-retryable status
+      // makes Stripe drop the event permanently, while 5xx keeps it
+      // retrying — required for transient provisioning/DB failures (P3).
+      res.status(500).json({
         success: false,
         error: 'Webhook processing failed',
         message,
