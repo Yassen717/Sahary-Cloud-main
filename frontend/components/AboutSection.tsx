@@ -39,11 +39,11 @@ export default function AboutSection() {
             transition={{ duration: 0.7 }}
           >
             <h2 className="text-3xl md:text-4xl font-bold mb-6">
-              <span className="text-primary">Solar-Powered</span> Virtual Private Servers in Libya
+              <span className="text-primary">Solar-Powered</span> Web Hosting in Libya
             </h2>
 
             <p className="text-lg text-gray-600 dark:text-gray-400 mb-8">
-              At Sahary Cloud, we&apos;re pioneering the future of sustainable hosting in North Africa. By harnessing the abundant sunshine of Libya, we provide reliable and eco-friendly VPS solutions that reduce carbon emissions without compromising on performance or reliability.
+              At Sahary Cloud, we&apos;re pioneering sustainable hosting in North Africa. We turn Libya&apos;s abundant sunshine into fast, reliable web hosting for founders and small businesses across the Arabic-speaking world — eco-friendly without compromising on performance or simplicity.
             </p>
 
             <div className="space-y-4 mb-8">
@@ -58,8 +58,8 @@ export default function AboutSection() {
               <div className="flex items-start gap-3">
                 <CheckCircle2 className="h-6 w-6 text-primary shrink-0 mt-1" />
                 <div>
-                  <h3 className="font-semibold text-lg">Cutting-Edge Infrastructure</h3>
-                  <p className="text-gray-600 dark:text-gray-400">State-of-the-art solar panel arrays combined with advanced battery storage systems for 24/7 reliability.</p>
+                  <h3 className="font-semibold text-lg">Built for the Region</h3>
+                  <p className="text-gray-600 dark:text-gray-400">Simple shared hosting designed for Arabic-speaking founders and small businesses, with English support included.</p>
                 </div>
               </div>
 

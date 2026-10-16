@@ -1,49 +1,49 @@
 "use client";
 
 import { motion, type Variants } from "motion/react";
-import { Server, Cloud, ShieldCheck, Zap, Cpu, Clock, Globe, RefreshCw } from "lucide-react";
+import { Sun, Globe, ShieldCheck, FolderOpen, Database, Upload, Gauge, LifeBuoy } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const features = [
   {
-    icon: <Server className="h-12 w-12 mb-6 text-primary" />,
-    title: "Cloud VPS",
-    description: "High-performance virtual private servers powered by 100% renewable solar energy."
-  },
-  {
-    icon: <Cloud className="h-12 w-12 mb-6 text-primary" />,
-    title: "Scalable Resources",
-    description: "Dynamically scale your resources up or down based on your needs with instant provisioning."
-  },
-  {
-    icon: <ShieldCheck className="h-12 w-12 mb-6 text-primary" />,
-    title: "Advanced Security",
-    description: "Enterprise-grade security with DDoS protection and regular security updates."
-  },
-  {
-    icon: <Zap className="h-12 w-12 mb-6 text-primary" />,
-    title: "High Performance",
-    description: "NVMe SSD storage and latest-gen processors for lightning-fast performance."
-  },
-  {
-    icon: <Cpu className="h-12 w-12 mb-6 text-primary" />,
-    title: "Dedicated Resources",
-    description: "Guaranteed CPU, RAM, and storage resources exclusively for your workloads."
-  },
-  {
-    icon: <Clock className="h-12 w-12 mb-6 text-primary" />,
-    title: "99.9% Uptime",
-    description: "Enterprise-grade reliability with advanced battery backup systems."
+    icon: <Sun className="h-12 w-12 mb-6 text-primary" />,
+    title: "Solar Powered",
+    description: "Every website we host runs on 100% clean solar energy — fast for visitors, kind to the planet."
   },
   {
     icon: <Globe className="h-12 w-12 mb-6 text-primary" />,
-    title: "Local Support",
-    description: "24/7 expert technical support from our team in Libya."
+    title: "Free Subdomain",
+    description: "Your site is live in minutes on your own yourname.sahary.cloud subdomain — no DNS setup needed."
   },
   {
-    icon: <RefreshCw className="h-12 w-12 mb-6 text-primary" />,
-    title: "Automated Backups",
-    description: "Daily automated backups with point-in-time recovery options."
+    icon: <ShieldCheck className="h-12 w-12 mb-6 text-primary" />,
+    title: "Custom Domains & Free SSL",
+    description: "Bring your own domain, verify it with a DNS record, and get a free SSL certificate that renews itself."
+  },
+  {
+    icon: <FolderOpen className="h-12 w-12 mb-6 text-primary" />,
+    title: "Web File Manager",
+    description: "Upload, edit, rename and organize your site files right in the browser — no extra tools needed."
+  },
+  {
+    icon: <Database className="h-12 w-12 mb-6 text-primary" />,
+    title: "MySQL Databases",
+    description: "A managed MySQL database for every account, with credentials one click away in your panel."
+  },
+  {
+    icon: <Upload className="h-12 w-12 mb-6 text-primary" />,
+    title: "FTP Access",
+    description: "Prefer FTP? Publish with your favorite client using your own credentials and one-click password resets."
+  },
+  {
+    icon: <Gauge className="h-12 w-12 mb-6 text-primary" />,
+    title: "Live Usage Meters",
+    description: "Disk and bandwidth usage tracked in real time with clear warnings before you hit a limit."
+  },
+  {
+    icon: <LifeBuoy className="h-12 w-12 mb-6 text-primary" />,
+    title: "Local Support",
+    description: "24/7 help from our team in Libya, in Arabic and English — real people, real answers."
   }
 ];
 
@@ -86,8 +86,8 @@ export default function FeaturesSection() {
             Why Choose Sahary Cloud
           </h2>
           <p className="text-xl text-gray-600 dark:text-gray-400 max-w-3xl mx-auto">
-            Experience the perfect blend of performance, sustainability, and reliability
-            with our cutting-edge cloud infrastructure.
+            Everything you need to put a website online — simple shared hosting
+            that runs on clean solar energy.
           </p>
         </motion.div>
 

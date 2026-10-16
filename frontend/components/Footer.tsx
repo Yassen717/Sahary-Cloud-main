@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Cloud, Mail, Phone, MapPin } from "lucide-react";
+import { features } from "@/lib/features";
 
 export default function Footer() {
   const currentYear = new Date().getFullYear();
@@ -19,7 +20,7 @@ export default function Footer() {
               </span>
             </div>
             <p className="text-gray-600 dark:text-gray-400 mb-4">
-              Pioneering sustainable cloud computing in Libya with our solar-powered infrastructure.
+              Solar-powered shared web hosting from Libya — simple, affordable and clean.
             </p>
           </div>
 
@@ -38,7 +39,7 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
-                <Link href="/#plans" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
+                <Link href="/pricing" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
                   Pricing Plans
                 </Link>
               </li>
@@ -70,35 +71,37 @@ export default function Footer() {
             <h3 className="font-semibold text-lg mb-4">Our Services</h3>
             <ul className="space-y-3">
               <li>
-                <Link href="/#plans" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
-                  Cloud VPS
-                </Link>
-              </li>
-              <li>
-                <Link href="/dashboard/hosting" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
-                  Managed Hosting
-                </Link>
-              </li>
-              <li>
-                <Link href="/#plans" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
-                  Dedicated Resources
+                <Link href="/pricing" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
+                  Shared Web Hosting
                 </Link>
               </li>
               <li>
                 <Link href="/#features" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
-                  Cloud Storage
+                  Custom Domains &amp; SSL
                 </Link>
               </li>
               <li>
-                <Link href="/help" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
-                  Backup Solutions
+                <Link href="/#features" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
+                  Web File Manager
+                </Link>
+              </li>
+              <li>
+                <Link href="/#features" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
+                  MySQL Databases
                 </Link>
               </li>
               <li>
                 <Link href="/contact" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
-                  Migration Services
+                  Website Migration
                 </Link>
               </li>
+              {features.vps && (
+                <li>
+                  <Link href="/vms" className="text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
+                    Cloud VPS
+                  </Link>
+                </li>
+              )}
             </ul>
           </div>
 

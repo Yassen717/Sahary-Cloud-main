@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import { savePendingPlan } from '@/components/pricing/pending-plan';
 
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^\-_.,~()[\]{}|+=:;'"\\/<>`!])\S+$/;
 const NAME_REGEX = new RegExp("^[\\p{L}][\\p{L}\\s'\u2019-]*$", "u");
@@ -16,7 +18,9 @@ const isValidName = (name: string) => {
   return value.length >= 2 && value.length <= 50 && NAME_REGEX.test(value);
 };
 
-export default function RegisterPage() {
+function RegisterForm() {
+  const searchParams = useSearchParams();
+  const planId = searchParams.get('plan');
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -27,6 +31,12 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { register } = useAuth();
+
+  // Remember the plan the visitor picked on /pricing — after email
+  // verification and login they are sent back to finish checkout.
+  useEffect(() => {
+    if (planId) savePendingPlan(planId);
+  }, [planId]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -73,8 +83,8 @@ export default function RegisterPage() {
         password: formData.password,
       });
       // AuthContext handles session refresh and navigation to /dashboard
-    } catch (err: any) {
-      setError(err.message || 'Registration failed');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {
       setLoading(false);
     }
@@ -209,5 +219,19 @@ export default function RegisterPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <RegisterForm />
+    </Suspense>
   );
 }

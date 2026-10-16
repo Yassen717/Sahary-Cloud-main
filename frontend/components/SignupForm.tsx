@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -45,7 +46,7 @@ const formSchema = z.object({
   }),
   company: z.string().optional(),
   plan: z.string({
-    required_error: "Please select a VPS plan.",
+    required_error: "Please tell us what you are interested in.",
   }),
   requirements: z.string().min(10, {
     message: "Please provide some details about your requirements.",
@@ -136,7 +137,12 @@ export default function SignupForm() {
               Get Started with Sahary Cloud
             </h2>
             <p className="text-xl text-gray-600 dark:text-gray-400 max-w-3xl mx-auto">
-              Fill out the form below to request your solar-powered VPS. Our team will contact you shortly.
+              Have a project in mind? Tell us about it below and our team will
+              get back to you — or{" "}
+              <Link href="/pricing" className="text-primary hover:underline">
+                pick a hosting plan
+              </Link>{" "}
+              and go live today.
             </p>
           </motion.div>
 
@@ -212,22 +218,22 @@ export default function SignupForm() {
                   name="plan"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>VPS Plan</FormLabel>
+                      <FormLabel>I&apos;m interested in</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select a plan" />
+                            <SelectValue placeholder="Select an option" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="basic">Basic VPS</SelectItem>
-                          <SelectItem value="standard">Standard VPS</SelectItem>
-                          <SelectItem value="premium">Premium VPS</SelectItem>
-                          <SelectItem value="custom">Custom Solution</SelectItem>
+                          <SelectItem value="shared-hosting">A shared hosting plan</SelectItem>
+                          <SelectItem value="custom-domain">Custom domain &amp; SSL setup</SelectItem>
+                          <SelectItem value="migration">Migrating an existing site</SelectItem>
+                          <SelectItem value="other">Something else</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormDescription>
-                        Choose the plan that best fits your needs or select Custom for a tailored solution.
+                        Let us know what you need — we&apos;ll point you at the right plan or a tailored solution.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

@@ -5,24 +5,31 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { 
-  Menu, 
-  Home, 
-  Server, 
-  Sun, 
-  Receipt, 
+import {
+  Menu,
+  Home,
+  Server,
+  Sun,
+  Receipt,
   Shield,
   Globe,
+  CreditCard,
   X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { features } from '@/lib/features';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
   { name: 'Hosting', href: '/dashboard/hosting', icon: Globe },
-  { name: 'Virtual Machines', href: '/vms', icon: Server },
-  { name: 'Solar', href: '/solar', icon: Sun },
-  { name: 'Billing', href: '/billing', icon: Receipt },
+  { name: 'Subscription', href: '/dashboard/subscription', icon: CreditCard },
+  ...(features.vps
+    ? [
+        { name: 'Virtual Machines', href: '/vms', icon: Server },
+        { name: 'Solar', href: '/solar', icon: Sun },
+        { name: 'Billing', href: '/billing', icon: Receipt },
+      ]
+    : []),
   { name: 'Admin', href: '/admin', icon: Shield },
 ];
 

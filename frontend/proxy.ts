@@ -44,6 +44,15 @@ const adminRoutes = ["/admin"];
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // VPS UI is hidden unless NEXT_PUBLIC_ENABLE_VPS=true — park the pages
+  // behind a redirect to the dashboard (hosting MVP ships without VPS).
+  if (
+    process.env.NEXT_PUBLIC_ENABLE_VPS !== "true" &&
+    (pathname === "/vms" || pathname.startsWith("/vms/"))
+  ) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
   // Check if the route is protected (exact match or sub-path, so
   // "/solar" doesn't accidentally match "/solar-alerts", etc.)
   const isProtectedRoute = protectedRoutes.some(
