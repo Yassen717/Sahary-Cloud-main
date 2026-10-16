@@ -78,7 +78,7 @@ export async function listAccounts(
     prisma.hostingAccount.findMany({
       where,
       include: ADMIN_ACCOUNT_INCLUDE,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       skip: (query.page - 1) * query.limit,
       take: query.limit,
     }),
