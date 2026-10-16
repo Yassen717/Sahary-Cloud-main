@@ -12,23 +12,24 @@ datasource db {
 
 // User Model - المستخدمين
 model User {
-  id          String   @id @default(cuid())
-  email       String   @unique
-  password    String
-  firstName   String
-  lastName    String
-  phone       String?
-  avatar      String?
-  role        String   @default("USER")
-  isActive    Boolean  @default(true)
-  isVerified  Boolean  @default(false)
-  emailVerificationToken String?
+  id                       String    @id @default(cuid())
+  email                    String    @unique
+  password                 String
+  firstName                String
+  lastName                 String
+  phone                    String?
+  avatar                   String?
+  role                     String    @default("USER")
+  isActive                 Boolean   @default(true)
+  isVerified               Boolean   @default(false)
+  emailVerificationToken   String?
   emailVerificationExpires DateTime?
-  passwordResetToken String?
-  passwordResetExpires DateTime?
-  lastLoginAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  passwordResetToken       String?
+  passwordResetExpires     DateTime?
+  lastLoginAt              DateTime?
+  stripeCustomerId         String?   @unique
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   // Relations
   virtualMachines VirtualMachine[]
@@ -45,39 +46,39 @@ model User {
 
 // Virtual Machine Model - الخوادم الافتراضية
 model VirtualMachine {
-  id          String    @id @default(cuid())
+  id          String  @id @default(cuid())
   name        String
   description String?
-  status      String   @default("STOPPED")
-  
+  status      String  @default("STOPPED")
+
   // Resource specifications
-  cpu         Int       // CPU cores
-  ram         Int       // RAM in MB
-  storage     Int       // Storage in GB
-  bandwidth   Int?      // Bandwidth in GB/month
-  
+  cpu       Int // CPU cores
+  ram       Int // RAM in MB
+  storage   Int // Storage in GB
+  bandwidth Int? // Bandwidth in GB/month
+
   // Network configuration
-  ipAddress   String?   @unique
-  port        Int?
-  
+  ipAddress String? @unique
+  port      Int?
+
   // Docker configuration
-  dockerImage String?
+  dockerImage       String?
   dockerContainerId String?
-  
+
   // Pricing
-  hourlyRate  Decimal   @default(0.00)
-  
+  hourlyRate Decimal @default(0.00)
+
   // Timestamps
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  startedAt   DateTime?
-  stoppedAt   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  startedAt DateTime?
+  stoppedAt DateTime?
 
   // Relations
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   usageRecords UsageRecord[]
-  backups     Backup[]
+  backups      Backup[]
 
   @@index([userId])
   @@index([userId, status])
@@ -88,34 +89,34 @@ model VirtualMachine {
 
 // Invoice Model - الفواتير
 model Invoice {
-  id          String        @id @default(cuid())
-  invoiceNumber String      @unique
-  amount      Decimal       @default(0.00)
-  subtotal    Decimal       @default(0.00)
-  tax         Decimal       @default(0.00)
-  discount    Decimal       @default(0.00)
-  currency    String        @default("USD")
-  status      String    @default("PENDING")
-  
+  id            String  @id @default(cuid())
+  invoiceNumber String  @unique
+  amount        Decimal @default(0.00)
+  subtotal      Decimal @default(0.00)
+  tax           Decimal @default(0.00)
+  discount      Decimal @default(0.00)
+  currency      String  @default("USD")
+  status        String  @default("PENDING")
+
   // Billing period
   billingPeriodStart DateTime
   billingPeriodEnd   DateTime
-  
+
   // Payment information
-  dueDate     DateTime
-  paidAt      DateTime?
+  dueDate       DateTime
+  paidAt        DateTime?
   paymentMethod String?
-  paymentId   String?
-  
+  paymentId     String?
+
   // Timestamps
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  userId      String
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items       InvoiceItem[]
-  payments    Payment[]
+  userId   String
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items    InvoiceItem[]
+  payments Payment[]
 
   @@index([userId])
   @@index([userId, status])
@@ -127,49 +128,49 @@ model Invoice {
 
 // Invoice Item Model - عناصر الفاتورة
 model InvoiceItem {
-  id          String   @id @default(cuid())
+  id          String  @id @default(cuid())
   description String
-  quantity    Decimal  @default(1)
+  quantity    Decimal @default(1)
   unitPrice   Decimal
   totalPrice  Decimal
-  
+
   // Resource details
-  resourceType String  // VM, Storage, Bandwidth, etc.
+  resourceType String // VM, Storage, Bandwidth, etc.
   resourceId   String?
-  
+
   // Usage period
-  usageStart  DateTime?
-  usageEnd    DateTime?
-  
-  createdAt   DateTime @default(now())
+  usageStart DateTime?
+  usageEnd   DateTime?
+
+  createdAt DateTime @default(now())
 
   // Relations
-  invoiceId   String
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@map("invoice_items")
 }
 
 // Payment Model - المدفوعات
 model Payment {
-  id          String        @id @default(cuid())
-  amount      Decimal
-  currency    String        @default("USD")
-  status      String        @default("PENDING")
-  method      String
-  
+  id       String  @id @default(cuid())
+  amount   Decimal
+  currency String  @default("USD")
+  status   String  @default("PENDING")
+  method   String
+
   // Payment gateway details
-  gatewayId   String?       // Stripe payment intent ID
+  gatewayId       String? // Stripe payment intent ID
   gatewayResponse String?
-  
+
   // Timestamps
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   processedAt DateTime?
 
   // Relations
-  invoiceId   String
-  invoice     Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
   @@index([status])
@@ -178,26 +179,26 @@ model Payment {
 
 // Usage Record Model - سجلات الاستخدام
 model UsageRecord {
-  id          String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Resource usage
-  cpuUsage    Float    @default(0) // CPU usage percentage
-  ramUsage    Float    @default(0) // RAM usage in MB
-  storageUsage Float   @default(0) // Storage usage in GB
+  cpuUsage       Float @default(0) // CPU usage percentage
+  ramUsage       Float @default(0) // RAM usage in MB
+  storageUsage   Float @default(0) // Storage usage in GB
   bandwidthUsage Float @default(0) // Bandwidth usage in GB
-  
+
   // Time tracking
-  duration    Int      @default(0) // Duration in minutes
-  timestamp   DateTime @default(now())
-  
+  duration  Int      @default(0) // Duration in minutes
+  timestamp DateTime @default(now())
+
   // Billing
-  cost        Decimal  @default(0.00)
-  
+  cost Decimal @default(0.00)
+
   // Relations
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  vmId        String?
-  vm          VirtualMachine? @relation(fields: [vmId], references: [id], onDelete: SetNull)
+  userId String
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vmId   String?
+  vm     VirtualMachine? @relation(fields: [vmId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([vmId])
@@ -208,25 +209,25 @@ model UsageRecord {
 
 // Solar Data Model - بيانات الطاقة الشمسية
 model SolarData {
-  id          String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Energy metrics
-  production  Float    @default(0) // kWh produced
-  consumption Float    @default(0) // kWh consumed
-  efficiency  Float    @default(0) // Efficiency percentage
-  
+  production  Float @default(0) // kWh produced
+  consumption Float @default(0) // kWh consumed
+  efficiency  Float @default(0) // Efficiency percentage
+
   // Environmental impact
-  co2Saved    Float    @default(0) // CO2 saved in kg
-  
+  co2Saved Float @default(0) // CO2 saved in kg
+
   // Weather data
   solarIrradiance Float? // Solar irradiance in W/m²
   temperature     Float? // Temperature in Celsius
   cloudCover      Float? // Cloud cover percentage
-  
+
   // System status
-  systemStatus    String    @default("NORMAL")
-  
-  timestamp   DateTime @default(now())
+  systemStatus String @default("NORMAL")
+
+  timestamp DateTime @default(now())
 
   @@index([timestamp])
   @@index([systemStatus])
@@ -235,22 +236,22 @@ model SolarData {
 
 // Session Model - الجلسات
 model Session {
-  id          String   @id @default(cuid())
-  sessionId   String   @unique
-  
+  id        String @id @default(cuid())
+  sessionId String @unique
+
   // Session data
-  data        String?
-  ipAddress   String?
-  userAgent   String?
-  
+  data      String?
+  ipAddress String?
+  userAgent String?
+
   // Timestamps
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  expiresAt   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  expiresAt DateTime
 
   // Relations
-  userId      String?
-  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
@@ -259,20 +260,20 @@ model Session {
 
 // Notification Model - الإشعارات
 model Notification {
-  id          String             @id @default(cuid())
-  title       String
-  message     String
-  type        String             @default("INFO")
-  isRead      Boolean            @default(false)
-  
+  id      String  @id @default(cuid())
+  title   String
+  message String
+  type    String  @default("INFO")
+  isRead  Boolean @default(false)
+
   // Metadata
-  metadata    String?
-  
-  createdAt   DateTime           @default(now())
+  metadata String?
+
+  createdAt DateTime @default(now())
 
   // Relations
-  userId      String
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([userId, isRead])
@@ -282,27 +283,27 @@ model Notification {
 
 // Backup Model - النسخ الاحتياطية
 model Backup {
-  id          String       @id @default(cuid())
+  id          String  @id @default(cuid())
   name        String
   description String?
-  size        BigInt       @default(0) // Size in bytes
-  status      String       @default("PENDING")
-  
+  size        BigInt  @default(0) // Size in bytes
+  status      String  @default("PENDING")
+
   // Backup details
-  backupPath  String?
-  backupType  String       @default("FULL")
-  dockerImageId String?    // Docker image ID for container backups
-  
+  backupPath    String?
+  backupType    String  @default("FULL")
+  dockerImageId String? // Docker image ID for container backups
+
   // Timestamps
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   completedAt DateTime?
 
   // Relations
-  vmId        String
-  vm          VirtualMachine @relation(fields: [vmId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vmId   String
+  vm     VirtualMachine @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  userId String
+  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([vmId])
   @@index([userId])
@@ -312,24 +313,24 @@ model Backup {
 
 // Audit Log Model - سجلات المراجعة
 model AuditLog {
-  id          String     @id @default(cuid())
-  action      String     // Action performed
-  resource    String     // Resource affected
-  resourceId  String?    // ID of the resource
-  
+  id         String  @id @default(cuid())
+  action     String // Action performed
+  resource   String // Resource affected
+  resourceId String? // ID of the resource
+
   // Request details
-  ipAddress   String?
-  userAgent   String?
-  
+  ipAddress String?
+  userAgent String?
+
   // Changes
-  oldValues   String?
-  newValues   String?
-  
-  timestamp   DateTime   @default(now())
+  oldValues String?
+  newValues String?
+
+  timestamp DateTime @default(now())
 
   // Relations
-  userId      String?
-  user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([action])
@@ -340,56 +341,56 @@ model AuditLog {
 
 // Pricing Plan Model - خطط الأسعار
 model PricingPlan {
-  id          String   @id @default(cuid())
-  name        String   @unique
+  id          String  @id @default(cuid())
+  name        String  @unique
   description String?
-  
+
   // Resource limits
-  maxCpu      Int      @default(1)
-  maxRam      Int      @default(1024) // MB
-  maxStorage  Int      @default(10)   // GB
-  maxBandwidth Int     @default(100)  // GB/month
-  maxVMs      Int      @default(1)
-  
+  maxCpu       Int @default(1)
+  maxRam       Int @default(1024) // MB
+  maxStorage   Int @default(10) // GB
+  maxBandwidth Int @default(100) // GB/month
+  maxVMs       Int @default(1)
+
   // Pricing
   monthlyPrice Decimal @default(0.00)
   hourlyPrice  Decimal @default(0.00)
-  
+
   // Features
-  features    String?
-  
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  features String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("pricing_plans")
 }
 
 // System Settings Model - إعدادات النظام
 model SystemSetting {
-  id          String   @id @default(cuid())
-  key         String   @unique
+  id          String  @id @default(cuid())
+  key         String  @unique
   value       String
   description String?
-  category    String   @default("general")
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  category    String  @default("general")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("system_settings")
 }
 
 // Solar Alert Model - تنبيهات الطاقة الشمسية
 model SolarAlert {
-  id          String        @id @default(cuid())
-  type        String        // Alert type (LOW_PRODUCTION, LOW_BATTERY, etc.)
-  severity    String        @default("WARNING")
-  message     String
-  data        String?       // JSON string with additional data
-  resolved    Boolean       @default(false)
-  
-  createdAt   DateTime      @default(now())
-  resolvedAt  DateTime?
+  id       String  @id @default(cuid())
+  type     String // Alert type (LOW_PRODUCTION, LOW_BATTERY, etc.)
+  severity String  @default("WARNING")
+  message  String
+  data     String? // JSON string with additional data
+  resolved Boolean @default(false)
+
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
 
   @@index([resolved])
   @@index([severity])
@@ -399,11 +400,11 @@ model SolarAlert {
 
 // Emergency Log Model - سجلات الطوارئ
 model EmergencyLog {
-  id          String        @id @default(cuid())
-  severity    String
-  action      String
-  data        String?       // JSON string with additional data
-  timestamp   DateTime      @default(now())
+  id        String   @id @default(cuid())
+  severity  String
+  action    String
+  data      String? // JSON string with additional data
+  timestamp DateTime @default(now())
 
   @@index([timestamp])
   @@map("emergency_logs")
@@ -411,10 +412,10 @@ model EmergencyLog {
 
 // System Status Model - حالة النظام
 model SystemStatus {
-  id          String   @id @default(cuid())
-  status      String   // NORMAL, BACKUP_POWER, BACKUP_READY, etc.
-  message     String
-  timestamp   DateTime @default(now())
+  id        String   @id @default(cuid())
+  status    String // NORMAL, BACKUP_POWER, BACKUP_READY, etc.
+  message   String
+  timestamp DateTime @default(now())
 
   @@index([timestamp])
   @@map("system_status")
@@ -422,27 +423,27 @@ model SystemStatus {
 
 // Hosting Plan Model - خطط الاستضافة المشتركة
 model HostingPlan {
-  id            String   @id @default(cuid())
-  name          String   @unique
-  description   String?
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
 
   // Resource limits
-  diskGB        Int      // Disk quota in GB
-  bandwidthGB   Int      // Monthly bandwidth quota in GB
-  maxDomains    Int      @default(1)
-  maxDatabases  Int      @default(1)
-  maxFtpAccounts Int     @default(1)
+  diskGB         Int // Disk quota in GB
+  bandwidthGB    Int // Monthly bandwidth quota in GB
+  maxDomains     Int @default(1)
+  maxDatabases   Int @default(1)
+  maxFtpAccounts Int @default(1)
 
   // Pricing
-  monthlyPrice  Decimal  @default(0.00)
+  monthlyPrice Decimal @default(0.00)
 
   // Stripe integration
   stripeProductId String?
   stripePriceId   String?
 
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
   hostingAccounts HostingAccount[]
@@ -452,49 +453,73 @@ model HostingPlan {
 
 // Hosting Account Model - حسابات الاستضافة
 model HostingAccount {
-  id            String   @id @default(cuid())
+  id String @id @default(cuid())
 
   // Primary subdomain (auto-assigned: <username>.sahary.cloud)
-  domain        String   @unique
+  domain String @unique
 
   // Absolute path to document root on the server
-  documentRoot  String?  // e.g. /var/www/<id>/public_html
+  documentRoot String? // e.g. /var/www/<id>/public_html
 
   // Resource quotas (copied from plan at creation time)
-  diskQuota     Int      // GB
-  bandwidthQuota Int     // GB / month
+  diskQuota      Int // GB
+  bandwidthQuota Int // GB / month
 
   // Current usage (updated by metering cron)
-  diskUsed      Float    @default(0) // GB
-  bandwidthUsed Float    @default(0) // GB used this cycle
+  diskUsed      Float @default(0) // GB
+  bandwidthUsed Float @default(0) // GB used this cycle
 
   // Status
-  status        String   @default("ACTIVE") // ACTIVE | SUSPENDED | TERMINATED
+  status String @default("ACTIVE") // ACTIVE | SUSPENDED | TERMINATED
 
   // FTP credentials
-  ftpUser       String?  @unique
-  ftpPassword   String?  // bcrypt hash — never returned in API responses
+  ftpUser     String? @unique
+  ftpPassword String? // bcrypt hash — never returned in API responses
 
   // Primary database credentials
-  dbName        String?
-  dbUser        String?
-  dbPassword    String?  // bcrypt hash — never returned in API responses
+  dbName     String?
+  dbUser     String?
+  dbPassword String? // bcrypt hash — never returned in API responses
 
   // SSL (primary domain)
-  sslEnabled    Boolean  @default(false)
-  sslExpiresAt  DateTime?
+  sslEnabled   Boolean   @default(false)
+  sslExpiresAt DateTime?
+
+  // Provisioning / lifecycle
+  provisioningError String?
+  suspendedAt       DateTime?
+  suspendReason     String?
+  purgedAt          DateTime?
+
+  // Stripe subscription linkage
+  stripeSubscriptionId String?   @unique
+  subscriptionStatus   String?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+
+  // Usage metering state
+  bandwidthCycleStart DateTime?
+  usageUpdatedAt      DateTime?
+  bandwidthLogOffset  BigInt    @default(0)
+  bandwidthLogInode   String?
+
+  // Quota alert state (0 | 80 | 100)
+  diskAlertLevel      Int @default(0)
+  bandwidthAlertLevel Int @default(0)
 
   // Timestamps
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  terminatedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  terminatedAt DateTime?
 
   // Relations
-  userId        String
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  planId        String
-  plan          HostingPlan    @relation(fields: [planId], references: [id])
-  domains       HostingDomain[]
+  userId         String
+  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId         String
+  plan           HostingPlan            @relation(fields: [planId], references: [id])
+  domains        HostingDomain[]
+  databases      HostingDatabase[]
+  usageSnapshots HostingUsageSnapshot[]
 
   @@index([userId])
   @@index([domain])
@@ -504,26 +529,78 @@ model HostingAccount {
 
 // Additional / Custom Domain Model
 model HostingDomain {
-  id           String   @id @default(cuid())
-  domain       String   @unique
+  id     String @id @default(cuid())
+  domain String @unique
 
   // DNS verification
-  isVerified   Boolean  @default(false)
-  verifyToken  String?  // TXT record value shown to user
+  isVerified  Boolean @default(false)
+  verifyToken String? // TXT record value shown to user
 
   // SSL per domain
-  sslEnabled   Boolean  @default(false)
+  sslEnabled   Boolean   @default(false)
   sslIssuedAt  DateTime?
   sslExpiresAt DateTime?
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  // Certificate lifecycle (NONE | PENDING | ACTIVE | FAILED)
+  sslStatus            String    @default("NONE")
+  sslLastError         String?
+  sslLastAttemptAt     DateTime?
+  sslExpiryNoticeLevel Int       @default(0) // 0 | 30 | 14 | 7
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  accountId    String
-  account      HostingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId String
+  account   HostingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@index([accountId])
   @@index([domain])
+  @@index([isVerified, sslStatus])
   @@map("hosting_domains")
+}
+
+// MySQL databases owned by a hosting account (one MySQL user, per-db grants)
+model HostingDatabase {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  accountId String
+  account   HostingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@map("hosting_databases")
+}
+
+// Daily usage snapshot per account (written by the metering job)
+model HostingUsageSnapshot {
+  id              String   @id @default(cuid())
+  date            DateTime // UTC midnight of the day
+  diskUsedGB      Float
+  bandwidthUsedGB Float // cycle-to-date at snapshot time
+  createdAt       DateTime @default(now())
+
+  accountId String
+  account   HostingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, date])
+  @@index([date])
+  @@map("hosting_usage_snapshots")
+}
+
+// Persistent Stripe webhook idempotency ledger
+model StripeWebhookEvent {
+  id          String    @id // Stripe event id (evt_...)
+  type        String
+  status      String    @default("PROCESSING") // PROCESSING | PROCESSED | FAILED
+  attempts    Int       @default(1)
+  lastError   String?
+  receivedAt  DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  processedAt DateTime?
+
+  @@index([status, updatedAt])
+  @@map("stripe_webhook_events")
 }

@@ -15,6 +15,9 @@ router.use(authenticate);
 // All admin routes require admin permission
 router.use(requirePermission('admin:access'));
 
+// Hosting admin (WP07 fills in the handlers)
+router.use('/hosting', require('./adminHosting'));
+
 // ==================== Dashboard ====================
 
 /**

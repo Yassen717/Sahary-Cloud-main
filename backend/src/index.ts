@@ -25,6 +25,7 @@ import { requestLogger } from './middlewares/requestLogger';
 import { correlationId } from './middlewares/correlationId';
 import { performanceMonitor } from './middlewares/performanceMonitor';
 import { sanitizeAll, checkXSS, preventNoSQLInjection } from './middlewares/sanitization';
+import { getHostingConfig } from './config/hosting';
 import { ddosProtectionMiddleware, connectionLimitMiddleware } from './middlewares/ddosProtection';
 
 const redisService = require('./services/redisService');
@@ -71,6 +72,13 @@ const stopBackgroundJobs = (): void => {
   loadJob('./jobs/cacheCleanup').stop();
   // stop() is being added to this job by the jobs refactor — call defensively.
   loadJob('./jobs/invoiceGenerator').stop?.();
+
+  if (getHostingConfig().jobsEnabled) {
+    loadJob('./jobs/hostingMeterJob').stop();
+    loadJob('./jobs/sslRenewalJob').stop();
+    loadJob('./jobs/hostingReconcileJob').stop();
+    loadJob('./jobs/hostingRetentionJob').stop();
+  }
 };
 
 const startBackgroundJobs = (): void => {
@@ -82,6 +90,13 @@ const startBackgroundJobs = (): void => {
   loadJob('./jobs/invoiceGenerator').start();
   loadJob('./jobs/solarDataCollector').start();
   loadJob('./jobs/cacheCleanup').start();
+
+  if (getHostingConfig().jobsEnabled) {
+    loadJob('./jobs/hostingMeterJob').start();
+    loadJob('./jobs/sslRenewalJob').start();
+    loadJob('./jobs/hostingReconcileJob').start();
+    loadJob('./jobs/hostingRetentionJob').start();
+  }
 };
 
 const shutdown = async (signal: 'SIGINT' | 'SIGTERM'): Promise<void> => {
