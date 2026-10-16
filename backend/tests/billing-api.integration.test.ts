@@ -22,7 +22,11 @@ describe('Billing API Integration Tests', () => {
     beforeAll(async () => {
         // Clean up leftover data owned by this suite's users only — other
         // test files run in parallel against the same database.
-        await (global as any).cleanupTestUsers(prisma, ['billing-api@test.com', 'billing-admin@test.com']);
+        await (global as any).cleanupTestUsers(prisma, [
+            'billing-api@test.com',
+            'billing-admin@test.com',
+            'invoice-gen-test@example.com',
+        ]);
 
         // Create test user
         const userResult = await AuthService.register({
@@ -94,7 +98,11 @@ describe('Billing API Integration Tests', () => {
 
     afterAll(async () => {
         // Clean up test data — scoped to this suite's users only.
-        await (global as any).cleanupTestUsers(prisma, ['billing-api@test.com', 'billing-admin@test.com']);
+        await (global as any).cleanupTestUsers(prisma, [
+            'billing-api@test.com',
+            'billing-admin@test.com',
+            'invoice-gen-test@example.com',
+        ]);
         await prisma.$disconnect();
     });
 
@@ -450,7 +458,8 @@ describe('Billing API Integration Tests', () => {
 
                 expect(response.status).toBe(200);
                 expect(response.body.success).toBe(true);
-                expect(response.body.data.updated).toBeGreaterThanOrEqual(0);
+                // markOverdueInvoices returns { success, failed, total, errors }.
+                expect(response.body.data.success).toBeGreaterThanOrEqual(0);
             });
         });
     });
