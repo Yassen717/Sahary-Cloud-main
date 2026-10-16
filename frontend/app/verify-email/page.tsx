@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { readPendingPlan } from '@/components/pricing/pending-plan';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,6 +27,10 @@ function VerifyEmailForm() {
   const [resendLoading, setResendLoading] = useState(false);
   const [resendMessage, setResendMessage] = useState('');
   const [resendError, setResendError] = useState('');
+  const { isAuthenticated, loading: authLoading } = useAuth();
+  // Read once at mount; only rendered inside the post-verification success
+  // block, so it cannot cause a hydration mismatch.
+  const [pendingPlan] = useState(() => readPendingPlan());
 
   useEffect(() => {
     if (!token || attemptedRef.current) return;
@@ -32,9 +38,9 @@ function VerifyEmailForm() {
     apiClient
       .verifyEmail(token)
       .then(() => setStatus('success'))
-      .catch((err: any) => {
+      .catch((err) => {
         setError(
-          err?.message || 'Verification link is invalid or has expired.'
+          err instanceof Error ? err.message : 'Verification link is invalid or has expired.'
         );
         setStatus('error');
       });
@@ -51,8 +57,8 @@ function VerifyEmailForm() {
       setResendMessage(
         res?.message || 'Verification email sent — please check your inbox.'
       );
-    } catch (err: any) {
-      setResendError(err?.message || 'Failed to resend verification email.');
+    } catch (err) {
+      setResendError(err instanceof Error ? err.message : 'Failed to resend verification email.');
     } finally {
       setResendLoading(false);
     }
@@ -89,9 +95,37 @@ function VerifyEmailForm() {
                   Your email has been verified successfully.
                 </p>
               </div>
-              <Button asChild className="w-full">
-                <Link href="/dashboard">Go to dashboard</Link>
-              </Button>
+              {pendingPlan ? (
+                <>
+                  <Button asChild className="w-full">
+                    <Link
+                      href={
+                        // Known logged-out users log in first (the login page
+                        // also falls back to the pending plan). Authenticated
+                        // or still-resolving sessions go straight to /pricing —
+                        // the proxy would otherwise bounce them to /dashboard.
+                        !authLoading && !isAuthenticated
+                          ? `/login?redirect=${encodeURIComponent(`/pricing?plan=${pendingPlan}`)}`
+                          : `/pricing?plan=${encodeURIComponent(pendingPlan)}`
+                      }
+                    >
+                      Continue to your plan
+                    </Link>
+                  </Button>
+                  <div className="text-center text-sm">
+                    <Link
+                      href="/dashboard"
+                      className="text-muted-foreground hover:underline"
+                    >
+                      Go to dashboard
+                    </Link>
+                  </div>
+                </>
+              ) : (
+                <Button asChild className="w-full">
+                  <Link href="/dashboard">Go to dashboard</Link>
+                </Button>
+              )}
               <div className="text-center text-sm">
                 <Link
                   href="/login"

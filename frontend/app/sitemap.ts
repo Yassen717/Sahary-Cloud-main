@@ -6,6 +6,7 @@ const publicPages: Array<{
     priority: number;
 }> = [
     { path: '', changeFrequency: 'weekly', priority: 1 },
+    { path: '/pricing', changeFrequency: 'weekly', priority: 0.9 },
     { path: '/help', changeFrequency: 'weekly', priority: 0.8 },
     { path: '/contact', changeFrequency: 'monthly', priority: 0.7 },
     { path: '/register', changeFrequency: 'monthly', priority: 0.7 },

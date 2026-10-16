@@ -10,8 +10,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { User, Settings, LogOut, LayoutDashboard, CreditCard, Shield } from 'lucide-react';
+import { User, Settings, LogOut, LayoutDashboard, CreditCard, Globe, Shield } from 'lucide-react';
 import Link from 'next/link';
+import { features } from '@/lib/features';
 
 export function UserProfileDropdown() {
   const { user, logout } = useAuth();
@@ -59,17 +60,31 @@ export function UserProfileDropdown() {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
+          <Link href="/dashboard/hosting" className="cursor-pointer">
+            <Globe className="mr-2 h-4 w-4" />
+            <span>Hosting</span>
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/dashboard/subscription" className="cursor-pointer">
+            <CreditCard className="mr-2 h-4 w-4" />
+            <span>Subscription</span>
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <Link href="/profile" className="cursor-pointer">
             <User className="mr-2 h-4 w-4" />
             <span>Profile</span>
           </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link href="/billing" className="cursor-pointer">
-            <CreditCard className="mr-2 h-4 w-4" />
-            <span>Billing</span>
-          </Link>
-        </DropdownMenuItem>
+        {features.vps && (
+          <DropdownMenuItem asChild>
+            <Link href="/billing" className="cursor-pointer">
+              <CreditCard className="mr-2 h-4 w-4" />
+              <span>Billing</span>
+            </Link>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem asChild>
           <Link href="/settings" className="cursor-pointer">
             <Settings className="mr-2 h-4 w-4" />

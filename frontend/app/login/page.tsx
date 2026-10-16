@@ -1,8 +1,9 @@
 'use client';
 
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { readPendingPlan } from '@/components/pricing/pending-plan';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,17 +15,15 @@ function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
   const { login } = useAuth();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect');
   const expired = searchParams.get('expired');
-
-  useEffect(() => {
-    if (expired === 'true') {
-      setError('Your session has expired. Please login again.');
-    }
-  }, [expired]);
+  const [error, setError] = useState(() =>
+    expired === 'true'
+      ? 'Your session has expired. Please login again.'
+      : '',
+  );
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,10 +32,19 @@ function LoginForm() {
 
     try {
       // AuthContext handles the API call, session refresh, and
-      // navigation to redirectTo || '/dashboard'
-      await login(email, password, redirectTo ?? undefined);
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
+      // navigation to redirectTo || '/dashboard'. A plan remembered from
+      // /pricing sends the user back there to finish checkout.
+      const pendingPlan = readPendingPlan();
+      await login(
+        email,
+        password,
+        redirectTo ??
+          (pendingPlan
+            ? `/pricing?plan=${encodeURIComponent(pendingPlan)}`
+            : undefined),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
       setLoading(false);
     }

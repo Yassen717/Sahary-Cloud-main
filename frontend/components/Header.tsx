@@ -9,6 +9,7 @@ import { ThemeToggle } from "./theme-toggle";
 import { Button } from "./ui/button";
 import { Menu, X, Cloud } from "lucide-react";
 import { useAuth, isAdminRole } from "@/lib/auth-context";
+import { features } from "@/lib/features";
 
 // Lazy load user profile dropdown
 const UserProfileDropdown = dynamic(
@@ -22,19 +23,22 @@ interface NavItem {
 }
 
 const publicNav: NavItem[] = [
+  { href: "/pricing", label: "Pricing" },
   { href: "/#features", label: "Features" },
-  { href: "/#about", label: "About" },
-  { href: "/#plans", label: "Plans" },
-  { href: "/help", label: "Help" },
   { href: "/contact", label: "Contact" },
+];
+
+const vpsNav: NavItem[] = [
+  { href: "/vms", label: "VMs" },
+  { href: "/solar", label: "Solar" },
+  { href: "/billing", label: "Billing" },
 ];
 
 const appNav: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/vms", label: "VMs" },
   { href: "/dashboard/hosting", label: "Hosting" },
-  { href: "/solar", label: "Solar" },
-  { href: "/billing", label: "Billing" },
+  { href: "/dashboard/subscription", label: "Subscription" },
+  ...(features.vps ? vpsNav : []),
   { href: "/help", label: "Help" },
 ];
 
