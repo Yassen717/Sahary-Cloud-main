@@ -122,22 +122,23 @@ export default function HeroSection() {
           className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6"
         >
           <span className="bg-clip-text text-transparent bg-linear-to-r from-primary to-primary/70">
-            Cloud Computing,
+            Web Hosting,
           </span>
           <br />
           <span className="bg-clip-text text-transparent bg-linear-to-r from-primary/70 to-primary">
             Powered by the Sun
           </span>
         </motion.h1>
-        
+
         <motion.p
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.4 }}
           className="text-xl md:text-2xl mb-8 text-gray-700 dark:text-gray-300 max-w-3xl mx-auto"
         >
-          Experience the future of sustainable cloud computing with Libya&apos;s first
-          solar-powered cloud infrastructure.
+          Launch your website on solar-powered shared hosting — a free
+          sahary.cloud subdomain, custom domains with free SSL, MySQL and FTP,
+          all from one clean control panel.
         </motion.p>
         
         <motion.div
@@ -151,7 +152,7 @@ export default function HeroSection() {
             className="bg-primary hover:bg-primary/90 text-white text-lg px-8 py-6 rounded-full transform hover:scale-105 transition-transform duration-300"
             asChild
           >
-            <Link href="#signup">Get Started</Link>
+            <Link href="/pricing">View Plans</Link>
           </Button>
           <Button
             size="lg"
