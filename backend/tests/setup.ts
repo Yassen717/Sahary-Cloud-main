@@ -1,11 +1,19 @@
 // Test setup file
+// Load the worktree .env first so TEST_DATABASE_URL / TEST_REDIS_URL are set
+// before the fallbacks below are evaluated (dotenv never overrides vars that
+// are already set).
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 
 // Mock environment variables for testing
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-jwt-secret';
 process.env.JWT_REFRESH_SECRET = 'test-refresh-secret';
-process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/sahary_cloud_test';
+process.env.DATABASE_URL = process.env.TEST_DATABASE_URL
+  || 'postgresql://test:test@localhost:5432/sahary_cloud_test';
+if (process.env.TEST_REDIS_URL) {
+  process.env.REDIS_URL = process.env.TEST_REDIS_URL;
+}
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret';
 process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder';
 
