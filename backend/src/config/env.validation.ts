@@ -83,6 +83,51 @@ export const envSchema = Joi.object({
   HOSTING_WWW_BASE: Joi.string().default('/var/www'),
   HOSTING_BASE_DOMAIN: Joi.string().default('sahary.cloud'),
 
+  // ── Hosting MVP ──────────────────────────────────────────────────────────
+  HOSTING_TRASH_DIR: Joi.string().optional().default(''),
+  HOSTING_ALLOW_UNPAID_ACCOUNTS: Joi.boolean().default(false),
+  HOSTING_JOBS_ENABLED: Joi.boolean().default(true),
+  HOSTING_RETENTION_DAYS: Joi.number().integer().min(0).default(7),
+  HOSTING_SUSPENDED_RETENTION_DAYS: Joi.number().integer().min(0).default(30),
+  HOSTING_PAST_DUE_GRACE_DAYS: Joi.number().integer().min(0).default(7),
+
+  HOSTING_NGINX_STAGING_DIR: Joi.string().default('/etc/nginx/sites-staging'),
+  HOSTING_NGINX_LOG_DIR: Joi.string().default('/var/log/nginx/sahary'),
+
+  HOSTING_MYSQL_ENABLED: Joi.boolean().default(false),
+  HOSTING_MYSQL_ADMIN_URL: Joi.string().allow('').optional().default(''),
+  HOSTING_MYSQL_PUBLIC_HOST: Joi.string().default('localhost'),
+  HOSTING_MYSQL_PUBLIC_PORT: Joi.number().integer().min(1).max(65535).default(3306),
+  HOSTING_MYSQL_USER_HOST: Joi.string().default('%'),
+
+  HOSTING_FTP_DRIVER: Joi.string().valid('none', 'pureftpd').default('none'),
+  HOSTING_FTP_PUBLIC_HOST: Joi.string().optional().default(''),
+  HOSTING_FTP_PORT: Joi.number().integer().min(1).max(65535).default(21),
+  HOSTING_FTP_SYSTEM_USER: Joi.string().default('ftpuser'),
+  HOSTING_FTP_SYSTEM_GROUP: Joi.string().default('ftpgroup'),
+  HOSTING_FTP_PUREPW_BIN: Joi.string().default('pure-pw'),
+  HOSTING_FTP_PASSWD_FILE: Joi.string().default('/etc/pure-ftpd/pureftpd.passwd'),
+  HOSTING_FTP_PDB_FILE: Joi.string().default('/etc/pure-ftpd/pureftpd.pdb'),
+
+  HOSTING_SSL_ENABLED: Joi.boolean().default(false),
+  HOSTING_CERTBOT_BIN: Joi.string().default('certbot'),
+  HOSTING_ACME_WEBROOT: Joi.string().default('/var/www/_acme'),
+  HOSTING_LETSENCRYPT_EMAIL: Joi.string().allow('').optional().default(''),
+  HOSTING_LETSENCRYPT_STAGING: Joi.boolean().default(false),
+  HOSTING_LETSENCRYPT_LIVE_DIR: Joi.string().default('/etc/letsencrypt/live'),
+  HOSTING_WILDCARD_CERT_PATH: Joi.string().allow('').optional().default(''),
+  HOSTING_WILDCARD_KEY_PATH: Joi.string().allow('').optional().default(''),
+
+  HOSTING_UPLOAD_MAX_MB: Joi.number().integer().min(1).default(50),
+  HOSTING_TEXT_EDIT_MAX_KB: Joi.number().integer().min(1).default(1024),
+
+  HOSTING_METER_CRON: Joi.string().default('0 * * * *'),
+  HOSTING_SSL_CRON: Joi.string().default('*/10 * * * *'),
+  HOSTING_RECONCILE_CRON: Joi.string().default('15 */6 * * *'),
+  HOSTING_RETENTION_CRON: Joi.string().default('30 3 * * *'),
+
+  ENABLE_VPS: Joi.boolean().default(false),
+
   MAX_FILE_SIZE: Joi.number().integer().min(1024).default(10485760),
   UPLOAD_PATH: Joi.string().default('./uploads'),
 
