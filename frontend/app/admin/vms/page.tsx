@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { apiClient } from '@/lib/api';
+import { features } from '@/lib/features';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -73,7 +75,7 @@ interface VMCounts {
     stopped: number;
 }
 
-export default function AdminVMsPage() {
+function AdminVMsPage() {
     const { toast } = useToast();
     const [loading, setLoading] = useState(true);
     const [vms, setVms] = useState<AdminVM[]>([]);
@@ -451,4 +453,12 @@ export default function AdminVMsPage() {
             </AlertDialog>
         </div>
     );
+}
+
+export default function AdminVMsPageGate() {
+    // VPS/VM administration only exists while the VPS feature is enabled.
+    if (!features.vps) {
+        redirect('/admin/hosting');
+    }
+    return <AdminVMsPage />;
 }

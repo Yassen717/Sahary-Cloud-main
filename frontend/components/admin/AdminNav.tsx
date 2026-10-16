@@ -3,12 +3,18 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { features } from '@/lib/features';
 
 const links = [
   { href: '/admin', label: 'Overview' },
   { href: '/admin/users', label: 'Users' },
-  { href: '/admin/vms', label: 'VMs' },
-  { href: '/admin/monitoring', label: 'Monitoring' },
+  // VPS/VM administration is only relevant while the VPS feature is enabled.
+  ...(features.vps
+    ? [
+        { href: '/admin/vms', label: 'VMs' },
+        { href: '/admin/monitoring', label: 'Monitoring' },
+      ]
+    : []),
   { href: '/admin/solar-management', label: 'Solar' },
   { href: '/admin/hosting', label: 'Hosting' },
 ];
