@@ -18,7 +18,7 @@ export type ApiUpdateProfileRequest = Partial<
   avatar?: string;
 };
 
-const API_URL =
+export const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api/v1";
 
 type QueryParams = Record<string, string | number | boolean | undefined | null>;
@@ -80,6 +80,14 @@ export class ApiClient {
   }
 
   /**
+   * Force a session refresh using the HttpOnly refreshToken cookie.
+   * Deduplicated like tryRefreshToken; returns false when refresh fails.
+   */
+  async refreshSession(): Promise<boolean> {
+    return this.tryRefreshToken();
+  }
+
+  /**
    * Attempt to refresh the access token using the HttpOnly refreshToken cookie.
    * Deduplicated: concurrent calls share the same in-flight promise.
    * @returns true if the new token cookie was set successfully, false otherwise.
@@ -124,10 +132,16 @@ export class ApiClient {
     return this.pendingRefreshPromise;
   }
 
-  private async request(
+  /**
+   * Public low-level request helper. Returns the raw parsed JSON body
+   * (the full `{ success, data, message? }` envelope) typed as `T`.
+   * Sends JSON Content-Type unless the body is FormData (browser sets
+   * the multipart boundary itself).
+   */
+  async request<T = any>(
     endpoint: string,
     options: RequestInit = {},
-  ): Promise<any> {
+  ): Promise<T> {
     // Rate limiting check
     const token = this.getToken();
     const rateLimitKey = `${endpoint}-${token || "anonymous"}`;
@@ -141,7 +155,9 @@ export class ApiClient {
     }
 
     const headers: HeadersInit = {
-      "Content-Type": "application/json",
+      ...(options.body instanceof FormData
+        ? {}
+        : { "Content-Type": "application/json" }),
       ...options.headers,
     };
 

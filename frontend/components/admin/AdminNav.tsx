@@ -10,6 +10,7 @@ const links = [
   { href: '/admin/vms', label: 'VMs' },
   { href: '/admin/monitoring', label: 'Monitoring' },
   { href: '/admin/solar-management', label: 'Solar' },
+  { href: '/admin/hosting', label: 'Hosting' },
 ];
 
 export function AdminNav() {
