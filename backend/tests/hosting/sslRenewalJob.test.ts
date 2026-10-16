@@ -32,6 +32,11 @@ describe('sslRenewalJob', () => {
         return task;
       },
     );
+    // clearMocks does not restore implementations — per-test impls would leak,
+    // so the resolved defaults are re-attached here as well.
+    (sslService.issuePendingCertificates as jest.Mock).mockResolvedValue({ attempted: 0, issued: 0, failed: 0 });
+    (sslService.renewExpiringCertificates as jest.Mock).mockResolvedValue({ checked: 0, renewed: 0, failed: 0 });
+    (sslService.syncPrimarySslState as jest.Mock).mockResolvedValue({ updated: 0 });
   });
 
   afterEach(() => {
