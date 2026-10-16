@@ -49,14 +49,12 @@ describe('Payment Service', () => {
     let testInvoice;
 
     beforeAll(async () => {
-        // Clean up existing test data
-        await prisma.payment.deleteMany({});
-        await prisma.invoice.deleteMany({});
-        await prisma.usageRecord.deleteMany({});
-        await prisma.virtualMachine.deleteMany({});
-        await prisma.user.deleteMany({
-            where: { email: 'payment-test@example.com' },
-        });
+        // Clean up leftover data owned by this suite's users only — other
+        // test files run in parallel against the same database.
+        await (global as any).cleanupTestUsers(prisma, [
+            'payment-test@example.com',
+            'other-payment-user@example.com',
+        ]);
 
         // Create test user
         const userResult = await AuthService.register({
@@ -103,14 +101,11 @@ describe('Payment Service', () => {
     });
 
     afterAll(async () => {
-        // Clean up test data
-        await prisma.payment.deleteMany({});
-        await prisma.invoice.deleteMany({});
-        await prisma.usageRecord.deleteMany({});
-        await prisma.virtualMachine.deleteMany({});
-        await prisma.user.deleteMany({
-            where: { email: 'payment-test@example.com' },
-        });
+        // Clean up test data — scoped to this suite's users only.
+        await (global as any).cleanupTestUsers(prisma, [
+            'payment-test@example.com',
+            'other-payment-user@example.com',
+        ]);
         await prisma.$disconnect();
     });
 
