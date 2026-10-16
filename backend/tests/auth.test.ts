@@ -24,29 +24,14 @@ const testUser2 = {
 
 describe('Authentication Service', () => {
   beforeEach(async () => {
-    // Clean up test data
-    await prisma.auditLog.deleteMany({});
-    await prisma.session.deleteMany({});
-    await prisma.user.deleteMany({
-      where: {
-        email: {
-          in: [testUser.email, testUser2.email]
-        }
-      }
-    });
+    // Clean up this suite's test data only — audit logs and sessions of
+    // parallel suites must not be wiped mid-run.
+    await (global as any).cleanupTestUsers(prisma, [testUser.email, testUser2.email]);
   });
 
   afterAll(async () => {
     // Clean up after all tests
-    await prisma.auditLog.deleteMany({});
-    await prisma.session.deleteMany({});
-    await prisma.user.deleteMany({
-      where: {
-        email: {
-          in: [testUser.email, testUser2.email]
-        }
-      }
-    });
+    await (global as any).cleanupTestUsers(prisma, [testUser.email, testUser2.email]);
     await prisma.$disconnect();
   });
 
