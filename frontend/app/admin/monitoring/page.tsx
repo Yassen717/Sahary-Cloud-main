@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { redirect } from 'next/navigation';
 import { apiClient } from '@/lib/api';
+import { features } from '@/lib/features';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -60,7 +62,7 @@ const CAPACITY_CARDS: { key: ResourceKey; label: string; unit: string; icon: typ
 
 const isHealthy = (status?: string) => status === 'healthy';
 
-export default function SystemMonitoringPage() {
+function SystemMonitoringPage() {
     const { toast } = useToast();
     const [loading, setLoading] = useState(true);
     const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -262,4 +264,12 @@ export default function SystemMonitoringPage() {
             )}
         </div>
     );
+}
+
+export default function SystemMonitoringPageGate() {
+    // System monitoring covers the VPS fleet; only shown while the VPS feature is enabled.
+    if (!features.vps) {
+        redirect('/admin/hosting');
+    }
+    return <SystemMonitoringPage />;
 }
