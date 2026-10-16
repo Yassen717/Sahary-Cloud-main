@@ -97,7 +97,18 @@ const sanitizeParams = (req: Request, _res: Response, next: NextFunction): void 
   next();
 };
 
+// PUT /api/v1/hosting/files/content carries raw file contents (HTML markup,
+// script tags, shell text) that must reach the file manager byte-for-byte.
+// req.path excludes the query string, so ?foo=bar does not defeat the match.
+const isHostingFileContentWrite = (req: Request): boolean =>
+  req.method === 'PUT' && req.path === '/api/v1/hosting/files/content';
+
 const sanitizeAll = (req: Request, res: Response, next: NextFunction): void => {
+  if (isHostingFileContentWrite(req)) {
+    next();
+    return;
+  }
+
   sanitizeBody(req, res, () => {
     sanitizeQuery(req, res, () => {
       sanitizeParams(req, res, next);
@@ -185,6 +196,11 @@ const checkSQLInjection = (req: Request, _res: Response, next: NextFunction): vo
 };
 
 const checkXSS = (req: Request, _res: Response, next: NextFunction): void => {
+  if (isHostingFileContentWrite(req)) {
+    next();
+    return;
+  }
+
   const xssPatterns = [
     /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
     /javascript:/gi,
@@ -245,6 +261,11 @@ const checkXSS = (req: Request, _res: Response, next: NextFunction): void => {
 };
 
 const preventNoSQLInjection = (req: Request, _res: Response, next: NextFunction): void => {
+  if (isHostingFileContentWrite(req)) {
+    next();
+    return;
+  }
+
   const checkValue = (value: unknown): void => {
     if (value && typeof value === 'object') {
       for (const key of Object.keys(value)) {
