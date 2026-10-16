@@ -85,6 +85,10 @@ class JWTUtils {
         ...payload,
         type: 'access',
         iat: Math.floor(Date.now() / 1000),
+        // A unique id per token: iat has second granularity, so two tokens
+        // minted for the same user within one second would otherwise be
+        // byte-identical — rotation blacklisting would kill the new token too.
+        jti: crypto.randomUUID(),
       },
       getSecret(config.jwt.secret, 'JWT secret'),
       {
@@ -108,6 +112,7 @@ class JWTUtils {
         ...payload,
         type: 'refresh',
         iat: Math.floor(Date.now() / 1000),
+        jti: crypto.randomUUID(),
       },
       getSecret(config.jwt.refreshSecret, 'JWT refresh secret'),
       {

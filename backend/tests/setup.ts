@@ -16,6 +16,10 @@ if (process.env.TEST_REDIS_URL) {
 }
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret';
 process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder';
+// The VPS/Docker feature flag defaults to off for the hosting MVP — the
+// legacy VM/Docker suites keep exercising it by running with the flag on.
+// ops-vps-flag.test.ts overrides this to prove flag-off behavior.
+process.env.ENABLE_VPS = 'true';
 
 // Docker Desktop on Windows exposes the daemon over a named pipe rather than
 // the default Unix socket. Honor an explicit DOCKER_HOST if one is set.

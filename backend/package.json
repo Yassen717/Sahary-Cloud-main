@@ -19,6 +19,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "prisma:seed": "node prisma/seed.js",
+    "prisma:seed:dev": "node prisma/seed-dev.js",
     "prisma:reset": "prisma migrate reset",
     "db:setup": "./scripts/setup-db.sh",
     "db:start": "docker-compose -f docker-compose.dev.yml up -d",

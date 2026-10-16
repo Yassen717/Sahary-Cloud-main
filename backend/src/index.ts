@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import fs from 'fs';
 import http from 'http';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
@@ -31,11 +32,23 @@ import { ddosProtectionMiddleware, connectionLimitMiddleware } from './middlewar
 const redisService = require('./services/redisService');
 const swaggerSpec = require('./config/swagger');
 const { initSocket } = require('./socket/index') as { initSocket: (server: http.Server) => SocketIOServer };
+const VhostService = require('./services/vhostService');
+const mysqlProvisionService = require('./services/mysqlProvisionService');
+const ftpService = require('./services/ftpService');
+const sslService = require('./services/sslService');
+
+// The VPS/Docker VM product is out of scope for the shared-hosting MVP.
+// ENABLE_VPS=false keeps the code in the tree but disables every Docker
+// touchpoint: /api/v1/vms + /api/v1/docker 404, no daemon connect, no
+// terminal WebSocket, no VM usage/invoice jobs.
+const VPS_ENABLED = process.env.ENABLE_VPS === 'true';
 
 type BackgroundJob = {
   start: () => void;
   stop: () => void;
 };
+
+type HostingCheckStatus = 'disabled' | 'ok' | 'error';
 
 handleUnhandledRejection();
 handleUncaughtException();
@@ -67,11 +80,13 @@ const stopBackgroundJobs = (): void => {
     return;
   }
 
-  loadJob('./jobs/usageCollector').stop();
+  if (VPS_ENABLED) {
+    loadJob('./jobs/usageCollector').stop();
+    // stop() is being added to this job by the jobs refactor — call defensively.
+    loadJob('./jobs/invoiceGenerator').stop?.();
+  }
   loadJob('./jobs/solarDataCollector').stop();
   loadJob('./jobs/cacheCleanup').stop();
-  // stop() is being added to this job by the jobs refactor — call defensively.
-  loadJob('./jobs/invoiceGenerator').stop?.();
 
   if (getHostingConfig().jobsEnabled) {
     loadJob('./jobs/hostingMeterJob').stop();
@@ -86,8 +101,10 @@ const startBackgroundJobs = (): void => {
     return;
   }
 
-  loadJob('./jobs/usageCollector').start();
-  loadJob('./jobs/invoiceGenerator').start();
+  if (VPS_ENABLED) {
+    loadJob('./jobs/usageCollector').start();
+    loadJob('./jobs/invoiceGenerator').start();
+  }
   loadJob('./jobs/solarDataCollector').start();
   loadJob('./jobs/cacheCleanup').start();
 
@@ -130,7 +147,7 @@ const shutdown = async (signal: 'SIGINT' | 'SIGTERM'): Promise<void> => {
       : Promise.resolve(),
     socketIo ? socketIo.close() : Promise.resolve(),
     redisService.disconnect(),
-    dockerService.disconnect(),
+    VPS_ENABLED ? dockerService.disconnect() : Promise.resolve(),
     disconnectDatabase(),
   ]);
 
@@ -258,21 +275,104 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
+// nginx -t probes are cached: /health is polled by load balancers and must
+// never turn into an exec storm. The result is only a config parse — never
+// a reload.
+const NGINX_HEALTH_CACHE_MS = 60_000;
+let nginxHealthCache: { checkedAt: number; ok: boolean } | null = null;
+
+const getNginxHealth = async (): Promise<HostingCheckStatus> => {
+  if (nginxHealthCache && Date.now() - nginxHealthCache.checkedAt < NGINX_HEALTH_CACHE_MS) {
+    return nginxHealthCache.ok ? 'ok' : 'error';
+  }
+  let ok = false;
+  try {
+    await VhostService.testConfig();
+    ok = true;
+  } catch {
+    ok = false;
+  }
+  nginxHealthCache = { checkedAt: Date.now(), ok };
+  return ok ? 'ok' : 'error';
+};
+
+const runHostingHealthCheck = async (
+  check: () => Promise<{ ok: boolean; message?: string }>,
+): Promise<HostingCheckStatus> => {
+  try {
+    return (await check()).ok ? 'ok' : 'error';
+  } catch {
+    return 'error';
+  }
+};
+
+// Free GB on the hosting document-root filesystem. fs.statfs is unavailable
+// on some platforms, so a failed probe degrades to null instead of throwing.
+const getHostingDiskFreeGB = async (wwwBase: string): Promise<number | null> => {
+  try {
+    const stats = await fs.promises.statfs(wwwBase);
+    return Math.round(((stats.bavail * stats.bsize) / 1024 ** 3) * 100) / 100;
+  } catch {
+    return null;
+  }
+};
+
+type HostingHealth = {
+  checks: {
+    nginx: HostingCheckStatus;
+    mysql: HostingCheckStatus;
+    ftp: HostingCheckStatus;
+    ssl: HostingCheckStatus;
+    disk: number | null;
+  };
+  degraded: boolean;
+};
+
+const getHostingHealth = async (): Promise<HostingHealth> => {
+  const hosting = getHostingConfig();
+
+  const [nginx, mysql, ftp, ssl, disk] = await Promise.all([
+    hosting.nginx.enabled ? getNginxHealth() : Promise.resolve<HostingCheckStatus>('disabled'),
+    hosting.mysql.enabled
+      ? runHostingHealthCheck(mysqlProvisionService.healthCheck)
+      : Promise.resolve<HostingCheckStatus>('disabled'),
+    hosting.ftp.driver !== 'none'
+      ? runHostingHealthCheck(ftpService.healthCheck)
+      : Promise.resolve<HostingCheckStatus>('disabled'),
+    hosting.ssl.enabled
+      ? runHostingHealthCheck(sslService.healthCheck)
+      : Promise.resolve<HostingCheckStatus>('disabled'),
+    getHostingDiskFreeGB(hosting.wwwBase),
+  ]);
+
+  const anyFeatureEnabled = hosting.nginx.enabled || hosting.mysql.enabled
+    || hosting.ftp.driver !== 'none' || hosting.ssl.enabled;
+
+  // On a real hosting node the docroot filesystem must be measurable; treat
+  // an unreadable wwwBase as a problem only when hosting infra is enabled
+  // (dev machines may have no /var/www at all).
+  const degraded = [nginx, mysql, ftp, ssl].includes('error')
+    || (anyFeatureEnabled && disk === null);
+
+  return { checks: { nginx, mysql, ftp, ssl, disk }, degraded };
+};
+
 app.get('/health', async (_req: Request, res: Response) => {
   try {
-    const [dbHealth, dockerHealth] = await Promise.all([
+    const [dbHealth, dockerHealth, hosting] = await Promise.all([
       checkDatabaseHealth(),
-      dockerService.getHealthStatus(),
+      VPS_ENABLED ? dockerService.getHealthStatus() : Promise.resolve(null),
+      getHostingHealth(),
     ]);
 
     const dbHealthy = dbHealth.status === 'healthy';
     const redisReady = redisService.isReady();
-    const dockerReady = dockerService.isReady();
+    const dockerReady = !VPS_ENABLED || dockerService.isReady();
 
     // 503 only when a hard dependency is down: without the database almost
-    // every route fails. Redis/Docker outages degrade features (sessions,
-    // caching, terminal) but the API keeps serving → DEGRADED on a 200.
-    const degraded = !dbHealthy || !redisReady || !dockerReady;
+    // every route fails. Redis/Docker outages and hosting-infra problems
+    // degrade features but the API keeps serving → DEGRADED on a 200.
+    const degraded = !dbHealthy || !redisReady || !dockerReady || hosting.degraded;
 
     // Health is unauthenticated: never echo raw error internals (query
     // errors, socket paths) to callers in production.
@@ -289,7 +389,8 @@ app.get('/health', async (_req: Request, res: Response) => {
       version: process.env.npm_package_version || '1.0.0',
       database: stripInternals(dbHealth),
       redis: redisReady ? 'connected' : 'disconnected',
-      docker: stripInternals(dockerHealth),
+      docker: VPS_ENABLED && dockerHealth ? stripInternals(dockerHealth) : 'disabled',
+      hosting: hosting.checks,
     });
   } catch (error) {
     // Both health probes swallow errors internally, but never let a stray
@@ -319,8 +420,19 @@ const asMiddleware = (m: unknown) => ((m as any)?.default ?? m) as express.Reque
 
 app.use('/api/v1/auth', asMiddleware(require('./routes/auth')));
 app.use('/api/v1/hosting', asMiddleware(require('./routes/hosting')));
-app.use('/api/v1/vms', asMiddleware(require('./routes/vms')));
-app.use('/api/v1/docker', asMiddleware(require('./routes/docker')));
+if (VPS_ENABLED) {
+  app.use('/api/v1/vms', asMiddleware(require('./routes/vms')));
+  app.use('/api/v1/docker', asMiddleware(require('./routes/docker')));
+} else {
+  // The VPS routers are not mounted at all — answer every call under these
+  // prefixes with an explicit, informative 404 instead of the generic
+  // notFoundHandler.
+  const vpsDisabled: express.RequestHandler = (_req, res) => {
+    res.status(404).json({ success: false, message: 'VPS hosting is not enabled' });
+  };
+  app.use('/api/v1/vms', vpsDisabled);
+  app.use('/api/v1/docker', vpsDisabled);
+}
 app.use('/api/v1/payments', asMiddleware(require('./routes/payments')));
 app.use('/api/v1/billing', asMiddleware(require('./routes/billing')));
 app.use('/api/v1/admin', asMiddleware(require('./routes/admin')));
@@ -349,7 +461,9 @@ if (process.env.NODE_ENV !== 'test') {
     try {
       await connectDatabase();
       await redisService.connect();
-      await dockerService.connect();
+      if (VPS_ENABLED) {
+        await dockerService.connect();
+      }
 
       if (redisService.isReady()) {
         const sessionSecret = process.env.SESSION_SECRET;
@@ -365,7 +479,11 @@ if (process.env.NODE_ENV !== 'test') {
       startBackgroundJobs();
 
       httpServer = http.createServer(app);
-      io = initSocket(httpServer);
+      // Socket.IO only exists for the Docker exec terminal — with VPS off
+      // nothing else needs it, so no WebSocket server is created at all.
+      if (VPS_ENABLED) {
+        io = initSocket(httpServer);
+      }
 
       httpServer.listen(PORT, HOST, () => {
         console.log(`🚀 Sahary Cloud API Server running on http://${HOST}:${PORT}`);
@@ -374,10 +492,10 @@ if (process.env.NODE_ENV !== 'test') {
         console.log(`❤️  Health Check: http://${HOST}:${PORT}/health`);
         console.log('🗄️  Database: Connected');
         console.log(`🔴 Redis: ${redisService.isReady() ? 'Connected' : 'Disconnected'}`);
-        console.log(`🐳 Docker: ${dockerService.isReady() ? 'Connected' : 'Disconnected'}`);
-        console.log('🖥️  WebSocket: Enabled (/terminal)');
-        console.log('📈 Usage Collector: Started');
-        console.log('💰 Invoice Generator: Started');
+        console.log(`🐳 Docker: ${VPS_ENABLED ? (dockerService.isReady() ? 'Connected' : 'Disconnected') : 'Disabled (ENABLE_VPS=false)'}`);
+        console.log(`🖥️  WebSocket: ${VPS_ENABLED ? 'Enabled (/terminal)' : 'Disabled (ENABLE_VPS=false)'}`);
+        console.log(`📈 Usage Collector: ${VPS_ENABLED ? 'Started' : 'Disabled (ENABLE_VPS=false)'}`);
+        console.log(`💰 Invoice Generator: ${VPS_ENABLED ? 'Started' : 'Disabled (ENABLE_VPS=false)'}`);
         console.log('🌞 Solar Data Collector: Started');
         console.log('🧹 Cache Cleanup: Started');
       });
