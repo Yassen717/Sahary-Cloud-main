@@ -85,7 +85,16 @@ export const envSchema = Joi.object({
 
   // ── Hosting MVP ──────────────────────────────────────────────────────────
   HOSTING_TRASH_DIR: Joi.string().optional().default(''),
-  HOSTING_ALLOW_UNPAID_ACCOUNTS: Joi.boolean().default(false),
+  // Dev/test escape hatch — a paid-checkout bypass must never reach
+  // production. The any.only violation is escalated to a boot failure by
+  // BOOT_FAIL_ENV_VARS below.
+  HOSTING_ALLOW_UNPAID_ACCOUNTS: Joi.boolean().when('NODE_ENV', {
+    is: 'production',
+    then: Joi.valid(false).messages({
+      'any.only': 'HOSTING_ALLOW_UNPAID_ACCOUNTS must not be enabled in production',
+    }),
+    otherwise: Joi.boolean().default(false),
+  }),
   HOSTING_JOBS_ENABLED: Joi.boolean().default(true),
   HOSTING_RETENTION_DAYS: Joi.number().integer().min(0).default(7),
   HOSTING_SUSPENDED_RETENTION_DAYS: Joi.number().integer().min(0).default(30),
@@ -95,7 +104,13 @@ export const envSchema = Joi.object({
   HOSTING_NGINX_LOG_DIR: Joi.string().default('/var/log/nginx/sahary'),
 
   HOSTING_MYSQL_ENABLED: Joi.boolean().default(false),
-  HOSTING_MYSQL_ADMIN_URL: Joi.string().allow('').optional().default(''),
+  // NB: `is` compares against the raw sibling value, which is the string
+  // 'true' for env vars — a coercing Joi.boolean().valid(true) is required.
+  HOSTING_MYSQL_ADMIN_URL: Joi.string().when('HOSTING_MYSQL_ENABLED', {
+    is: Joi.boolean().valid(true),
+    then: Joi.string().min(1).required(),
+    otherwise: Joi.string().allow('').default(''),
+  }),
   HOSTING_MYSQL_PUBLIC_HOST: Joi.string().default('localhost'),
   HOSTING_MYSQL_PUBLIC_PORT: Joi.number().integer().min(1).max(65535).default(3306),
   HOSTING_MYSQL_USER_HOST: Joi.string().default('%'),
@@ -106,13 +121,25 @@ export const envSchema = Joi.object({
   HOSTING_FTP_SYSTEM_USER: Joi.string().default('ftpuser'),
   HOSTING_FTP_SYSTEM_GROUP: Joi.string().default('ftpgroup'),
   HOSTING_FTP_PUREPW_BIN: Joi.string().default('pure-pw'),
-  HOSTING_FTP_PASSWD_FILE: Joi.string().default('/etc/pure-ftpd/pureftpd.passwd'),
-  HOSTING_FTP_PDB_FILE: Joi.string().default('/etc/pure-ftpd/pureftpd.pdb'),
+  HOSTING_FTP_PASSWD_FILE: Joi.string().when('HOSTING_FTP_DRIVER', {
+    is: 'pureftpd',
+    then: Joi.string().min(1).required(),
+    otherwise: Joi.string().default('/etc/pure-ftpd/pureftpd.passwd'),
+  }),
+  HOSTING_FTP_PDB_FILE: Joi.string().when('HOSTING_FTP_DRIVER', {
+    is: 'pureftpd',
+    then: Joi.string().min(1).required(),
+    otherwise: Joi.string().default('/etc/pure-ftpd/pureftpd.pdb'),
+  }),
 
   HOSTING_SSL_ENABLED: Joi.boolean().default(false),
   HOSTING_CERTBOT_BIN: Joi.string().default('certbot'),
   HOSTING_ACME_WEBROOT: Joi.string().default('/var/www/_acme'),
-  HOSTING_LETSENCRYPT_EMAIL: Joi.string().allow('').optional().default(''),
+  HOSTING_LETSENCRYPT_EMAIL: Joi.string().when('HOSTING_SSL_ENABLED', {
+    is: Joi.boolean().valid(true),
+    then: Joi.string().email().required(),
+    otherwise: Joi.string().allow('').default(''),
+  }),
   HOSTING_LETSENCRYPT_STAGING: Joi.boolean().default(false),
   HOSTING_LETSENCRYPT_LIVE_DIR: Joi.string().default('/etc/letsencrypt/live'),
   HOSTING_WILDCARD_CERT_PATH: Joi.string().allow('').optional().default(''),
@@ -172,6 +199,11 @@ export const envSchema = Joi.object({
 
 const REQUIRED_ENV_VARS = new Set(['DATABASE_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'SESSION_SECRET']);
 
+// Joi reports "must not" invariants as warning-class types (e.g. any.only),
+// but a violation of these keys is a safety breach — abort boot the same as
+// a missing required variable.
+const BOOT_FAIL_ENV_VARS = new Set(['HOSTING_ALLOW_UNPAID_ACCOUNTS']);
+
 export function validateEnv(): Record<string, unknown> {
   // Treat present-but-empty env vars as unset: optional vars then fall back to
   // their defaults instead of emitting "is not allowed to be empty" warnings,
@@ -193,7 +225,7 @@ export function validateEnv(): Record<string, unknown> {
       const key = detail.context?.key || detail.path.join('.');
       const message = detail.message.replace(/"/g, '');
 
-      if (detail.type === 'any.required' || REQUIRED_ENV_VARS.has(key)) {
+      if (detail.type === 'any.required' || REQUIRED_ENV_VARS.has(key) || BOOT_FAIL_ENV_VARS.has(key)) {
         requiredErrors.push({ key, message });
       } else {
         warnings.push({ key, message });
