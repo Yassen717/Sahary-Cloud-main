@@ -36,16 +36,13 @@ describe('Authentication API Integration Tests', () => {
   let adminId;
 
   beforeAll(async () => {
-    // Clean up existing test data
-    await prisma.auditLog.deleteMany({});
-    await prisma.session.deleteMany({});
-    await prisma.user.deleteMany({
-      where: {
-        email: {
-          in: [testUser.email, testAdmin.email, freshUser.email]
-        }
-      }
-    });
+    // Clean up this suite's leftover data only — audit logs and sessions
+    // of parallel suites must not be wiped mid-run.
+    await (global as any).cleanupTestUsers(prisma, [
+      testUser.email,
+      testAdmin.email,
+      freshUser.email,
+    ]);
 
     // Register the never-deactivated user and mint its token up front
     const freshResult = await AuthService.register(freshUser);
@@ -58,15 +55,11 @@ describe('Authentication API Integration Tests', () => {
 
   afterAll(async () => {
     // Clean up after all tests
-    await prisma.auditLog.deleteMany({});
-    await prisma.session.deleteMany({});
-    await prisma.user.deleteMany({
-      where: {
-        email: {
-          in: [testUser.email, testAdmin.email, freshUser.email]
-        }
-      }
-    });
+    await (global as any).cleanupTestUsers(prisma, [
+      testUser.email,
+      testAdmin.email,
+      freshUser.email,
+    ]);
     await prisma.$disconnect();
   });
 

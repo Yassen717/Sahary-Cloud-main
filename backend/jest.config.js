@@ -29,10 +29,15 @@ module.exports = {
     'html'
   ],
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
-  testTimeout: 10000,
+  // Docker-backed tests (VM start/stop/restart) create and wait on real
+  // containers — well above the old 10s ceiling.
+  testTimeout: 30000,
   verbose: true,
   forceExit: true,
   clearMocks: true,
-  resetMocks: true,
+  // resetMocks deliberately stays OFF: it wipes implementations declared in
+  // module-scope jest.mock() factories (e.g. the Stripe SDK mock), making
+  // them silently return undefined. clearMocks keeps call assertions
+  // per-test, restoreMocks still unwinds jest.spyOn handles.
   restoreMocks: true
 };

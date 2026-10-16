@@ -8,20 +8,33 @@ const AuthService = require('../src/services/authService').default;
  * Tests usage tracking, cost calculation, and billing operations
  */
 
+// Emails this suite owns — cleanup is scoped to them so parallel suites'
+// rows (and Docker artifacts) are never touched.
+const SUITE_EMAILS = [
+  'billing-test@example.com',
+  'no-vms@example.com',
+  'discount-test@example.com',
+  'billing-invoice@example.com',
+];
+
+// Docker-dependent tests skip cleanly when no daemon is reachable or in CI
+// (tests/setup.ts). Everything else in this file is DB-only and always runs.
+const itDocker = (global as any).dockerTestsEnabled ? it : it.skip;
+
 // Shared fixtures — declared at module scope so the 'Invoice Generation'
 // describe below can access them (previously declared inside the first
-// describe, causing an out-of-scope ReferenceError).
+// describe, causing an out-of-scope ReferenceError). Each top-level describe
+// manages its own fixtures: 'Billing Service' owns the pair below, while
+// 'Invoice Generation' builds its own (the first describe's afterAll removes
+// them before the second runs).
 let testUser;
 let testVM;
 
 describe('Billing Service', () => {
   beforeAll(async () => {
-    // Clean up existing test data
-    await prisma.usageRecord.deleteMany({});
-    await prisma.virtualMachine.deleteMany({});
-    await prisma.user.deleteMany({
-      where: { email: 'billing-test@example.com' },
-    });
+    // Clean up leftover data owned by this suite's users only.
+    await (global as any).cleanupTestUsers(prisma, SUITE_EMAILS);
+    await (global as any).ensureDockerConnected();
 
     // Create test user
     const userResult = await AuthService.register({
@@ -52,12 +65,8 @@ describe('Billing Service', () => {
   });
 
   afterAll(async () => {
-    // Clean up test data
-    await prisma.usageRecord.deleteMany({});
-    await prisma.virtualMachine.deleteMany({});
-    await prisma.user.deleteMany({
-      where: { email: 'billing-test@example.com' },
-    });
+    // Clean up test data — scoped to this suite's users only.
+    await (global as any).cleanupTestUsers(prisma, SUITE_EMAILS);
     await prisma.$disconnect();
   });
 
@@ -80,7 +89,8 @@ describe('Billing Service', () => {
       expect(record.storageUsage).toBe(20);
       expect(record.bandwidthUsage).toBe(500);
       expect(record.duration).toBe(60);
-      expect(record.cost).toBeGreaterThan(0);
+      // `cost` is a Prisma Decimal — unwrap before numeric matchers.
+      expect(Number(record.cost)).toBeGreaterThan(0);
     });
 
     it('should calculate cost correctly', async () => {
@@ -95,8 +105,8 @@ describe('Billing Service', () => {
       const record = await BillingService.recordUsage(testVM.id, usageData);
 
       // Cost should be positive and reasonable
-      expect(record.cost).toBeGreaterThan(0);
-      expect(record.cost).toBeLessThan(testVM.hourlyRate * 2); // Should not exceed 2x hourly rate
+      expect(Number(record.cost)).toBeGreaterThan(0);
+      expect(Number(record.cost)).toBeLessThan(Number(testVM.hourlyRate) * 2); // Should not exceed 2x hourly rate
     });
 
     it('should reject usage recording for non-existent VM', async () => {
@@ -221,9 +231,11 @@ describe('Billing Service', () => {
   });
 
   describe('Usage Tracking', () => {
-    it('should start usage tracking for running VM', async () => {
-      // Start the VM first
-      await VMService.startVM(testVM.id, testUser.id);
+    // VM start/stop drives real Docker containers — skipped when no daemon.
+    itDocker('should start usage tracking for running VM', async () => {
+      // Start the VM first — startVMSafely recovers from recycled-IP
+      // unique-constraint races with parallel suites.
+      await (global as any).startVMSafely(testVM.id, testUser.id);
       await new Promise((resolve) => setTimeout(resolve, 2500)); // Wait for VM to start
 
       const result = await BillingService.startUsageTracking(testVM.id);
@@ -232,7 +244,7 @@ describe('Billing Service', () => {
       expect(result.message).toContain('started');
     });
 
-    it('should reject tracking for non-running VM', async () => {
+    itDocker('should reject tracking for non-running VM', async () => {
       // Stop the VM
       await VMService.stopVM(testVM.id, testUser.id);
       await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait for VM to stop
@@ -365,27 +377,26 @@ describe('Billing Service', () => {
   });
 
   describe('Current Usage Collection', () => {
-    it('should return zero usage for stopped VM', async () => {
+    it('should return null usage for stopped VM', async () => {
+      // Stopped VMs have no container stats — the service reports null rather
+      // than fabricating zero usage that would corrupt billing deltas.
       const usage = await BillingService.collectCurrentUsage(testVM.id);
 
-      expect(usage).toBeDefined();
-      expect(usage.cpuUsage).toBe(0);
-      expect(usage.ramUsage).toBe(0);
-      expect(usage.storageUsage).toBe(0);
-      expect(usage.bandwidthUsage).toBe(0);
+      expect(usage).toBeNull();
     });
 
     it('should handle non-existent VM gracefully', async () => {
+      // Same contract: failures resolve to null instead of throwing.
       await expect(
         BillingService.collectCurrentUsage('non-existent-id')
-      ).rejects.toThrow('VM not found');
+      ).resolves.toBeNull();
     });
   });
 
   describe('Bulk Usage Collection', () => {
-    it('should collect usage for all running VMs', async () => {
+    itDocker('should collect usage for all running VMs', async () => {
       // Start VM for testing
-      await VMService.startVM(testVM.id, testUser.id);
+      await (global as any).startVMSafely(testVM.id, testUser.id);
       await new Promise((resolve) => setTimeout(resolve, 2500));
 
       const results = await BillingService.collectAllRunningVMsUsage();
@@ -412,9 +423,38 @@ describe('Billing Service', () => {
 
 
 describe('Invoice Generation', () => {
+  let invoiceUser;
+  let invoiceVM;
   let testInvoice;
 
   beforeAll(async () => {
+    // Own fixtures — the 'Billing Service' describe's afterAll has already
+    // deleted its user/VM by the time this describe runs.
+    await (global as any).cleanupTestUsers(prisma, ['billing-invoice@example.com']);
+
+    const userResult = await AuthService.register({
+      email: 'billing-invoice@example.com',
+      password: 'TestPassword123!',
+      firstName: 'Billing',
+      lastName: 'Invoice',
+    });
+    invoiceUser = userResult.user;
+
+    await prisma.user.update({
+      where: { id: invoiceUser.id },
+      data: { isVerified: true },
+    });
+
+    invoiceVM = await VMService.createVM(invoiceUser.id, {
+      name: 'billing-invoice-vm',
+      description: 'VM for invoice generation tests',
+      cpu: 2,
+      ram: 2048,
+      storage: 40,
+      bandwidth: 1000,
+      dockerImage: 'ubuntu:latest',
+    });
+
     // Create some usage records for invoice generation
     const usageRecords = [
       { cpuUsage: 40, ramUsage: 1000, storageUsage: 18, bandwidthUsage: 400, duration: 60 },
@@ -423,25 +463,30 @@ describe('Invoice Generation', () => {
     ];
 
     for (const usage of usageRecords) {
-      await BillingService.recordUsage(testVM.id, usage);
+      await BillingService.recordUsage(invoiceVM.id, usage);
     }
+  });
+
+  afterAll(async () => {
+    await (global as any).cleanupTestUsers(prisma, ['billing-invoice@example.com']);
   });
 
   describe('Monthly Invoice Generation', () => {
     it('should generate monthly invoice for user', async () => {
       const now = new Date();
-      const invoice = await BillingService.generateMonthlyInvoice(testUser.id, {
+      const invoice = await BillingService.generateMonthlyInvoice(invoiceUser.id, {
         month: now.getMonth(),
         year: now.getFullYear(),
       });
 
       expect(invoice).toBeDefined();
       expect(invoice.invoiceNumber).toMatch(/^INV-\d{6}-\d{4}$/);
-      expect(invoice.userId).toBe(testUser.id);
+      expect(invoice.userId).toBe(invoiceUser.id);
       expect(invoice.status).toBe('PENDING');
-      expect(invoice.subtotal).toBeGreaterThan(0);
-      expect(invoice.tax).toBeGreaterThan(0);
-      expect(invoice.amount).toBeGreaterThan(invoice.subtotal);
+      // Money columns are Prisma Decimals — unwrap before numeric matchers.
+      expect(Number(invoice.subtotal)).toBeGreaterThan(0);
+      expect(Number(invoice.tax)).toBeGreaterThan(0);
+      expect(Number(invoice.amount)).toBeGreaterThan(Number(invoice.subtotal));
       expect(invoice.items).toBeInstanceOf(Array);
       expect(invoice.items.length).toBeGreaterThan(0);
 
@@ -451,7 +496,7 @@ describe('Invoice Generation', () => {
     it('should not generate duplicate invoice for same period', async () => {
       const now = new Date();
       await expect(
-        BillingService.generateMonthlyInvoice(testUser.id, {
+        BillingService.generateMonthlyInvoice(invoiceUser.id, {
           month: now.getMonth(),
           year: now.getFullYear(),
         })
@@ -464,7 +509,7 @@ describe('Invoice Generation', () => {
       futureDate.setMonth(futureDate.getMonth() + 2);
 
       await expect(
-        BillingService.generateMonthlyInvoice(testUser.id, {
+        BillingService.generateMonthlyInvoice(invoiceUser.id, {
           month: futureDate.getMonth(),
           year: futureDate.getFullYear(),
         })
@@ -484,7 +529,7 @@ describe('Invoice Generation', () => {
 
   describe('Invoice Retrieval', () => {
     it('should get invoice by ID', async () => {
-      const invoice = await BillingService.getInvoiceById(testInvoice.id, testUser.id);
+      const invoice = await BillingService.getInvoiceById(testInvoice.id, invoiceUser.id);
 
       expect(invoice).toBeDefined();
       expect(invoice.id).toBe(testInvoice.id);
@@ -493,13 +538,13 @@ describe('Invoice Generation', () => {
     });
 
     it('should return null for non-existent invoice', async () => {
-      const invoice = await BillingService.getInvoiceById('non-existent-id', testUser.id);
+      const invoice = await BillingService.getInvoiceById('non-existent-id', invoiceUser.id);
 
       expect(invoice).toBeNull();
     });
 
     it('should get user invoices with pagination', async () => {
-      const result = await BillingService.getUserInvoices(testUser.id, {
+      const result = await BillingService.getUserInvoices(invoiceUser.id, {
         page: 1,
         limit: 10,
       });
@@ -512,7 +557,7 @@ describe('Invoice Generation', () => {
     });
 
     it('should filter invoices by status', async () => {
-      const result = await BillingService.getUserInvoices(testUser.id, {
+      const result = await BillingService.getUserInvoices(invoiceUser.id, {
         status: 'PENDING',
       });
 
@@ -526,15 +571,16 @@ describe('Invoice Generation', () => {
   describe('Discount Application', () => {
     it('should apply fixed discount to invoice', async () => {
       const originalTotal = Number(testInvoice.amount);
+      const subtotal = Number(testInvoice.subtotal);
 
       const updatedInvoice = await BillingService.applyDiscount(testInvoice.id, {
         discountAmount: 5.0,
         reason: 'Test discount',
       });
 
-      // Service only persists the `discount` field on the invoice;
-      // the reason/code are recorded in the audit log, not on the invoice.
-      expect(Number(updatedInvoice.discount)).toBe(5.0);
+      // Discounts are clamped to the subtotal — the service never rejects
+      // an oversized amount, it caps it (see next test).
+      expect(Number(updatedInvoice.discount)).toBe(Math.min(5.0, subtotal));
       expect(Number(updatedInvoice.amount)).toBeLessThan(originalTotal);
     });
 
@@ -590,12 +636,17 @@ describe('Invoice Generation', () => {
       await prisma.user.delete({ where: { id: newUser.user.id } });
     });
 
-    it('should reject discount exceeding subtotal', async () => {
-      await expect(
-        BillingService.applyDiscount(testInvoice.id, {
-          discountAmount: Number(testInvoice.subtotal) + 100,
-        })
-      ).rejects.toThrow('cannot exceed subtotal');
+    it('should clamp discount exceeding subtotal', async () => {
+      // Hardened behavior: oversized discounts are clamped to the subtotal
+      // rather than rejected, so the invoice total can never go negative.
+      const subtotal = Number(testInvoice.subtotal);
+
+      const updatedInvoice = await BillingService.applyDiscount(testInvoice.id, {
+        discountAmount: subtotal + 100,
+      });
+
+      expect(Number(updatedInvoice.discount)).toBe(subtotal);
+      expect(Number(updatedInvoice.amount)).toBe(0);
     });
 
     it('should reject discount on non-pending invoice', async () => {
@@ -608,8 +659,12 @@ describe('Invoice Generation', () => {
         })
       ).rejects.toThrow('pending invoices');
 
-      // Revert status
-      await BillingService.updateInvoiceStatus(testInvoice.id, 'PENDING');
+      // Revert status — PAID → PENDING is not a legal service transition,
+      // so restore the fixture row directly.
+      await prisma.invoice.update({
+        where: { id: testInvoice.id },
+        data: { status: 'PENDING', paidAt: null },
+      });
     });
   });
 
@@ -625,8 +680,12 @@ describe('Invoice Generation', () => {
     });
 
     it('should update invoice status to CANCELLED', async () => {
-      // Revert to PENDING first
-      await BillingService.updateInvoiceStatus(testInvoice.id, 'PENDING');
+      // Revert to PENDING first — PAID → PENDING is not a legal service
+      // transition, so restore the fixture row directly.
+      await prisma.invoice.update({
+        where: { id: testInvoice.id },
+        data: { status: 'PENDING', paidAt: null },
+      });
 
       const updatedInvoice = await BillingService.updateInvoiceStatus(
         testInvoice.id,
@@ -637,18 +696,16 @@ describe('Invoice Generation', () => {
     });
 
     it('should reject invalid status', async () => {
-      // TODO: BillingService.updateInvoiceStatus does not validate the status
-      // value — it writes whatever string it is given (schema uses a plain
-      // String field). The service should validate against known statuses;
-      // until then this test asserts the actual behavior and restores state.
-      const updatedInvoice = await BillingService.updateInvoiceStatus(
-        testInvoice.id,
-        'INVALID_STATUS'
-      );
-      expect(updatedInvoice.status).toBe('INVALID_STATUS');
+      // updateInvoiceStatus validates against INVOICE_STATUS_TRANSITIONS —
+      // unknown statuses are rejected, and nothing may leave CANCELLED.
+      await expect(
+        BillingService.updateInvoiceStatus(testInvoice.id, 'INVALID_STATUS')
+      ).rejects.toThrow('Cannot transition invoice');
 
-      // Restore a valid status for subsequent tests
-      await BillingService.updateInvoiceStatus(testInvoice.id, 'PENDING');
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: testInvoice.id },
+      });
+      expect(invoice.status).toBe('CANCELLED');
     });
   });
 
@@ -696,7 +753,7 @@ describe('Invoice Generation', () => {
 
   describe('Invoice Statistics', () => {
     it('should get invoice statistics for user', async () => {
-      const stats = await BillingService.getInvoiceStatistics(testUser.id);
+      const stats = await BillingService.getInvoiceStatistics(invoiceUser.id);
 
       expect(stats).toBeDefined();
       expect(stats.counts).toBeDefined();
