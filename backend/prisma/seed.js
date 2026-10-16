@@ -1,228 +1,239 @@
+// Production-safe seed for the shared-hosting MVP.
+//
+//   node prisma/seed.js          — core data only (system settings + hosting
+//                                  plans). Admin user only when SEED_ADMIN_EMAIL
+//                                  and SEED_ADMIN_PASSWORD (>= 12 chars) are set.
+//   SEED_DEMO_DATA=true          — additionally seed the legacy VM pricing plans,
+//                                  a demo user and a demo VM. DEV ONLY.
+//
+// The module also exports the individual steps so tests can drive them with an
+// explicit env object instead of mutating process.env.
+
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 
-const prisma = new PrismaClient();
+const MIN_ADMIN_PASSWORD_LENGTH = 12;
+const BCRYPT_ROUNDS = 12;
 
-async function main() {
-  console.log('🌱 Starting database seeding...');
+const SYSTEM_SETTINGS = [
+  {
+    key: 'site_name',
+    value: 'Sahary Cloud',
+    description: 'Website name',
+    category: 'general',
+  },
+  {
+    key: 'site_description',
+    value: 'Solar-powered shared web hosting platform',
+    description: 'Website description',
+    category: 'general',
+  },
+  {
+    key: 'default_currency',
+    value: 'USD',
+    description: 'Default currency for billing',
+    category: 'billing',
+  },
+  {
+    key: 'tax_rate',
+    value: '0.10',
+    description: 'Default tax rate (10%)',
+    category: 'billing',
+  },
+  {
+    key: 'max_vms_per_user',
+    value: '5',
+    description: 'Maximum VMs per user (legacy VPS feature)',
+    category: 'limits',
+  },
+  {
+    key: 'solar_monitoring_enabled',
+    value: 'true',
+    description: 'Enable solar energy monitoring',
+    category: 'features',
+  },
+];
 
-  // Create system settings
-  console.log('📝 Creating system settings...');
-  const systemSettings = [
-    {
-      key: 'site_name',
-      value: 'Sahary Cloud',
-      description: 'Website name',
-      category: 'general'
-    },
-    {
-      key: 'site_description',
-      value: 'Solar-powered VPS and hosting platform',
-      description: 'Website description',
-      category: 'general'
-    },
-    {
-      key: 'default_currency',
-      value: 'USD',
-      description: 'Default currency for billing',
-      category: 'billing'
-    },
-    {
-      key: 'tax_rate',
-      value: '0.10',
-      description: 'Default tax rate (10%)',
-      category: 'billing'
-    },
-    {
-      key: 'max_vms_per_user',
-      value: '5',
-      description: 'Maximum VMs per user',
-      category: 'limits'
-    },
-    {
-      key: 'solar_monitoring_enabled',
-      value: 'true',
-      description: 'Enable solar energy monitoring',
-      category: 'features'
-    }
-  ];
+const HOSTING_PLANS = [
+  {
+    name: 'Starter',
+    description: 'Perfect for personal sites and small projects',
+    diskGB: 1,
+    bandwidthGB: 10,
+    maxDomains: 1,
+    maxDatabases: 1,
+    maxFtpAccounts: 1,
+    monthlyPrice: 3.00,
+  },
+  {
+    name: 'Pro',
+    description: 'For growing websites and small businesses',
+    diskGB: 10,
+    bandwidthGB: 100,
+    maxDomains: 5,
+    maxDatabases: 5,
+    maxFtpAccounts: 5,
+    monthlyPrice: 8.00,
+  },
+  {
+    name: 'Business',
+    description: 'High-performance hosting for demanding sites',
+    diskGB: 30,
+    bandwidthGB: 500,
+    maxDomains: 20,
+    maxDatabases: 20,
+    maxFtpAccounts: 20,
+    monthlyPrice: 18.00,
+  },
+];
 
-  for (const setting of systemSettings) {
-    await prisma.systemSetting.upsert({
+// Legacy VPS pricing plans — only seeded with SEED_DEMO_DATA=true.
+const VM_PRICING_PLANS = [
+  {
+    name: 'Starter',
+    description: 'Perfect for small projects and testing',
+    maxCpu: 1,
+    maxRam: 1024,
+    maxStorage: 20,
+    maxBandwidth: 1000,
+    maxVMs: 1,
+    monthlyPrice: 5.00,
+    hourlyPrice: 0.007,
+    features: JSON.stringify({
+      ssd_storage: true,
+      backup_included: false,
+      support_level: 'community',
+      solar_powered: true,
+    }),
+  },
+  {
+    name: 'Professional',
+    description: 'Ideal for growing businesses',
+    maxCpu: 2,
+    maxRam: 4096,
+    maxStorage: 80,
+    maxBandwidth: 4000,
+    maxVMs: 3,
+    monthlyPrice: 20.00,
+    hourlyPrice: 0.028,
+    features: JSON.stringify({
+      ssd_storage: true,
+      backup_included: true,
+      support_level: 'email',
+      solar_powered: true,
+      load_balancer: true,
+    }),
+  },
+  {
+    name: 'Enterprise',
+    description: 'For large-scale applications',
+    maxCpu: 8,
+    maxRam: 16384,
+    maxStorage: 320,
+    maxBandwidth: 16000,
+    maxVMs: 10,
+    monthlyPrice: 80.00,
+    hourlyPrice: 0.111,
+    features: JSON.stringify({
+      ssd_storage: true,
+      backup_included: true,
+      support_level: 'priority',
+      solar_powered: true,
+      load_balancer: true,
+      dedicated_support: true,
+      custom_images: true,
+    }),
+  },
+];
+
+const DEMO_USER_EMAIL = 'demo@saharycloud.com';
+const DEMO_USER_PASSWORD = 'demo123';
+
+// ── (a) Core data — always seeded, safe for production ──────────────────────
+
+async function seedSystemSettings(prisma) {
+  await Promise.all(
+    SYSTEM_SETTINGS.map((setting) => prisma.systemSetting.upsert({
       where: { key: setting.key },
       update: setting,
-      create: setting
-    });
-  }
+      create: setting,
+    })),
+  );
+  return SYSTEM_SETTINGS.length;
+}
 
-  // Create pricing plans
-  console.log('💰 Creating pricing plans...');
-  const pricingPlans = [
-    {
-      name: 'Starter',
-      description: 'Perfect for small projects and testing',
-      maxCpu: 1,
-      maxRam: 1024, // 1GB
-      maxStorage: 20, // 20GB
-      maxBandwidth: 1000, // 1TB
-      maxVMs: 1,
-      monthlyPrice: 5.00,
-      hourlyPrice: 0.007,
-      features: JSON.stringify({
-        ssd_storage: true,
-        backup_included: false,
-        support_level: 'community',
-        solar_powered: true
-      })
-    },
-    {
-      name: 'Professional',
-      description: 'Ideal for growing businesses',
-      maxCpu: 2,
-      maxRam: 4096, // 4GB
-      maxStorage: 80, // 80GB
-      maxBandwidth: 4000, // 4TB
-      maxVMs: 3,
-      monthlyPrice: 20.00,
-      hourlyPrice: 0.028,
-      features: JSON.stringify({
-        ssd_storage: true,
-        backup_included: true,
-        support_level: 'email',
-        solar_powered: true,
-        load_balancer: true
-      })
-    },
-    {
-      name: 'Enterprise',
-      description: 'For large-scale applications',
-      maxCpu: 8,
-      maxRam: 16384, // 16GB
-      maxStorage: 320, // 320GB
-      maxBandwidth: 16000, // 16TB
-      maxVMs: 10,
-      monthlyPrice: 80.00,
-      hourlyPrice: 0.111,
-      features: JSON.stringify({
-        ssd_storage: true,
-        backup_included: true,
-        support_level: 'priority',
-        solar_powered: true,
-        load_balancer: true,
-        dedicated_support: true,
-        custom_images: true
-      })
-    }
-  ];
-
-  for (const plan of pricingPlans) {
-    await prisma.pricingPlan.upsert({
-      where: { name: plan.name },
-      update: plan,
-      create: plan
-    });
-  }
-
-  // Create hosting plans
-  console.log('🌐 Creating hosting plans...');
-  const hostingPlans = [
-    {
-      name: 'Starter',
-      description: 'Perfect for personal sites and small projects',
-      diskGB: 1,
-      bandwidthGB: 10,
-      maxDomains: 1,
-      maxDatabases: 1,
-      maxFtpAccounts: 1,
-      monthlyPrice: 3.00,
-    },
-    {
-      name: 'Pro',
-      description: 'For growing websites and small businesses',
-      diskGB: 10,
-      bandwidthGB: 100,
-      maxDomains: 5,
-      maxDatabases: 5,
-      maxFtpAccounts: 5,
-      monthlyPrice: 8.00,
-    },
-    {
-      name: 'Business',
-      description: 'High-performance hosting for demanding sites',
-      diskGB: 30,
-      bandwidthGB: 500,
-      maxDomains: 20,
-      maxDatabases: 20,
-      maxFtpAccounts: 20,
-      monthlyPrice: 18.00,
-    },
-  ];
-
-  for (const plan of hostingPlans) {
-    await prisma.hostingPlan.upsert({
+async function seedHostingPlans(prisma) {
+  await Promise.all(
+    HOSTING_PLANS.map((plan) => prisma.hostingPlan.upsert({
       where: { name: plan.name },
       update: plan,
       create: plan,
-    });
+    })),
+  );
+  return HOSTING_PLANS.length;
+}
+
+// ── (b) Admin bootstrap — only when BOTH env vars are set ────────────────────
+
+async function seedAdminUser(prisma, env, log, warn) {
+  const email = env.SEED_ADMIN_EMAIL;
+  const password = env.SEED_ADMIN_PASSWORD;
+
+  if (!email && !password) {
+    log('👤 SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD not set — skipping admin bootstrap');
+    return null;
+  }
+  if (!email || !password) {
+    warn('⚠️  Admin bootstrap skipped: SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD must BOTH be set');
+    return null;
+  }
+  if (password.length < MIN_ADMIN_PASSWORD_LENGTH) {
+    throw new Error(
+      `SEED_ADMIN_PASSWORD must be at least ${MIN_ADMIN_PASSWORD_LENGTH} characters long`,
+    );
   }
 
-  // Create admin user
-  console.log('👤 Creating admin user...');
-  const hashedPassword = await bcrypt.hash('admin123!@#', 12);
+  const normalizedEmail = email.toLowerCase().trim();
+  const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-  const adminUser = await prisma.user.upsert({
-    where: { email: 'admin@saharycloud.com' },
+  // update:{} — never overwrite an existing admin's (possibly rotated) password.
+  const user = await prisma.user.upsert({
+    where: { email: normalizedEmail },
     update: {},
     create: {
-      email: 'admin@saharycloud.com',
+      email: normalizedEmail,
       password: hashedPassword,
       firstName: 'System',
       lastName: 'Administrator',
       role: 'SUPER_ADMIN',
       isActive: true,
-      isVerified: true
-    }
+      isVerified: true,
+    },
   });
 
-  // Create demo user
-  console.log('👤 Creating demo user...');
-  const demoPassword = await bcrypt.hash('demo123', 12);
+  log(`👤 Admin user ready (${normalizedEmail})`);
+  return user;
+}
 
-  const demoUser = await prisma.user.upsert({
-    where: { email: 'demo@saharycloud.com' },
-    update: {},
-    create: {
-      email: 'demo@saharycloud.com',
-      password: demoPassword,
-      firstName: 'Demo',
-      lastName: 'User',
-      role: 'USER',
-      isActive: true,
-      isVerified: true
-    }
-  });
+// ── (c) Demo data — SEED_DEMO_DATA=true only, dev only ──────────────────────
 
-  // Create sample solar data
-  console.log('☀️ Creating sample solar data...');
+// 24 hours of sample solar production/consumption points for the widget.
+async function seedSolarSamples(prisma) {
   const now = new Date();
   const solarDataPoints = [];
-
-  // Generate 24 hours of sample data
-  for (let i = 0; i < 24; i++) {
-    const timestamp = new Date(now.getTime() - (i * 60 * 60 * 1000)); // i hours ago
+  for (let i = 0; i < 24; i += 1) {
+    const timestamp = new Date(now.getTime() - (i * 60 * 60 * 1000));
     const hour = timestamp.getHours();
 
-    // Simulate solar production based on time of day
     let production = 0;
     if (hour >= 6 && hour <= 18) {
-      // Daylight hours - simulate solar curve
       const dayProgress = (hour - 6) / 12;
       production = Math.sin(dayProgress * Math.PI) * 100 + Math.random() * 20;
     }
 
-    const consumption = 50 + Math.random() * 30; // Base consumption + variation
+    const consumption = 50 + Math.random() * 30;
     const efficiency = production > 0 ? Math.min(95, 80 + Math.random() * 15) : 0;
-    const co2Saved = (production / 1000) * 0.5; // Rough calculation
+    const co2Saved = (production / 1000) * 0.5;
 
     solarDataPoints.push({
       production: Math.max(0, production),
@@ -233,24 +244,50 @@ async function main() {
       temperature: 20 + Math.random() * 15,
       cloudCover: Math.random() * 100,
       systemStatus: 'NORMAL',
-      timestamp
+      timestamp,
     });
   }
+  await prisma.solarData.createMany({ data: solarDataPoints });
+  return solarDataPoints.length;
+}
 
-  await prisma.solarData.createMany({
-    data: solarDataPoints
+async function seedDemoData(prisma, log, warn) {
+  warn('⚠️⚠️  SEED_DEMO_DATA=true — creating DEVELOPMENT-ONLY demo data');
+  warn('⚠️⚠️  Demo user credentials: demo@saharycloud.com / demo123 — NEVER use this flag in production');
+
+  await Promise.all(
+    VM_PRICING_PLANS.map((plan) => prisma.pricingPlan.upsert({
+      where: { name: plan.name },
+      update: plan,
+      create: plan,
+    })),
+  );
+
+  const demoPassword = await bcrypt.hash(DEMO_USER_PASSWORD, BCRYPT_ROUNDS);
+  const demoUser = await prisma.user.upsert({
+    where: { email: DEMO_USER_EMAIL },
+    update: {},
+    create: {
+      email: DEMO_USER_EMAIL,
+      password: demoPassword,
+      firstName: 'Demo',
+      lastName: 'User',
+      role: 'USER',
+      isActive: true,
+      isVerified: true,
+    },
   });
 
-  // Create sample VM for demo user
-  console.log('🖥️ Creating sample VM...');
-  // Check if VM exists
+  // Insert-if-empty keeps the demo seed idempotent — there is no natural key
+  // to upsert on, so a second run would otherwise append duplicates.
+  let solarDataPoints = 0;
+  if ((await prisma.solarData.count()) === 0) {
+    solarDataPoints = await seedSolarSamples(prisma);
+  }
+
   const existingVM = await prisma.virtualMachine.findFirst({
-    where: {
-      userId: demoUser.id,
-      name: 'demo-web-server'
-    }
+    where: { userId: demoUser.id, name: 'demo-web-server' },
   });
-
   if (!existingVM) {
     await prisma.virtualMachine.create({
       data: {
@@ -264,29 +301,71 @@ async function main() {
         hourlyRate: 0.007,
         userId: demoUser.id,
         ipAddress: '192.168.1.100',
-        dockerImage: 'nginx:alpine'
-      }
+        dockerImage: 'nginx:alpine',
+      },
     });
   }
 
-  console.log('✅ Database seeding completed successfully!');
-  console.log(`
-📊 Created:
-- ${systemSettings.length} system settings
-- ${pricingPlans.length} VM pricing plans
-- ${hostingPlans.length} hosting plans (Starter / Pro / Business)
-- 1 admin user (admin@saharycloud.com / admin123!@#)
-- 1 demo user (demo@saharycloud.com / demo123)
-- ${solarDataPoints.length} solar data points
-- 1 sample VM
-  `);
+  return {
+    pricingPlans: VM_PRICING_PLANS.length,
+    solarDataPoints,
+    demoUser,
+  };
 }
 
-main()
-  .catch((e) => {
-    console.error('❌ Seeding failed:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
+// ── Orchestrator ─────────────────────────────────────────────────────────────
+
+async function run(prisma, env = process.env, logger = console) {
+  const log = (...args) => logger.log(...args);
+  const warn = (...args) => (logger.warn ? logger.warn(...args) : logger.log(...args));
+
+  log('🌱 Starting database seeding...');
+
+  const settingsCount = await seedSystemSettings(prisma);
+  const hostingPlansCount = await seedHostingPlans(prisma);
+  log(`📝 ${settingsCount} system settings, ${hostingPlansCount} hosting plans (Starter / Pro / Business)`);
+
+  const adminUser = await seedAdminUser(prisma, env, log, warn);
+
+  let demo = null;
+  if (env.SEED_DEMO_DATA === 'true') {
+    demo = await seedDemoData(prisma, log, warn);
+    log(`💰 ${demo.pricingPlans} VM pricing plans, ${demo.solarDataPoints} solar data points, 1 demo VM`);
+  }
+
+  log('✅ Database seeding completed');
+  return {
+    settingsCount,
+    hostingPlansCount,
+    adminUser,
+    demo,
+  };
+}
+
+async function runCli() {
+  const prisma = new PrismaClient();
+  try {
+    await run(prisma);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('❌ Seeding failed:', error);
+    process.exitCode = 1;
+  } finally {
     await prisma.$disconnect();
-  });
+  }
+}
+
+if (require.main === module) {
+  // eslint-disable-next-line no-void
+  void runCli();
+}
+
+module.exports = {
+  run,
+  runCli,
+  seedSystemSettings,
+  seedHostingPlans,
+  seedAdminUser,
+  seedDemoData,
+  MIN_ADMIN_PASSWORD_LENGTH,
+};
